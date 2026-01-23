@@ -15,20 +15,20 @@ class ProductRepository {
         return '
         SELECT
           p.id,
-          p."legacyId",
-          p.categoria AS "category",
-          p.nombre AS "name",
-          p.genero AS "gender",
-          p.nuevo AS "new",
-          p.oferta AS "sale",
-          p.precio AS "price",
-          p.precio_original AS "originPrice",
-          p."cost" AS "cost", 
-          p.marca AS "brand",
-          p.vendido AS "sold",
-          p.cantidad AS "quantity",
-          p.descripcion AS "description",
-          p.accion AS "action",
+          p.legacy_id AS "legacyId",
+          p.category AS "category",
+          p.name AS "name",
+          p.gender AS "gender",
+          p.is_new AS "new",
+          p.is_sale AS "sale",
+          p.price AS "price",
+          p.original_price AS "originPrice",
+          p.cost AS "cost", 
+          p.brand AS "brand",
+          p.sold AS "sold",
+          p.quantity AS "quantity",
+          p.description AS "description",
+          p.action AS "action",
           p.slug AS "slug",
           COALESCE(img.images, \'[]\') AS images,
           COALESCE(var.variations, \'[]\') AS variations
@@ -36,30 +36,30 @@ class ProductRepository {
         LEFT JOIN LATERAL (
           SELECT json_agg(i.url ORDER BY i.id) AS images
           FROM "Image" i
-          WHERE i."productId" = p.id
+          WHERE i.product_id = p.id
         ) img ON true
         LEFT JOIN LATERAL (
           SELECT json_agg(jsonb_build_object(
             \'color\', v.color,
-            \'colorCode\', v."colorCode",
-            \'colorImage\', v."colorImage",
+            \'colorCode\', v.color_code,
+            \'colorImage\', v.color_image,
             \'image\', v.image
           ) ORDER BY v.id) AS variations
           FROM "Variation" v
-          WHERE v."productId" = p.id
+          WHERE v.product_id = p.id
         ) var ON true
         ';
     }
 
     public function getAll() {
-        $sql = $this->getBaseQuery() . ' ORDER BY p."fecha_de_creacion" DESC';
+        $sql = $this->getBaseQuery() . ' ORDER BY p.created_at DESC';
         $stmt = $this->db->query($sql);
         $rows = $stmt->fetchAll();
         return array_map([$this, 'formatRow'], $rows);
     }
 
     public function getById($idOrLegacyOrSlug) {
-        $sql = $this->getBaseQuery() . ' WHERE p.id = :id OR p."legacyId" = :id OR p.slug = :id LIMIT 1';
+        $sql = $this->getBaseQuery() . ' WHERE p.id = :id OR p.legacy_id = :id OR p.slug = :id LIMIT 1';
         $stmt = $this->db->prepare($sql);
         $stmt->execute(['id' => $idOrLegacyOrSlug]);
         $row = $stmt->fetch();
@@ -105,21 +105,22 @@ class ProductRepository {
     public function create($data) {
         $sql = '
             INSERT INTO "Product" (
-                "legacyId", categoria, nombre, genero, nuevo, oferta, precio, precio_original, cost, marca, vendido, cantidad, descripcion, accion, slug, "fecha_de_creacion"
+                id, legacy_id, category, name, gender, is_new, is_sale, price, original_price, cost, brand, sold, quantity, description, action, slug, created_at
             ) VALUES (
-                :legacyId, :category, :name, :gender, :new, :sale, :price, :originPrice, :cost, :brand, :sold, :quantity, :description, :action, :slug, NOW()
+                :id, :legacy_id, :category, :name, :gender, :is_new, :is_sale, :price, :original_price, :cost, :brand, :sold, :quantity, :description, :action, :slug, NOW()
             ) RETURNING id
         ';
         
         $params = [
-            'legacyId' => $data['legacyId'] ?? uniqid(),
+            'id' => uniqid('prod_'),
+            'legacy_id' => $data['legacyId'] ?? uniqid(),
             'category' => $data['category'] ?? 'General',
             'name' => $data['name'],
             'gender' => $data['gender'] ?? 'Unisex',
-            'new' => isset($data['new']) ? ($data['new'] ? 'true' : 'false') : 'true',
-            'sale' => isset($data['sale']) ? ($data['sale'] ? 'true' : 'false') : 'false',
+            'is_new' => isset($data['new']) ? ($data['new'] ? 'true' : 'false') : 'true',
+            'is_sale' => isset($data['sale']) ? ($data['sale'] ? 'true' : 'false') : 'false',
             'price' => $data['price'],
-            'originPrice' => $data['originPrice'] ?? $data['price'],
+            'original_price' => $data['originPrice'] ?? $data['price'],
             'cost' => $data['cost'] ?? 0,
             'brand' => $data['brand'] ?? 'Generico',
             'sold' => $data['sold'] ?? 0,
@@ -141,19 +142,19 @@ class ProductRepository {
         $params = ['id' => $id];
         
         $mapping = [
-            'category' => 'categoria',
-            'name' => 'nombre',
-            'gender' => 'genero',
-            'new' => 'nuevo',
-            'sale' => 'oferta',
-            'price' => 'precio',
-            'originPrice' => 'precio_original',
+            'category' => 'category',
+            'name' => 'name',
+            'gender' => 'gender',
+            'new' => 'is_new',
+            'sale' => 'is_sale',
+            'price' => 'price',
+            'originPrice' => 'original_price',
             'cost' => 'cost',
-            'brand' => 'marca',
-            'sold' => 'vendido',
-            'quantity' => 'cantidad',
-            'description' => 'descripcion',
-            'action' => 'accion',
+            'brand' => 'brand',
+            'sold' => 'sold',
+            'quantity' => 'quantity',
+            'description' => 'description',
+            'action' => 'action',
             'slug' => 'slug'
         ];
 

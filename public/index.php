@@ -39,6 +39,7 @@ $router->add('GET', '/api/orders', 'OrderController@index');
 $router->add('GET', '/api/orders/my-orders', 'OrderController@myOrders'); // Specific route for user's orders
 $router->add('GET', '/api/orders/{id}', 'OrderController@show');
 $router->add('POST', '/api/orders', 'OrderController@store');
+$router->add('POST', '/api/orders/quote', 'OrderController@quote');
 
 // Admin Dashboard Routes
 $router->add('GET', '/api/admin/dashboard/stats', 'DashboardController@stats');

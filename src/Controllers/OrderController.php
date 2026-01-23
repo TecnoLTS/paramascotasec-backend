@@ -94,6 +94,20 @@ class OrderController {
         }
     }
 
+    public function quote() {
+        try {
+            $data = json_decode(file_get_contents('php://input'), true);
+            if (!isset($data['items'])) {
+                throw new \Exception("Items required");
+            }
+            $quote = $this->orderRepository->calculateQuote($data['items'], $data['delivery_method'] ?? 'delivery');
+            echo json_encode($quote);
+        } catch (\Exception $e) {
+            http_response_code(400);
+            echo json_encode(['error' => $e->getMessage()]);
+        }
+    }
+
     public function store() {
         $user = $this->authenticate();
         try {

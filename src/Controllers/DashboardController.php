@@ -30,12 +30,8 @@ class DashboardController {
         $this->authenticate();
         
         try {
-            $response = [
-                'totalSales' => $this->orderRepo->getTotalSales(),
-                'newOrders' => $this->orderRepo->getNewOrdersCount(),
-                'newClients' => $this->userRepo->getNewUsersCount(), // I added this
-                'monthlyPerformance' => $this->orderRepo->getMonthlyPerformance()
-            ];
+            $biService = new \App\Services\BusinessIntelligenceService();
+            $response = $biService->getFullDashboardStats();
             echo json_encode($response);
         } catch (\Exception $e) {
             http_response_code(500);

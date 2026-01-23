@@ -29,7 +29,7 @@ class AuthController {
             return;
         }
 
-        if (!$user['emailVerified']) {
+        if (!$user['email_verified']) {
             http_response_code(403);
             echo json_encode(['error' => 'Por favor, confirma tu dirección de correo electrónico antes de iniciar sesión']);
             return;
@@ -38,7 +38,7 @@ class AuthController {
         $secretKey = $_ENV['JWT_SECRET'] ?? 'default_secret';
         $payload = [
             'iat' => time(),
-            'exp' => time() + (60 * 60 * 24), // 24 hours
+            'exp' => time() + (60 * 60 * 3), // 3 hours
             'sub' => $user['id'],
             'email' => $user['email'],
             'name' => $user['name']
