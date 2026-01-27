@@ -889,7 +889,15 @@ class OrderRepository {
 
     public function getRecentOrders($limit = 5) {
         $stmt = $this->db->query("
-            SELECT o.id, u.name as user_name, (COALESCE(o.vat_subtotal, o.total - COALESCE(o.vat_amount, 0) - COALESCE(o.shipping, 0))) as total, o.status, o.created_at
+            SELECT o.id,
+                   u.name as user_name,
+                   o.total,
+                   COALESCE(o.vat_subtotal, o.total - COALESCE(o.vat_amount, 0) - COALESCE(o.shipping, 0)) as vat_subtotal,
+                   COALESCE(o.vat_amount, 0) as vat_amount,
+                   COALESCE(o.shipping, 0) as shipping,
+                   COALESCE(o.vat_rate, 0) as vat_rate,
+                   o.status,
+                   o.created_at
             FROM \"Order\" o
             LEFT JOIN \"User\" u ON o.user_id = u.id
             ORDER BY o.created_at DESC

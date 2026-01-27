@@ -151,12 +151,13 @@ class OrderController {
                 echo json_encode(['error' => 'Pedido no encontrado']);
                 return;
             }
-            if ($order['user_id'] !== $user['sub']) {
+            $isAdmin = ($user['role'] ?? '') === 'admin';
+            if (!$isAdmin && $order['user_id'] !== $user['sub']) {
                 http_response_code(403);
                 echo json_encode(['error' => 'No autorizado']);
                 return;
             }
-            if (($order['status'] ?? '') === 'canceled') {
+            if (!$isAdmin && ($order['status'] ?? '') === 'canceled') {
                 http_response_code(403);
                 echo json_encode(['error' => 'Factura no disponible para pedidos cancelados']);
                 return;
