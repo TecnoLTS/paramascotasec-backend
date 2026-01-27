@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Repositories\OrderRepository;
 use App\Repositories\UserRepository;
 use App\Repositories\ProductRepository;
+use App\Repositories\SettingsRepository;
 
 class BusinessIntelligenceService {
     private $orderRepo;
@@ -16,7 +17,14 @@ class BusinessIntelligenceService {
     }
 
     public function getFullDashboardStats() {
+        $settings = new SettingsRepository();
+        $vatRate = $settings->get('vat_rate');
+        $vatRate = is_numeric($vatRate) ? floatval($vatRate) : 0;
         return [
+            'tax' => [
+                'rate' => $vatRate,
+                'multiplier' => round(1 + ($vatRate / 100), 4)
+            ],
             'totalSales' => [
                 'amount' => (float)$this->orderRepo->getTotalSales(),
                 'progress' => $this->orderRepo->getSalesProgress()
@@ -42,7 +50,8 @@ class BusinessIntelligenceService {
                 'recentOrders' => $this->orderRepo->getRecentOrders(8),
                 'salesDeepDive' => $this->orderRepo->getSalesDeepDive(),
                 'inventoryDeepDive' => $this->inventoryHealthCheck(),
-                'aovDeepDive' => $this->orderRepo->getAOVDeepDive()
+                'aovDeepDive' => $this->orderRepo->getAOVDeepDive(),
+                'salesSummary' => $this->orderRepo->getSalesSummary()
             ],
             'strategicAlerts' => $this->generateAlerts()
         ];

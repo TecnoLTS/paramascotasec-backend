@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Auto-dump DB so data changes are versioned with code.
+# Configure DB_DOCKER_CONTAINER or rely on local pg_dump.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts"
+"$SCRIPT_DIR/db_dump.sh"
+
+git add db/backup.sql

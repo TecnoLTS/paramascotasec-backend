@@ -18,7 +18,7 @@ try {
     ];
 
     $stmtUserCheck = $db->prepare('SELECT id FROM "User" WHERE id = :id');
-    $stmtUserInsert = $db->prepare('INSERT INTO "User" (id, name, email, password, role, "updatedAt", "createdAt") VALUES (:id, :name, :email, :password, \'client\', NOW(), NOW())');
+    $stmtUserInsert = $db->prepare('INSERT INTO "User" (id, name, email, password, role, email_verified, updated_at, created_at) VALUES (:id, :name, :email, :password, \'client\', TRUE, NOW(), NOW())');
 
     foreach ($users as $u) {
         $stmtUserCheck->execute(['id' => $u['id']]);

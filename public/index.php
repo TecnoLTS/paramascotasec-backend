@@ -31,18 +31,30 @@ $router->add('DELETE', '/api/products/{id}', 'ProductController@destroy');
 
 // User Routes
 $router->add('GET', '/api/users', 'UserController@index');
+$router->add('GET', '/api/user/addresses', 'UserController@getAddresses');
+$router->add('PUT', '/api/user/addresses', 'UserController@updateAddresses');
+$router->add('GET', '/api/user/profile', 'UserController@getProfile');
+$router->add('PUT', '/api/user/profile', 'UserController@updateProfile');
 $router->add('POST', '/api/auth/login', 'AuthController@login');
 $router->add('POST', '/api/auth/register', 'AuthController@register');
+$router->add('GET', '/api/auth/verify', 'AuthController@verify');
 
 // Order Routes
 $router->add('GET', '/api/orders', 'OrderController@index');
 $router->add('GET', '/api/orders/my-orders', 'OrderController@myOrders'); // Specific route for user's orders
 $router->add('GET', '/api/orders/{id}', 'OrderController@show');
+$router->add('PATCH', '/api/orders/{id}/status', 'OrderController@updateStatus');
+$router->add('GET', '/api/orders/{id}/invoice', 'OrderController@invoice');
 $router->add('POST', '/api/orders', 'OrderController@store');
 $router->add('POST', '/api/orders/quote', 'OrderController@quote');
 
 // Admin Dashboard Routes
 $router->add('GET', '/api/admin/dashboard/stats', 'DashboardController@stats');
+$router->add('GET', '/api/admin/settings/tax', 'SettingsController@getVat');
+$router->add('PUT', '/api/admin/settings/tax', 'SettingsController@updateVat');
+$router->add('GET', '/api/settings/shipping', 'SettingsController@getShipping');
+$router->add('GET', '/api/admin/settings/shipping', 'SettingsController@getShipping');
+$router->add('PUT', '/api/admin/settings/shipping', 'SettingsController@updateShipping');
 $router->add('GET', '/api/shipments', 'ShippingController@index');
 
 // Health Route

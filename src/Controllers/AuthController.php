@@ -41,7 +41,8 @@ class AuthController {
             'exp' => time() + (60 * 60 * 3), // 3 hours
             'sub' => $user['id'],
             'email' => $user['email'],
-            'name' => $user['name']
+            'name' => $user['name'],
+            'role' => $user['role'] ?? 'customer'
         ];
 
         $jwt = JWT::encode($payload, $secretKey, 'HS256');
@@ -66,6 +67,12 @@ class AuthController {
             return;
         }
 
+        if (mb_strlen($data['password']) < 12) {
+            http_response_code(400);
+            echo json_encode(['error' => 'La contraseña debe tener al menos 12 caracteres']);
+            return;
+        }
+
         // Check if user already exists
         if ($this->userRepository->getByEmail($data['email'])) {
             http_response_code(409);
@@ -75,6 +82,11 @@ class AuthController {
 
         try {
             $result = $this->userRepository->create($data);
+            if (!$this->sendVerificationEmail($data['email'], $data['name'], $result['token'])) {
+                http_response_code(500);
+                echo json_encode(['error' => 'No se pudo enviar el correo de verificación. Intenta más tarde.']);
+                return;
+            }
             echo json_encode([
                 'message' => 'Usuario registrado exitosamente. Por favor, revisa tu correo para confirmar tu cuenta.',
                 'id' => $result['id'],
@@ -103,5 +115,40 @@ class AuthController {
             http_response_code(400);
             echo json_encode(['error' => 'Token de verificación inválido o expirado']);
         }
+    }
+
+    private function sendVerificationEmail($email, $name, $token) {
+        $verifyUrl = $this->buildVerificationUrl($token);
+        $fromAddress = $_ENV['MAIL_FROM_ADDRESS'] ?? 'no-reply@paramascotasec.com';
+        $fromName = $_ENV['MAIL_FROM_NAME'] ?? 'Para Mascotas EC';
+        $subject = 'Confirma tu cuenta';
+
+        $safeName = trim($name);
+        $message = "Hola {$safeName},\n\n";
+        $message .= "Gracias por registrarte en Para Mascotas EC. Para confirmar tu cuenta, visita el siguiente enlace:\n";
+        $message .= "{$verifyUrl}\n\n";
+        $message .= "Si no solicitaste este registro, puedes ignorar este correo.\n";
+
+        $headers = [
+            'From: ' . $fromName . ' <' . $fromAddress . '>',
+            'Reply-To: ' . $fromAddress,
+            'Content-Type: text/plain; charset=UTF-8'
+        ];
+
+        return mail($email, $subject, $message, implode("\r\n", $headers));
+    }
+
+    private function buildVerificationUrl($token) {
+        $baseUrl = $_ENV['APP_URL'] ?? $this->getRequestBaseUrl();
+        return rtrim($baseUrl, '/') . '/api/auth/verify?token=' . urlencode($token);
+    }
+
+    private function getRequestBaseUrl() {
+        $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? null;
+        if (!$proto) {
+            $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        }
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        return $proto . '://' . $host;
     }
 }

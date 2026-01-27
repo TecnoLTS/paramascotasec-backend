@@ -22,6 +22,66 @@ class UserRepository {
         return $stmt->fetch();
     }
 
+    public function getById($id) {
+        $stmt = $this->db->prepare('SELECT id, name, email, role FROM "User" WHERE id = :id');
+        $stmt->execute(['id' => $id]);
+        return $stmt->fetch();
+    }
+
+    public function getAddresses($userId) {
+        $this->ensureAddressesColumn();
+        $stmt = $this->db->prepare('SELECT addresses FROM "User" WHERE id = :id');
+        $stmt->execute(['id' => $userId]);
+        $row = $stmt->fetch();
+        return $row ? $row['addresses'] : null;
+    }
+
+    public function updateAddresses($userId, $addresses) {
+        $this->ensureAddressesColumn();
+        $stmt = $this->db->prepare('UPDATE "User" SET addresses = :addresses, updated_at = NOW() WHERE id = :id');
+        $stmt->execute([
+            'id' => $userId,
+            'addresses' => json_encode($addresses)
+        ]);
+        return $this->getAddresses($userId);
+    }
+
+    private function ensureAddressesColumn() {
+        $check = $this->db->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'User' AND column_name = 'addresses'");
+        $check->execute();
+        if ($check->fetch()) {
+            return;
+        }
+        $this->db->exec('ALTER TABLE "User" ADD COLUMN IF NOT EXISTS addresses jsonb');
+    }
+
+    public function getProfile($userId) {
+        $this->ensureProfileColumn();
+        $stmt = $this->db->prepare('SELECT name, profile FROM "User" WHERE id = :id');
+        $stmt->execute(['id' => $userId]);
+        return $stmt->fetch();
+    }
+
+    public function updateProfile($userId, $name, $profile) {
+        $this->ensureProfileColumn();
+        $stmt = $this->db->prepare('UPDATE "User" SET name = :name, profile = :profile, updated_at = NOW() WHERE id = :id');
+        $stmt->execute([
+            'id' => $userId,
+            'name' => $name,
+            'profile' => json_encode($profile)
+        ]);
+        return $this->getProfile($userId);
+    }
+
+    private function ensureProfileColumn() {
+        $check = $this->db->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'User' AND column_name = 'profile'");
+        $check->execute();
+        if ($check->fetch()) {
+            return;
+        }
+        $this->db->exec('ALTER TABLE "User" ADD COLUMN IF NOT EXISTS profile jsonb');
+    }
+
     public function create($data) {
         $sql = 'INSERT INTO "User" (id, name, email, password, updated_at, verification_token) VALUES (:id, :name, :email, :password, NOW(), :token)';
         $stmt = $this->db->prepare($sql);

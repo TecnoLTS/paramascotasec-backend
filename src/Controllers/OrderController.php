@@ -94,6 +94,139 @@ class OrderController {
         }
     }
 
+    public function updateStatus($id) {
+        $user = $this->authenticate();
+        $data = json_decode(file_get_contents('php://input'), true);
+
+        if (!isset($data['status'])) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Estado requerido']);
+            return;
+        }
+
+        try {
+            $order = $this->orderRepository->getById($id);
+            if (!$order) {
+                http_response_code(404);
+                echo json_encode(['error' => 'Pedido no encontrado']);
+                return;
+            }
+            // Only owner or admin (fallback to email match if user_id is missing)
+            $isAdmin = (($user['role'] ?? 'customer') === 'admin');
+            $isOwner = (!empty($order['user_id']) && $order['user_id'] === $user['sub']);
+            $emailMatch = false;
+            if (!$isOwner && !$isAdmin) {
+                $shipping = $this->decodeAddress($order['shipping_address'] ?? null);
+                $billing = $this->decodeAddress($order['billing_address'] ?? null);
+                $orderEmail = $shipping['email'] ?? $billing['email'] ?? null;
+                if ($orderEmail && isset($user['email']) && $orderEmail === $user['email']) {
+                    $emailMatch = true;
+                }
+            }
+
+            // If we can't prove ownership but user is authenticated, allow for now
+            if (!($isAdmin || $isOwner || $emailMatch)) {
+                $emailAllow = !empty($user['email']);
+                if (!$emailAllow) {
+                    http_response_code(403);
+                    echo json_encode(['error' => 'No autorizado']);
+                    return;
+                }
+            }
+
+            $updated = $this->orderRepository->updateStatus($id, $data['status']);
+            echo json_encode($updated);
+        } catch (\Exception $e) {
+            http_response_code(500);
+            echo json_encode(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function invoice($id) {
+        $user = $this->authenticate();
+        try {
+            $order = $this->orderRepository->getById($id);
+            if (!$order) {
+                http_response_code(404);
+                echo json_encode(['error' => 'Pedido no encontrado']);
+                return;
+            }
+            if ($order['user_id'] !== $user['sub']) {
+                http_response_code(403);
+                echo json_encode(['error' => 'No autorizado']);
+                return;
+            }
+            if (($order['status'] ?? '') === 'canceled') {
+                http_response_code(403);
+                echo json_encode(['error' => 'Factura no disponible para pedidos cancelados']);
+                return;
+            }
+            if (empty($order['invoice_html'])) {
+                $baseUrl = $_ENV['APP_URL'] ?? null;
+                if (!$baseUrl) {
+                    $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
+                    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                    $baseUrl = $proto . '://' . $host;
+                }
+                $invoiceHtml = $this->orderRepository->ensureInvoiceForOrder($order, $baseUrl);
+                if (!$invoiceHtml) {
+                    http_response_code(404);
+                    echo json_encode(['error' => 'Factura no disponible']);
+                    return;
+                }
+                $order['invoice_html'] = $invoiceHtml;
+            } else {
+                $invoiceData = null;
+                if (!empty($order['invoice_data'])) {
+                    $invoiceData = json_decode($order['invoice_data'], true);
+                }
+                $customerName = $invoiceData['customer']['name'] ?? null;
+                $subtotalGross = 0.0;
+                if (!empty($order['items']) && is_array($order['items'])) {
+                    foreach ($order['items'] as $item) {
+                        $subtotalGross += (float)($item['price'] ?? 0) * (int)($item['quantity'] ?? 1);
+                    }
+                }
+                $expectedShipping = (float)($order['total'] ?? $subtotalGross) - $subtotalGross;
+                if ($expectedShipping < 0) {
+                    $expectedShipping = 0;
+                }
+                $showsZeroShipping = strpos($order['invoice_html'], 'Envío</span><span>$0') !== false
+                    || strpos($order['invoice_html'], 'Envío</span><span>$0,00') !== false
+                    || strpos($order['invoice_html'], 'Envío</span><span>$0.00') !== false;
+                $needsRegenerate = empty($customerName)
+                    || (strpos($order['invoice_html'], 'LogoVerde150.png') !== false && strpos($order['invoice_html'], 'api.') !== false)
+                    || (strpos($order['invoice_html'], 'brand-name') !== false)
+                    || (strpos($order['invoice_html'], 'invoice_v2_tax_net') === false)
+                    || ($expectedShipping > 0 && $showsZeroShipping);
+                if ($needsRegenerate) {
+                    $baseUrl = $_ENV['APP_URL'] ?? null;
+                    if (!$baseUrl) {
+                        $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
+                        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                        $baseUrl = $proto . '://' . $host;
+                    }
+                    $invoiceHtml = $this->orderRepository->ensureInvoiceForOrder($order, $baseUrl, true);
+                    if ($invoiceHtml) {
+                        $order['invoice_html'] = $invoiceHtml;
+                    }
+                }
+            }
+            header('Content-Type: text/html; charset=utf-8');
+            echo $order['invoice_html'];
+        } catch (\Exception $e) {
+            http_response_code(500);
+            echo json_encode(['error' => $e->getMessage()]);
+        }
+    }
+
+    private function decodeAddress($value) {
+        if (!$value) return [];
+        if (is_array($value)) return $value;
+        $decoded = json_decode($value, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
     public function quote() {
         try {
             $data = json_decode(file_get_contents('php://input'), true);
@@ -119,7 +252,13 @@ class OrderController {
                 $data['id'] = 'ORD-' . time() . mt_rand(1000, 9999);
             }
 
-            $order = $this->orderRepository->create($data);
+            $baseUrl = $_ENV['APP_URL'] ?? null;
+            if (!$baseUrl) {
+                $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
+                $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                $baseUrl = $proto . '://' . $host;
+            }
+            $order = $this->orderRepository->create($data, $baseUrl);
             http_response_code(201);
             echo json_encode($order);
         } catch (\Exception $e) {

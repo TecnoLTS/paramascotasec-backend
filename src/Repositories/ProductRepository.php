@@ -6,6 +6,7 @@ use App\Core\Database;
 
 class ProductRepository {
     private $db;
+    private $taxRateCache = null;
 
     public function __construct() {
         $this->db = Database::getInstance();
@@ -69,20 +70,26 @@ class ProductRepository {
     private function formatRow($row) {
         $row['images'] = json_decode($row['images'] ?? '[]', true);
         $row['variations'] = json_decode($row['variations'] ?? '[]', true);
+
+        $taxRate = $this->getTaxRate();
+        $taxMultiplier = 1 + ($taxRate / 100);
+        $row['price'] = round(floatval($row['price'] ?? 0) * $taxMultiplier, 2);
+        $row['originPrice'] = round(floatval($row['originPrice'] ?? 0) * $taxMultiplier, 2);
         
         // Smart Business Logic
         $cost = floatval($row['cost'] ?? 0);
         $price = floatval($row['price'] ?? 0);
+        $priceNet = $taxMultiplier > 0 ? ($price / $taxMultiplier) : $price;
         
         if ($cost > 0) {
             $row['business'] = [
                 'cost' => $cost,
-                'margin' => $price > 0 ? round((($price - $cost) / $price) * 100, 1) : 0,
-                'profit' => round($price - $cost, 2),
+                'margin' => $priceNet > 0 ? round((($priceNet - $cost) / $priceNet) * 100, 1) : 0,
+                'profit' => round($priceNet - $cost, 2),
                 'suggestions' => [
-                    'min_price' => round($cost * 1.15, 2),        // 15% margin
-                    'recommended_price' => round($cost * 1.35, 2), // 35% margin
-                    'max_price' => round($cost * 1.60, 2)         // 60% margin
+                    'min_price' => round($cost * 1.15, 2),
+                    'recommended_price' => round($cost * 1.35, 2),
+                    'max_price' => round($cost * 1.60, 2)
                 ]
             ];
         } else {
@@ -90,11 +97,11 @@ class ProductRepository {
              $row['business'] = [
                 'cost' => 0,
                 'margin' => 100,
-                'profit' => $price,
+                'profit' => $priceNet,
                 'suggestions' => [
-                    'min_price' => round($price * 0.8, 2),
-                    'recommended_price' => $price,
-                    'max_price' => round($price * 1.2, 2)
+                    'min_price' => round($priceNet * 0.8, 2),
+                    'recommended_price' => round($priceNet, 2),
+                    'max_price' => round($priceNet * 1.2, 2)
                 ]
             ];
         }
@@ -102,12 +109,23 @@ class ProductRepository {
         return $row;
     }
 
+    private function getTaxRate() {
+        if ($this->taxRateCache !== null) {
+            return $this->taxRateCache;
+        }
+        $settings = new \App\Repositories\SettingsRepository();
+        $value = $settings->get('vat_rate');
+        $rate = is_numeric($value) ? floatval($value) : 0;
+        $this->taxRateCache = $rate;
+        return $rate;
+    }
+
     public function create($data) {
         $sql = '
             INSERT INTO "Product" (
-                id, legacy_id, category, name, gender, is_new, is_sale, price, original_price, cost, brand, sold, quantity, description, action, slug, created_at
+                id, legacy_id, category, name, gender, is_new, is_sale, price, original_price, cost, brand, sold, quantity, description, action, slug, created_at, updated_at
             ) VALUES (
-                :id, :legacy_id, :category, :name, :gender, :is_new, :is_sale, :price, :original_price, :cost, :brand, :sold, :quantity, :description, :action, :slug, NOW()
+                :id, :legacy_id, :category, :name, :gender, :is_new, :is_sale, :price, :original_price, :cost, :brand, :sold, :quantity, :description, :action, :slug, NOW(), NOW()
             ) RETURNING id
         ';
         
@@ -170,6 +188,7 @@ class ProductRepository {
             return $this->getById($id);
         }
 
+        $fields[] = '"updated_at" = NOW()';
         $sql = 'UPDATE "Product" SET ' . implode(', ', $fields) . ' WHERE id = :id';
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
