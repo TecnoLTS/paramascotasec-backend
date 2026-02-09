@@ -3,8 +3,9 @@
 namespace App\Controllers;
 
 use App\Repositories\OrderRepository;
-use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
+use App\Core\Response;
+use App\Core\Auth;
+use App\Core\TenantContext;
 
 class OrderController {
     private $orderRepository;
@@ -14,62 +15,43 @@ class OrderController {
     }
 
     private function authenticate() {
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? null;
-        
-        if (!$authHeader || !preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
-            http_response_code(401);
-            echo json_encode(['error' => 'No autorizado']);
-            exit;
-        }
+        return Auth::requireUser();
+    }
 
-        $jwt = $matches[1];
-        $secretKey = $_ENV['JWT_SECRET'] ?? 'default_secret';
-        try {
-            $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
-            return (array) $decoded;
-        } catch (\Exception $e) {
-            http_response_code(401);
-            echo json_encode(['error' => 'Token inválido']);
-            exit;
-        }
+    private function authenticateOptional() {
+        return Auth::optionalUser();
     }
 
     public function index() {
         $user = $this->authenticate();
-        // Check role? For now assume only admin calls this via /api/orders
-        // Or filter by user if not admin.
-        
-        // TODO: ideally check if $user['role'] == 'admin'.
-        // For now I'll implement logic: if user is admin return all, else return own.
-        // But the JWT payload 'role' wasn't fully saved in the JWT in AuthController - wait, it WAS saved in my previous memory but let's check.
-        // I will assume it is.
-        
-        // Let's just return all for simplicity if the route is /api/orders, assuming frontend protects it.
-        // Or better, let's look at the implementation:
-        
-        if (isset($_GET['user_id'])) {
-             // Admin filtering by user, or user fetching own
-             // if user is not admin and trying to fetch other's -> 403.
-             // simplifying...
-        }
-
         try {
-            $orders = $this->orderRepository->getAll();
-            echo json_encode($orders);
+            $isAdmin = (($user['role'] ?? 'customer') === 'admin');
+            if ($isAdmin) {
+                $orders = $this->orderRepository->getAll();
+            } else {
+                if (empty($user['sub'])) {
+                    Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
+                    return;
+                }
+                $orders = $this->orderRepository->getByUserId($user['sub']);
+            }
+            Response::json($orders);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'ORDERS_LIST_FAILED');
         }
     }
     
     public function myOrders() {
         $user = $this->authenticate();
         try {
+            if (($user['role'] ?? 'customer') === 'guest' || empty($user['sub'])) {
+                Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
+                return;
+            }
             $orders = $this->orderRepository->getByUserId($user['sub']); // 'sub' is user id in JWT
-            echo json_encode($orders);
+            Response::json($orders);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'ORDERS_LIST_FAILED');
         }
     }
 
@@ -78,19 +60,19 @@ class OrderController {
         try {
             $order = $this->orderRepository->getById($id);
             if (!$order) {
-                http_response_code(404);
-                echo json_encode(['error' => 'Pedido no encontrado']);
+                Response::error('Pedido no encontrado', 404, 'ORDER_NOT_FOUND');
                 return;
             }
             // Permission check: admin or owner
-            if ($order['user_id'] !== $user['sub'] /* && $user['role'] !== 'admin' */) {
-                // skipping strict role check logic from JWT for now as I need to double check JWT structure
+            $isAdmin = (($user['role'] ?? 'customer') === 'admin');
+            if (!$isAdmin && $order['user_id'] !== $user['sub']) {
+                Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
+                return;
             }
             
-            echo json_encode($order);
+            Response::json($order);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'ORDER_FETCH_FAILED');
         }
     }
 
@@ -99,16 +81,14 @@ class OrderController {
         $data = json_decode(file_get_contents('php://input'), true);
 
         if (!isset($data['status'])) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Estado requerido']);
+            Response::error('Estado requerido', 400, 'ORDER_STATUS_REQUIRED');
             return;
         }
 
         try {
             $order = $this->orderRepository->getById($id);
             if (!$order) {
-                http_response_code(404);
-                echo json_encode(['error' => 'Pedido no encontrado']);
+                Response::error('Pedido no encontrado', 404, 'ORDER_NOT_FOUND');
                 return;
             }
             // Only owner or admin (fallback to email match if user_id is missing)
@@ -128,17 +108,15 @@ class OrderController {
             if (!($isAdmin || $isOwner || $emailMatch)) {
                 $emailAllow = !empty($user['email']);
                 if (!$emailAllow) {
-                    http_response_code(403);
-                    echo json_encode(['error' => 'No autorizado']);
+                    Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
                     return;
                 }
             }
 
             $updated = $this->orderRepository->updateStatus($id, $data['status']);
-            echo json_encode($updated);
+            Response::json($updated);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'ORDER_STATUS_UPDATE_FAILED');
         }
     }
 
@@ -147,23 +125,20 @@ class OrderController {
         try {
             $order = $this->orderRepository->getById($id);
             if (!$order) {
-                http_response_code(404);
-                echo json_encode(['error' => 'Pedido no encontrado']);
+                Response::error('Pedido no encontrado', 404, 'ORDER_NOT_FOUND');
                 return;
             }
             $isAdmin = ($user['role'] ?? '') === 'admin';
             if (!$isAdmin && $order['user_id'] !== $user['sub']) {
-                http_response_code(403);
-                echo json_encode(['error' => 'No autorizado']);
+                Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
                 return;
             }
             if (!$isAdmin && ($order['status'] ?? '') === 'canceled') {
-                http_response_code(403);
-                echo json_encode(['error' => 'Factura no disponible para pedidos cancelados']);
+                Response::error('Factura no disponible para pedidos cancelados', 403, 'ORDER_INVOICE_UNAVAILABLE');
                 return;
             }
             if (empty($order['invoice_html'])) {
-                $baseUrl = $_ENV['APP_URL'] ?? null;
+                $baseUrl = TenantContext::appUrl() ?? ($_ENV['APP_URL'] ?? null);
                 if (!$baseUrl) {
                     $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
                     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -171,8 +146,7 @@ class OrderController {
                 }
                 $invoiceHtml = $this->orderRepository->ensureInvoiceForOrder($order, $baseUrl);
                 if (!$invoiceHtml) {
-                    http_response_code(404);
-                    echo json_encode(['error' => 'Factura no disponible']);
+                    Response::error('Factura no disponible', 404, 'ORDER_INVOICE_UNAVAILABLE');
                     return;
                 }
                 $order['invoice_html'] = $invoiceHtml;
@@ -201,7 +175,7 @@ class OrderController {
                     || (strpos($order['invoice_html'], 'invoice_v2_tax_net') === false)
                     || ($expectedShipping > 0 && $showsZeroShipping);
                 if ($needsRegenerate) {
-                    $baseUrl = $_ENV['APP_URL'] ?? null;
+                    $baseUrl = TenantContext::appUrl() ?? ($_ENV['APP_URL'] ?? null);
                     if (!$baseUrl) {
                         $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
                         $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -216,8 +190,7 @@ class OrderController {
             header('Content-Type: text/html; charset=utf-8');
             echo $order['invoice_html'];
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'ORDER_INVOICE_FAILED');
         }
     }
 
@@ -235,10 +208,9 @@ class OrderController {
                 throw new \Exception("Items required");
             }
             $quote = $this->orderRepository->calculateQuote($data['items'], $data['delivery_method'] ?? 'delivery');
-            echo json_encode($quote);
+            Response::json($quote);
         } catch (\Exception $e) {
-            http_response_code(400);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 400, 'ORDER_QUOTE_FAILED');
         }
     }
 
@@ -246,25 +218,27 @@ class OrderController {
         $user = $this->authenticate();
         try {
             $data = json_decode(file_get_contents('php://input'), true);
-            $data['user_id'] = $user['sub']; // Force user_id from token
+            if (($user['role'] ?? 'customer') === 'guest' || empty($user['sub'])) {
+                Response::error('Debes iniciar sesión para comprar', 403, 'GUEST_PURCHASE_DISABLED');
+                return;
+            }
+            $data['user_id'] = $user['sub'];
             
             // Generate basic ID if not provided
             if (!isset($data['id'])) {
                 $data['id'] = 'ORD-' . time() . mt_rand(1000, 9999);
             }
 
-            $baseUrl = $_ENV['APP_URL'] ?? null;
+            $baseUrl = TenantContext::appUrl() ?? ($_ENV['APP_URL'] ?? null);
             if (!$baseUrl) {
                 $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
                 $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
                 $baseUrl = $proto . '://' . $host;
             }
             $order = $this->orderRepository->create($data, $baseUrl);
-            http_response_code(201);
-            echo json_encode($order);
+            Response::json($order, 201);
         } catch (\Exception $e) {
-            http_response_code(400);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 400, 'ORDER_CREATE_FAILED');
         }
     }
 }

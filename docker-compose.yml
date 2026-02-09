@@ -6,6 +6,11 @@ services:
     container_name: paramascotasec-backend-app
     restart: unless-stopped
     working_dir: /var/www/html
+    command: >
+      sh -c "mkdir -p /var/www/html/public/uploads/products
+      && chown -R www-data:www-data /var/www/html/public/uploads
+      && chmod -R 775 /var/www/html/public/uploads
+      && php-fpm"
     volumes:
       - .:/var/www/html
     environment:

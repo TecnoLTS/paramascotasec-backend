@@ -4,8 +4,8 @@ namespace App\Controllers;
 
 use App\Repositories\OrderRepository;
 use App\Repositories\UserRepository;
-use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
+use App\Core\Response;
+use App\Core\Auth;
 
 class DashboardController {
     private $orderRepo;
@@ -17,13 +17,7 @@ class DashboardController {
     }
 
     private function authenticate() {
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? null;
-        if (!$authHeader || !preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
-            http_response_code(401);
-            echo json_encode(['error' => 'No autorizado']);
-            exit;
-        }
-        // ... (reuse auth logic or move to trait/helper)
+        Auth::requireUser();
     }
 
     public function stats() {
@@ -32,10 +26,9 @@ class DashboardController {
         try {
             $biService = new \App\Services\BusinessIntelligenceService();
             $response = $biService->getFullDashboardStats();
-            echo json_encode($response);
+            Response::json($response);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'DASHBOARD_STATS_FAILED');
         }
     }
 }

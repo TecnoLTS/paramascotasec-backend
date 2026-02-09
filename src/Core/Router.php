@@ -32,6 +32,13 @@ class Router {
         }
         
         http_response_code(404);
-        echo json_encode(['error' => 'Route not found', 'uri' => $uri, 'method' => $method]);
+        echo json_encode([
+            'ok' => false,
+            'error' => [
+                'message' => 'Route not found',
+                'code' => 'ROUTE_NOT_FOUND',
+                'details' => ['uri' => $uri, 'method' => $method]
+            ]
+        ]);
     }
 }

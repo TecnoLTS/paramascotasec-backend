@@ -3,8 +3,8 @@
 namespace App\Controllers;
 
 use App\Repositories\UserRepository;
-use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
+use App\Core\Response;
+use App\Core\Auth;
 
 class UserController {
     private $userRepository;
@@ -14,33 +14,15 @@ class UserController {
     }
 
     private function authenticate() {
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? null;
-
-        if (!$authHeader || !preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
-            http_response_code(401);
-            echo json_encode(['error' => 'No autorizado']);
-            exit;
-        }
-
-        $jwt = $matches[1];
-        $secretKey = $_ENV['JWT_SECRET'] ?? 'default_secret';
-        try {
-            $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
-            return (array) $decoded;
-        } catch (\Exception $e) {
-            http_response_code(401);
-            echo json_encode(['error' => 'Token inválido']);
-            exit;
-        }
+        return Auth::requireUser();
     }
 
     public function index() {
         try {
             $users = $this->userRepository->getAll();
-            echo json_encode($users);
+            Response::json($users);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'USERS_LIST_FAILED');
         }
     }
 
@@ -48,10 +30,9 @@ class UserController {
         $user = $this->authenticate();
         try {
             $addresses = $this->userRepository->getAddresses($user['sub']);
-            echo json_encode(['addresses' => $addresses ? json_decode($addresses, true) : []]);
+            Response::json(['addresses' => $addresses ? json_decode($addresses, true) : []]);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'USER_ADDRESSES_FETCH_FAILED');
         }
     }
 
@@ -60,17 +41,15 @@ class UserController {
         $data = json_decode(file_get_contents('php://input'), true);
 
         if (!isset($data['addresses'])) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Direcciones requeridas']);
+            Response::error('Direcciones requeridas', 400, 'USER_ADDRESSES_REQUIRED');
             return;
         }
 
         try {
             $addresses = $this->userRepository->updateAddresses($user['sub'], $data['addresses']);
-            echo json_encode(['addresses' => $addresses ? json_decode($addresses, true) : []]);
+            Response::json(['addresses' => $addresses ? json_decode($addresses, true) : []]);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'USER_ADDRESSES_UPDATE_FAILED');
         }
     }
 
@@ -85,11 +64,19 @@ class UserController {
                 if (!empty($profileData['profile'])) {
                     $profile = json_decode($profileData['profile'], true) ?: [];
                 }
+                if (!empty($profileData['document_type'])) {
+                    $profile['documentType'] = $profileData['document_type'];
+                }
+                if (!empty($profileData['document_number'])) {
+                    $profile['documentNumber'] = $profileData['document_number'];
+                }
+                if (!empty($profileData['business_name'])) {
+                    $profile['businessName'] = $profileData['business_name'];
+                }
             }
-            echo json_encode(['name' => $name, 'profile' => $profile]);
+            Response::json(['name' => $name, 'profile' => $profile]);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'USER_PROFILE_FETCH_FAILED');
         }
     }
 
@@ -98,8 +85,7 @@ class UserController {
         $data = json_decode(file_get_contents('php://input'), true);
 
         if (!isset($data['profile']) || !is_array($data['profile'])) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Perfil requerido']);
+            Response::error('Perfil requerido', 400, 'USER_PROFILE_REQUIRED');
             return;
         }
 
@@ -119,11 +105,19 @@ class UserController {
                 if (!empty($updated['profile'])) {
                     $profile = json_decode($updated['profile'], true) ?: [];
                 }
+                if (!empty($updated['document_type'])) {
+                    $profile['documentType'] = $updated['document_type'];
+                }
+                if (!empty($updated['document_number'])) {
+                    $profile['documentNumber'] = $updated['document_number'];
+                }
+                if (!empty($updated['business_name'])) {
+                    $profile['businessName'] = $updated['business_name'];
+                }
             }
-            echo json_encode(['name' => $savedName, 'profile' => $profile]);
+            Response::json(['name' => $savedName, 'profile' => $profile]);
         } catch (\Exception $e) {
-            http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            Response::error($e->getMessage(), 500, 'USER_PROFILE_UPDATE_FAILED');
         }
     }
 }

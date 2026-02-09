@@ -3,6 +3,7 @@
 namespace App\Repositories;
 
 use App\Core\Database;
+use App\Core\TenantContext;
 use PDO;
 
 class OrderRepository {
@@ -13,23 +14,29 @@ class OrderRepository {
 
     public function __construct() {
         $this->db = Database::getInstance();
+        $this->ensureTenantColumn();
         $this->ensureInvoiceColumns();
     }
 
     public function getAll() {
         // Fetch orders with user name
-        $stmt = $this->db->query('
+        $stmt = $this->db->prepare('
             SELECT o.*, u.name as user_name 
             FROM "Order" o 
             LEFT JOIN "User" u ON o.user_id = u.id 
+            WHERE o.tenant_id = :tenant_id
             ORDER BY o.created_at DESC
         ');
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return $stmt->fetchAll();
     }
 
     public function getByUserId($userId) {
-        $stmt = $this->db->prepare('SELECT * FROM "Order" WHERE "user_id" = :user_id ORDER BY created_at DESC');
-        $stmt->execute(['user_id' => $userId]);
+        $stmt = $this->db->prepare('SELECT * FROM "Order" WHERE "user_id" = :user_id AND tenant_id = :tenant_id ORDER BY created_at DESC');
+        $stmt->execute([
+            'user_id' => $userId,
+            'tenant_id' => $this->getTenantId()
+        ]);
         $orders = $stmt->fetchAll();
 
         if (!$orders) {
@@ -57,8 +64,11 @@ class OrderRepository {
     }
 
     public function getById($id) {
-        $stmt = $this->db->prepare('SELECT * FROM "Order" WHERE "id" = :id');
-        $stmt->execute(['id' => $id]);
+        $stmt = $this->db->prepare('SELECT * FROM "Order" WHERE "id" = :id AND tenant_id = :tenant_id');
+        $stmt->execute([
+            'id' => $id,
+            'tenant_id' => $this->getTenantId()
+        ]);
         $order = $stmt->fetch();
 
         if ($order) {
@@ -72,9 +82,10 @@ class OrderRepository {
     }
 
     public function updateStatus($id, $status) {
-        $stmt = $this->db->prepare('UPDATE "Order" SET status = :status WHERE id = :id');
+        $stmt = $this->db->prepare('UPDATE "Order" SET status = :status WHERE id = :id AND tenant_id = :tenant_id');
         $stmt->execute([
             'id' => $id,
+            'tenant_id' => $this->getTenantId(),
             'status' => $status
         ]);
         return $this->getById($id);
@@ -135,8 +146,11 @@ class OrderRepository {
             $customerName = $order['user_name'] ?? null;
         }
         if (!$customerName) {
-            $stmtUser = $this->db->prepare('SELECT name FROM "User" WHERE id = :id');
-            $stmtUser->execute(['id' => $order['user_id'] ?? null]);
+            $stmtUser = $this->db->prepare('SELECT name FROM "User" WHERE id = :id AND tenant_id = :tenant_id');
+            $stmtUser->execute([
+                'id' => $order['user_id'] ?? null,
+                'tenant_id' => $this->getTenantId()
+            ]);
             $userRow = $stmtUser->fetch();
             if ($userRow && !empty($userRow['name'])) {
                 $customerName = $userRow['name'];
@@ -170,9 +184,10 @@ class OrderRepository {
             'payment_method' => $order['payment_method'] ?? null
         ], $quote, $invoiceData, $baseUrl);
 
-        $stmt = $this->db->prepare('UPDATE "Order" SET invoice_number = :invoice_number, invoice_html = :invoice_html, invoice_created_at = NOW(), invoice_data = :invoice_data WHERE id = :id');
+        $stmt = $this->db->prepare('UPDATE "Order" SET invoice_number = :invoice_number, invoice_html = :invoice_html, invoice_created_at = NOW(), invoice_data = :invoice_data WHERE id = :id AND tenant_id = :tenant_id');
         $stmt->execute([
             'id' => $orderId,
+            'tenant_id' => $this->getTenantId(),
             'invoice_number' => $invoiceNumber,
             'invoice_html' => $invoiceHtml,
             'invoice_data' => json_encode($invoiceData)
@@ -192,9 +207,12 @@ class OrderRepository {
                 SELECT p.id, p.legacy_id, p.price, p.name, 
                        (SELECT url FROM "Image" WHERE product_id = p.id ORDER BY id LIMIT 1) as image
                 FROM "Product" p 
-                WHERE p.id = :id OR p.legacy_id = :id
+                WHERE (p.id = :id OR p.legacy_id = :id) AND p.tenant_id = :tenant_id
             ');
-            $stmt->execute(['id' => $item['product_id']]);
+            $stmt->execute([
+                'id' => $item['product_id'],
+                'tenant_id' => $this->getTenantId()
+            ]);
             $product = $stmt->fetch();
 
             if (!$product) {
@@ -291,10 +309,11 @@ class OrderRepository {
             // Inteligencia de Negocio: El Backend recalcula y valida TODO.
             $quote = $this->calculateQuote($data['items'], $data['delivery_method'] ?? 'delivery');
             
-            $stmt = $this->db->prepare('INSERT INTO "Order" ("id", "user_id", "total", "status", "created_at", "shipping_address", "billing_address", "payment_method", "payment_details", "items_subtotal", "vat_subtotal", "vat_rate", "vat_amount", "shipping", "shipping_base", "shipping_tax_rate", "shipping_tax_amount") VALUES (:id, :user_id, :total, :status, NOW(), :shipping_address, :billing_address, :payment_method, :payment_details, :items_subtotal, :vat_subtotal, :vat_rate, :vat_amount, :shipping, :shipping_base, :shipping_tax_rate, :shipping_tax_amount)');
+            $stmt = $this->db->prepare('INSERT INTO "Order" ("id", "tenant_id", "user_id", "total", "status", "created_at", "shipping_address", "billing_address", "payment_method", "payment_details", "items_subtotal", "vat_subtotal", "vat_rate", "vat_amount", "shipping", "shipping_base", "shipping_tax_rate", "shipping_tax_amount", "order_notes") VALUES (:id, :tenant_id, :user_id, :total, :status, NOW(), :shipping_address, :billing_address, :payment_method, :payment_details, :items_subtotal, :vat_subtotal, :vat_rate, :vat_amount, :shipping, :shipping_base, :shipping_tax_rate, :shipping_tax_amount, :order_notes)');
             
             $stmt->execute([
                 'id' => $data['id'],
+                'tenant_id' => $this->getTenantId(),
                 'user_id' => $data['user_id'],
                 'total' => $quote['total'],
                 'status' => $data['status'] ?? 'pending',
@@ -309,7 +328,8 @@ class OrderRepository {
                 'shipping' => $quote['shipping'],
                 'shipping_base' => $quote['shipping_base'] ?? $quote['shipping'],
                 'shipping_tax_rate' => $quote['shipping_tax_rate'] ?? 0,
-                'shipping_tax_amount' => $quote['shipping_tax_amount'] ?? 0
+                'shipping_tax_amount' => $quote['shipping_tax_amount'] ?? 0,
+                'order_notes' => $data['order_notes'] ?? null
             ]);
 
             foreach ($quote['items'] as $item) {
@@ -326,10 +346,11 @@ class OrderRepository {
                 ]);
 
                 // Reducir stock
-                $stmtUpdateStock = $this->db->prepare('UPDATE "Product" SET quantity = quantity - :qty WHERE id = :id');
+                $stmtUpdateStock = $this->db->prepare('UPDATE "Product" SET quantity = quantity - :qty WHERE id = :id AND tenant_id = :tenant_id');
                 $stmtUpdateStock->execute([
                     'qty' => $item['quantity'],
-                    'id' => $item['product_id']
+                    'id' => $item['product_id'],
+                    'tenant_id' => $this->getTenantId()
                 ]);
             }
 
@@ -337,9 +358,10 @@ class OrderRepository {
             $invoiceNumber = $this->buildInvoiceNumber($data['id']);
             $invoiceHtml = $this->renderInvoiceHtml($invoiceNumber, $data, $quote, $invoiceData, $baseUrl);
 
-            $stmtInvoice = $this->db->prepare('UPDATE "Order" SET invoice_number = :invoice_number, invoice_html = :invoice_html, invoice_created_at = NOW(), invoice_data = :invoice_data WHERE id = :id');
+            $stmtInvoice = $this->db->prepare('UPDATE "Order" SET invoice_number = :invoice_number, invoice_html = :invoice_html, invoice_created_at = NOW(), invoice_data = :invoice_data WHERE id = :id AND tenant_id = :tenant_id');
             $stmtInvoice->execute([
                 'id' => $data['id'],
+                'tenant_id' => $this->getTenantId(),
                 'invoice_number' => $invoiceNumber,
                 'invoice_html' => $invoiceHtml,
                 'invoice_data' => json_encode($invoiceData)
@@ -356,19 +378,24 @@ class OrderRepository {
 
     // Stats methods for Dashboard
     public function getTotalSales() {
-        $stmt = $this->db->query('
+        $stmt = $this->db->prepare('
             SELECT SUM(COALESCE(vat_subtotal, total - COALESCE(vat_amount, 0) - COALESCE(shipping, 0))) as total
             FROM "Order"
-            WHERE status != \'canceled\'
+            WHERE tenant_id = :tenant_id AND status != \'canceled\'
         ');
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $result = $stmt->fetch();
         return $result['total'] ?? 0;
     }
 
     public function getSalesProgress() {
         // This month vs Last month
-        $thisMonth = $this->db->query('SELECT SUM(COALESCE(vat_subtotal, total - COALESCE(vat_amount, 0) - COALESCE(shipping, 0))) FROM "Order" WHERE status != \'canceled\' AND created_at >= DATE_TRUNC(\'month\', NOW())')->fetchColumn() ?: 0;
-        $lastMonth = $this->db->query('SELECT SUM(COALESCE(vat_subtotal, total - COALESCE(vat_amount, 0) - COALESCE(shipping, 0))) FROM "Order" WHERE status != \'canceled\' AND created_at >= DATE_TRUNC(\'month\', NOW() - INTERVAL \'1 month\') AND created_at < DATE_TRUNC(\'month\', NOW())')->fetchColumn() ?: 0;
+        $stmtThis = $this->db->prepare('SELECT SUM(COALESCE(vat_subtotal, total - COALESCE(vat_amount, 0) - COALESCE(shipping, 0))) FROM "Order" WHERE tenant_id = :tenant_id AND status != \'canceled\' AND created_at >= DATE_TRUNC(\'month\', NOW())');
+        $stmtThis->execute(['tenant_id' => $this->getTenantId()]);
+        $thisMonth = $stmtThis->fetchColumn() ?: 0;
+        $stmtLast = $this->db->prepare('SELECT SUM(COALESCE(vat_subtotal, total - COALESCE(vat_amount, 0) - COALESCE(shipping, 0))) FROM "Order" WHERE tenant_id = :tenant_id AND status != \'canceled\' AND created_at >= DATE_TRUNC(\'month\', NOW() - INTERVAL \'1 month\') AND created_at < DATE_TRUNC(\'month\', NOW())');
+        $stmtLast->execute(['tenant_id' => $this->getTenantId()]);
+        $lastMonth = $stmtLast->fetchColumn() ?: 0;
         
         $percentage = $lastMonth > 0 ? (($thisMonth - $lastMonth) / $lastMonth) * 100 : 100;
         return [
@@ -380,14 +407,19 @@ class OrderRepository {
 
     public function getNewOrdersCount() {
         // Today
-        $stmt = $this->db->query('SELECT COUNT(*) as count FROM "Order" WHERE created_at >= CURRENT_DATE');
+        $stmt = $this->db->prepare('SELECT COUNT(*) as count FROM "Order" WHERE tenant_id = :tenant_id AND created_at >= CURRENT_DATE');
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $result = $stmt->fetch();
         return $result['count'] ?? 0;
     }
 
     public function getOrdersProgress() {
-        $today = $this->db->query('SELECT COUNT(*) FROM "Order" WHERE created_at >= CURRENT_DATE')->fetchColumn() ?: 0;
-        $yesterday = $this->db->query('SELECT COUNT(*) FROM "Order" WHERE created_at >= CURRENT_DATE - INTERVAL \'1 day\' AND created_at < CURRENT_DATE')->fetchColumn() ?: 0;
+        $stmtToday = $this->db->prepare('SELECT COUNT(*) FROM "Order" WHERE tenant_id = :tenant_id AND created_at >= CURRENT_DATE');
+        $stmtToday->execute(['tenant_id' => $this->getTenantId()]);
+        $today = $stmtToday->fetchColumn() ?: 0;
+        $stmtYesterday = $this->db->prepare('SELECT COUNT(*) FROM "Order" WHERE tenant_id = :tenant_id AND created_at >= CURRENT_DATE - INTERVAL \'1 day\' AND created_at < CURRENT_DATE');
+        $stmtYesterday->execute(['tenant_id' => $this->getTenantId()]);
+        $yesterday = $stmtYesterday->fetchColumn() ?: 0;
         
         $percentage = $yesterday > 0 ? (($today - $yesterday) / $yesterday) * 100 : 100;
         return [
@@ -399,38 +431,41 @@ class OrderRepository {
 
     public function getMonthlyPerformance() {
         // Last 7 days sales including today, even if 0
-        $stmt = $this->db->query("
+        $stmt = $this->db->prepare("
             SELECT TO_CHAR(d, 'Dy') as day, COALESCE(SUM(COALESCE(o.vat_subtotal, o.total - COALESCE(o.vat_amount, 0) - COALESCE(o.shipping, 0))), 0) as total
             FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, '1 day') d
-            LEFT JOIN \"Order\" o ON DATE(o.created_at) = d AND o.status != 'canceled'
+            LEFT JOIN \"Order\" o ON DATE(o.created_at) = d AND o.status != 'canceled' AND o.tenant_id = :tenant_id
             GROUP BY d
             ORDER BY d ASC
         ");
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return $stmt->fetchAll();
     }
 
     public function getSalesTrend30Days() {
         // Last 30 days sales including today, even if 0
-        $stmt = $this->db->query("
+        $stmt = $this->db->prepare("
             SELECT TO_CHAR(d, 'DD Mon') as day, COALESCE(SUM(COALESCE(o.vat_subtotal, o.total - COALESCE(o.vat_amount, 0) - COALESCE(o.shipping, 0))), 0) as total
             FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, '1 day') d
-            LEFT JOIN \"Order\" o ON DATE(o.created_at) = d AND o.status != 'canceled'
+            LEFT JOIN \"Order\" o ON DATE(o.created_at) = d AND o.status != 'canceled' AND o.tenant_id = :tenant_id
             GROUP BY d
             ORDER BY d ASC
         ");
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return $stmt->fetchAll();
     }
 
     public function getSalesSummary() {
-        $stmt = $this->db->query('
+        $stmt = $this->db->prepare('
             SELECT
                 SUM(total) as gross,
                 SUM(COALESCE(vat_subtotal, total - COALESCE(vat_amount, 0) - COALESCE(shipping, 0))) as net,
                 SUM(COALESCE(vat_amount, total - COALESCE(shipping, 0) - COALESCE(vat_subtotal, 0))) as vat,
                 SUM(COALESCE(shipping, 0)) as shipping
             FROM "Order"
-            WHERE status != \'canceled\'
+            WHERE tenant_id = :tenant_id AND status != \'canceled\'
         ');
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $row = $stmt->fetch();
         return [
             'gross' => round($row['gross'] ?? 0, 2),
@@ -448,12 +483,15 @@ class OrderRepository {
                    SUM(oi.quantity * (oi.price / (1 + (COALESCE(o.vat_rate, :vat_rate) / 100.0)))) as revenue
             FROM "OrderItem" oi
             JOIN "Order" o ON oi.order_id = o.id
-            WHERE o.status != \'canceled\'
+            WHERE o.tenant_id = :tenant_id AND o.status != \'canceled\'
             GROUP BY oi.product_name
             ORDER BY sold DESC
             LIMIT 5
         ');
-        $stmt->execute(['vat_rate' => $vatRate]);
+        $stmt->execute([
+            'vat_rate' => $vatRate,
+            'tenant_id' => $this->getTenantId()
+        ]);
         return $stmt->fetchAll();
     }
 
@@ -465,38 +503,46 @@ class OrderRepository {
             FROM "OrderItem" oi
             JOIN "Product" p ON oi.product_id = p.id
             JOIN "Order" o ON oi.order_id = o.id
-            WHERE o.status != \'canceled\'
+            WHERE o.tenant_id = :tenant_id AND o.status != \'canceled\'
             GROUP BY p.category
             ORDER BY total DESC
         ');
-        $stmt->execute(['vat_rate' => $vatRate]);
+        $stmt->execute([
+            'vat_rate' => $vatRate,
+            'tenant_id' => $this->getTenantId()
+        ]);
         return $stmt->fetchAll();
     }
 
     public function getAverageOrderValue() {
-        $stmt = $this->db->query('SELECT AVG(COALESCE(vat_subtotal, total - COALESCE(vat_amount, 0) - COALESCE(shipping, 0))) as avg FROM "Order" WHERE status != \'canceled\'');
+        $stmt = $this->db->prepare('SELECT AVG(COALESCE(vat_subtotal, total - COALESCE(vat_amount, 0) - COALESCE(shipping, 0))) as avg FROM "Order" WHERE tenant_id = :tenant_id AND status != \'canceled\'');
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return round($stmt->fetchColumn() ?: 0, 2);
     }
 
     public function getSalesDeepDive() {
         // Daily comparison: This Month (all days till today) vs Last Month
-        $currentDays = $this->db->query("
+        $stmtCurrent = $this->db->prepare("
             SELECT EXTRACT(DAY FROM d) as day, COALESCE(SUM(COALESCE(o.vat_subtotal, o.total - COALESCE(o.vat_amount, 0) - COALESCE(o.shipping, 0))), 0) as total
             FROM generate_series(DATE_TRUNC('month', NOW()), CURRENT_DATE, '1 day') d
-            LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d) AND o.status != 'canceled'
+            LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d) AND o.status != 'canceled' AND o.tenant_id = :tenant_id
             GROUP BY day ORDER BY day ASC
-        ")->fetchAll();
+        ");
+        $stmtCurrent->execute(['tenant_id' => $this->getTenantId()]);
+        $currentDays = $stmtCurrent->fetchAll();
 
-        $previousDays = $this->db->query("
+        $stmtPrevious = $this->db->prepare("
             SELECT EXTRACT(DAY FROM d) as day, COALESCE(SUM(COALESCE(o.vat_subtotal, o.total - COALESCE(o.vat_amount, 0) - COALESCE(o.shipping, 0))), 0) as total
             FROM generate_series(
                 DATE_TRUNC('month', NOW() - INTERVAL '1 month'), 
                 DATE_TRUNC('month', NOW() - INTERVAL '1 month') + (CURRENT_DATE - DATE_TRUNC('month', NOW())), 
                 '1 day'
             ) d
-            LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d) AND o.status != 'canceled'
+            LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d) AND o.status != 'canceled' AND o.tenant_id = :tenant_id
             GROUP BY day ORDER BY day ASC
-        ")->fetchAll();
+        ");
+        $stmtPrevious->execute(['tenant_id' => $this->getTenantId()]);
+        $previousDays = $stmtPrevious->fetchAll();
 
         // Categorical growth drivers
         $vatRate = $this->getTaxRate();
@@ -506,7 +552,7 @@ class OrderRepository {
                 FROM \"OrderItem\" oi
                 JOIN \"Product\" p ON oi.product_id = p.id
                 JOIN \"Order\" o ON oi.order_id = o.id
-                WHERE o.status != 'canceled' AND o.created_at >= DATE_TRUNC('month', NOW())
+                WHERE o.status != 'canceled' AND o.tenant_id = :tenant_id AND o.created_at >= DATE_TRUNC('month', NOW())
                 GROUP BY p.category
             ),
             last_month AS (
@@ -514,7 +560,7 @@ class OrderRepository {
                 FROM \"OrderItem\" oi
                 JOIN \"Product\" p ON oi.product_id = p.id
                 JOIN \"Order\" o ON oi.order_id = o.id
-                WHERE o.status != 'canceled' 
+                WHERE o.status != 'canceled' AND o.tenant_id = :tenant_id
                 AND o.created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
                 AND o.created_at < DATE_TRUNC('month', NOW())
                 GROUP BY p.category
@@ -532,7 +578,10 @@ class OrderRepository {
             FULL OUTER JOIN last_month lm ON tm.category = lm.category
             ORDER BY growth DESC
         ");
-        $catGrowthStmt->execute(['vat_rate' => $vatRate]);
+        $catGrowthStmt->execute([
+            'vat_rate' => $vatRate,
+            'tenant_id' => $this->getTenantId()
+        ]);
         $catGrowth = $catGrowthStmt->fetchAll();
 
         return [
@@ -545,25 +594,27 @@ class OrderRepository {
     }
 
     public function getProfitStats() {
-        // Profit = Net Sales (sin IVA y sin envío) - COGS - Gastos de envío
-        $salesStmt = $this->db->query('
+        // Profit = Net Sales (sin IVA y sin envío) - COGS. El envío se muestra aparte.
+        $salesStmt = $this->db->prepare('
             SELECT 
                 SUM(COALESCE(vat_subtotal, total - COALESCE(vat_amount, 0) - COALESCE(shipping, 0))) as revenue,
                 SUM(COALESCE(shipping_base, shipping, 0)) as shipping_cost
             FROM "Order"
-            WHERE status != \'canceled\'
+            WHERE tenant_id = :tenant_id AND status != \'canceled\'
         ');
+        $salesStmt->execute(['tenant_id' => $this->getTenantId()]);
         $salesRow = $salesStmt->fetch();
         $revenue = $salesRow['revenue'] ?: 0;
         $shippingCost = $salesRow['shipping_cost'] ?: 0;
 
-        $costStmt = $this->db->query('
+        $costStmt = $this->db->prepare('
             SELECT SUM(oi.quantity * p.cost) as cost
             FROM "OrderItem" oi
             JOIN "Product" p ON oi.product_id = p.id
             JOIN "Order" o ON oi.order_id = o.id
-            WHERE o.status != \'canceled\'
+            WHERE o.tenant_id = :tenant_id AND o.status != \'canceled\'
         ');
+        $costStmt->execute(['tenant_id' => $this->getTenantId()]);
         $costRow = $costStmt->fetch();
         $cost = $costRow['cost'] ?: 0;
         $profit = $revenue - $cost;
@@ -579,12 +630,14 @@ class OrderRepository {
     }
 
     public function getInventoryValue() {
-        $stmt = $this->db->query('SELECT SUM(quantity * price) as market_value, SUM(quantity * cost) as cost_value, SUM(quantity) as total_items FROM "Product"');
+        $stmt = $this->db->prepare('SELECT SUM(quantity * price) as market_value, SUM(quantity * cost) as cost_value, SUM(quantity) as total_items FROM "Product" WHERE tenant_id = :tenant_id');
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return $stmt->fetch();
     }
 
     public function getOrdersByStatus() {
-        $stmt = $this->db->query('SELECT status, COUNT(*) as count FROM "Order" GROUP BY status');
+        $stmt = $this->db->prepare('SELECT status, COUNT(*) as count FROM "Order" WHERE tenant_id = :tenant_id GROUP BY status');
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return $stmt->fetchAll();
     }
 
@@ -602,6 +655,21 @@ class OrderRepository {
         $this->db->exec('ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS shipping_base numeric(12,2)');
         $this->db->exec('ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS shipping_tax_rate numeric(6,2)');
         $this->db->exec('ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS shipping_tax_amount numeric(12,2)');
+        $this->db->exec('ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS order_notes text');
+    }
+
+    private function ensureTenantColumn() {
+        $check = $this->db->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Order' AND column_name = 'tenant_id'");
+        $check->execute();
+        if ($check->fetch()) {
+            return;
+        }
+        $this->db->exec('ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS tenant_id text');
+        $this->db->exec('UPDATE "Order" SET tenant_id = COALESCE(tenant_id, \'' . $this->getTenantId() . '\')');
+    }
+
+    private function getTenantId() {
+        return TenantContext::id() ?? ($_ENV['DEFAULT_TENANT'] ?? 'paramascotasec');
     }
 
     private function buildInvoiceNumber($orderId) {
@@ -629,14 +697,18 @@ class OrderRepository {
             ],
             'company' => $billing['company'] ?? null,
             'payment_method' => $data['payment_method'] ?? null,
-            'items' => $quote['items']
+            'items' => $quote['items'],
+            'order_notes' => $data['order_notes'] ?? null
         ];
     }
 
     private function getUserDefaultBilling($userId) {
         if (!$userId) return null;
-        $stmt = $this->db->prepare('SELECT addresses FROM "User" WHERE id = :id');
-        $stmt->execute(['id' => $userId]);
+        $stmt = $this->db->prepare('SELECT addresses FROM "User" WHERE id = :id AND tenant_id = :tenant_id');
+        $stmt->execute([
+            'id' => $userId,
+            'tenant_id' => $this->getTenantId()
+        ]);
         $row = $stmt->fetch();
         if (!$row || empty($row['addresses'])) return null;
         $addresses = json_decode($row['addresses'], true);
@@ -653,10 +725,10 @@ class OrderRepository {
     }
 
     private function renderInvoiceHtml($invoiceNumber, $data, $quote, $invoiceData, $baseUrl = null) {
-        $frontendBase = $_ENV['FRONTEND_URL'] ?? ($_ENV['APP_URL'] ?? '');
+        $frontendBase = TenantContext::appUrl() ?? ($_ENV['FRONTEND_URL'] ?? ($_ENV['APP_URL'] ?? ''));
         $baseUrl = $baseUrl ?: $frontendBase;
         if (empty($baseUrl)) {
-            $baseUrl = 'https://paramascotasec.com';
+            $baseUrl = TenantContext::appUrl() ?? 'https://paramascotasec.com';
         }
         if (strpos($baseUrl, 'api.') !== false) {
             $baseUrl = str_replace('://api.', '://', $baseUrl);
@@ -861,9 +933,18 @@ class OrderRepository {
         if (!$addr || !is_array($addr)) return [];
         $nameLine = trim(($addr['firstName'] ?? '') . ' ' . ($addr['lastName'] ?? ''));
         $cityLine = trim(implode(', ', array_filter([$addr['city'] ?? null, $addr['state'] ?? null, $addr['zip'] ?? null])));
+        $docType = trim((string)($addr['documentType'] ?? ''));
+        $docNumber = trim((string)($addr['documentNumber'] ?? ''));
+        $docLine = null;
+        if ($docType !== '' && $docNumber !== '') {
+            $docLine = 'Identificación: ' . $docType . ' ' . $docNumber;
+        } elseif ($docNumber !== '') {
+            $docLine = 'Identificación: ' . $docNumber;
+        }
         $lines = array_filter([
             $nameLine ?: null,
             $addr['company'] ?? null,
+            $docLine,
             $addr['street'] ?? null,
             $cityLine ?: null,
             $addr['country'] ?? null,
@@ -888,7 +969,8 @@ class OrderRepository {
     }
 
     public function getRecentOrders($limit = 5) {
-        $stmt = $this->db->query("
+        $safeLimit = max(1, min(50, (int)$limit));
+        $stmt = $this->db->prepare("
             SELECT o.id,
                    u.name as user_name,
                    o.total,
@@ -900,39 +982,48 @@ class OrderRepository {
                    o.created_at
             FROM \"Order\" o
             LEFT JOIN \"User\" u ON o.user_id = u.id
+            WHERE o.tenant_id = :tenant_id
             ORDER BY o.created_at DESC
-            LIMIT $limit
+            LIMIT $safeLimit
         ");
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return $stmt->fetchAll();
     }
 
     public function getInventoryDeepDive() {
         // High Value Stock (Top 5 by cost investment)
-        $highValue = $this->db->query("
+        $highValueStmt = $this->db->prepare("
             SELECT name, quantity, cost, (quantity * cost) as total_cost
             FROM \"Product\"
-            WHERE quantity > 0
+            WHERE tenant_id = :tenant_id AND quantity > 0
             ORDER BY total_cost DESC
             LIMIT 5
-        ")->fetchAll();
+        ");
+        $highValueStmt->execute(['tenant_id' => $this->getTenantId()]);
+        $highValue = $highValueStmt->fetchAll();
 
         // Stock Risk (Low quantity)
-        $stockRisk = $this->db->query("
+        $stockRiskStmt = $this->db->prepare("
             SELECT name, quantity
             FROM \"Product\"
-            WHERE quantity <= 5
+            WHERE tenant_id = :tenant_id AND quantity <= 5
             ORDER BY quantity ASC
             LIMIT 5
-        ")->fetchAll();
+        ");
+        $stockRiskStmt->execute(['tenant_id' => $this->getTenantId()]);
+        $stockRisk = $stockRiskStmt->fetchAll();
 
         // Stock Health Summary
-        $summary = $this->db->query("
+        $summaryStmt = $this->db->prepare("
             SELECT 
                 COUNT(*) FILTER (WHERE quantity = 0) as out_of_stock,
                 COUNT(*) FILTER (WHERE quantity > 0 AND quantity <= 5) as low_stock,
                 COUNT(*) FILTER (WHERE quantity > 50) as overstock
             FROM \"Product\"
-        ")->fetch();
+            WHERE tenant_id = :tenant_id
+        ");
+        $summaryStmt->execute(['tenant_id' => $this->getTenantId()]);
+        $summary = $summaryStmt->fetch();
 
         return [
             'highValueItems' => $highValue,
@@ -943,7 +1034,7 @@ class OrderRepository {
 
     public function getAOVDeepDive() {
         // Order value distribution buckets
-        $distribution = $this->db->query("
+        $distributionStmt = $this->db->prepare("
             SELECT 
                 CASE 
                     WHEN total < 50 THEN 'Bajo (<$50)'
@@ -953,10 +1044,12 @@ class OrderRepository {
                 COUNT(*) as count,
                 SUM(total) as revenue
             FROM \"Order\"
-            WHERE status != 'canceled'
+            WHERE tenant_id = :tenant_id AND status != 'canceled'
             GROUP BY bucket
             ORDER BY count DESC
-        ")->fetchAll();
+        ");
+        $distributionStmt->execute(['tenant_id' => $this->getTenantId()]);
+        $distribution = $distributionStmt->fetchAll();
 
         return [
             'distribution' => $distribution

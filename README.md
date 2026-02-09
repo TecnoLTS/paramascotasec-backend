@@ -32,6 +32,48 @@ Este es el backend de la tienda en linea, construido con PHP (FPM) y Nginx, cone
 - `GET /api/users`: Lista todos los usuarios.
 - `GET /api/health`: Estado de salud de la API.
 
+## Formato de Respuesta Estándar
+
+Todas las respuestas JSON siguen el mismo envelope:
+
+```json
+{
+  "ok": true,
+  "data": {}
+}
+```
+
+En errores:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "message": "Descripción del error",
+    "code": "CODIGO_OPCIONAL",
+    "details": {}
+  }
+}
+```
+
+## Seguridad (Token requerido)
+
+Todas las rutas bajo `/api` requieren `Authorization: Bearer <token>` excepto:
+- `/api/auth/login`
+- `/api/auth/register`
+- `/api/auth/verify`
+
+Para solicitudes server-side (SSR), define `BACKEND_SERVICE_TOKEN` en el frontend con un JWT válido.
+Puedes generarlo con:
+
+```bash
+php scripts/generate_service_token.php
+```
+
+### Un solo token activo por usuario
+Al iniciar sesión se genera un nuevo token y se guarda como `active_token_id` en la tabla `User`.
+Si el mismo usuario inicia sesión en otro dispositivo, el token anterior queda inválido automáticamente.
+
 ## Integración con el Frontend
 
 El frontend debe apuntar a `http://localhost:8080/api/` (o la URL del proxy si se usa uno) para obtener los datos.

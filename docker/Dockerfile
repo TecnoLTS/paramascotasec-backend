@@ -19,8 +19,13 @@ WORKDIR /var/www/html
 # Copy existing application directory contents
 COPY . .
 
+# Ensure upload directories exist and are writable
+RUN mkdir -p /var/www/html/public/uploads/products \
+    && chown -R www-data:www-data /var/www/html/public/uploads \
+    && chmod -R 775 /var/www/html/public/uploads
+
 # Install dependencies if composer.json exists
-# RUN if [ -f "composer.json" ]; then composer install --no-interaction --optimize-autoloader; fi
+RUN if [ -f "composer.json" ]; then git config --global --add safe.directory /var/www/html && composer install --no-interaction --prefer-dist --optimize-autoloader; fi
 
 EXPOSE 9000
 

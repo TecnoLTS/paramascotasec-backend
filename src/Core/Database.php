@@ -4,17 +4,18 @@ namespace App\Core;
 
 use PDO;
 use PDOException;
+use App\Core\TenantContext;
 
 class Database {
-    private static $instance = null;
+    private static $instances = [];
     private $connection;
 
-    private function __construct() {
-        $host = $_ENV['DB_HOST'];
-        $port = $_ENV['DB_PORT'];
-        $db   = $_ENV['DB_DATABASE'];
-        $user = $_ENV['DB_USERNAME'];
-        $pass = $_ENV['DB_PASSWORD'];
+    private function __construct(array $config) {
+        $host = $config['host'];
+        $port = $config['port'];
+        $db   = $config['database'];
+        $user = $config['username'];
+        $pass = $config['password'];
 
         $dsn = "pgsql:host=$host;port=$port;dbname=$db";
         $options = [
@@ -30,10 +31,36 @@ class Database {
         }
     }
 
+    private static function resolveConfig(): array {
+        $tenant = TenantContext::get();
+        $tenantDb = $tenant['db'] ?? [];
+
+        $host = $tenantDb['host'] ?? ($_ENV['DB_HOST'] ?? 'localhost');
+        $port = $tenantDb['port'] ?? ($_ENV['DB_PORT'] ?? 5432);
+        $database = $tenantDb['database'] ?? ($_ENV['DB_DATABASE'] ?? 'paramascotasec');
+        $username = $tenantDb['username'] ?? ($_ENV['DB_USERNAME'] ?? 'postgres');
+        $password = $tenantDb['password'] ?? ($_ENV['DB_PASSWORD'] ?? '');
+
+        return [
+            'host' => $host,
+            'port' => $port,
+            'database' => $database,
+            'username' => $username,
+            'password' => $password
+        ];
+    }
+
     public static function getInstance() {
-        if (self::$instance === null) {
-            self::$instance = new self();
+        $config = self::resolveConfig();
+        $key = implode('|', [
+            $config['host'],
+            $config['port'],
+            $config['database'],
+            $config['username']
+        ]);
+        if (!isset(self::$instances[$key])) {
+            self::$instances[$key] = new self($config);
         }
-        return self::$instance->connection;
+        return self::$instances[$key]->connection;
     }
 }
