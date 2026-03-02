@@ -1,0 +1,847 @@
+id,user_id,status,total,created_at,shipping_address,billing_address,payment_method,invoice_number,invoice_html,invoice_created_at,invoice_data,payment_details,items_subtotal,vat_subtotal,vat_rate,vat_amount,shipping,shipping_base,shipping_tax_rate,shipping_tax_amount,order_notes,tenant_id,discount_code,discount_total,discount_snapshot
+ORD-17694707785194,c64a137ebd7456ac9a17,delivered,120.00,2026-01-26 18:39:38.418,"{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": ""Distrito Federal"", ""street"": ""La Candelaria Caracas"", ""company"": ""No"", ""country"": ""Venezuela"", ""lastName"": ""Vasquez"", ""firstName"": ""Edwin Eduardo""}",null,transfer,FAC-20260126-785194,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260126-785194</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .totals { margin-top:16px; width: 280px; margin-left:auto; }
+    .totals div { display:flex; justify-content:space-between; padding:6px 0; font-size:12px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""https://paramascotasec.com/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260126-785194</div>
+      <div>Fecha: 26/01/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Edwin Eduardo Vasquez</div>
+      <div>edwin.eduardo.vm@gmail.com</div>
+      <div>0962782126</div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>transfer</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Edwin Vasquez</div><div>No</div><div>La Candelaria Caracas</div><div>Caracas, Distrito Federal, 1010</div><div>Venezuela</div><div>0962782126</div><div>edwin.eduardo.vm@gmail.com</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>No</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table>
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Abrigo Forrado para Perro</td><td>1</td><td>$100,00</td><td>$100,00</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class=""totals"">
+    <div><span>Subtotal sin IVA</span><span>$100,00</span></div>
+    <div><span>IVA (15,00%)</span><span>$15,00</span></div>
+    <div><span>Envío</span><span>$5,00</span></div>
+    <div class=""total""><span>Total</span><span>$120,00</span></div>
+  </div>
+</body>
+</html>",2026-01-26 18:39:38.418,"{""items"": [{""price"": 115, ""total"": 115, ""quantity"": 1, ""product_id"": ""cmj8w103c0012prxy17kkex47"", ""product_name"": ""Abrigo Forrado para Perro"", ""product_image"": ""/images/product/20.jpg""}], ""company"": ""No"", ""customer"": {""name"": ""Edwin Eduardo Vasquez"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126""}, ""payment_method"": ""transfer"", ""billing_address"": {""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": ""Distrito Federal"", ""street"": ""La Candelaria Caracas"", ""company"": ""No"", ""country"": ""Venezuela"", ""lastName"": ""Vasquez"", ""firstName"": ""Edwin""}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}","{""amount"": ""120"", ""reference"": ""54664654654"", ""proof_name"": null}",115.00,100.00,15.00,15.00,5.00,,,,,paramascotasec,,0.00,
+ORD-17695216151322,c64a137ebd7456ac9a17,canceled,14.95,2026-01-27 08:46:55.731,"{""zip"": """", ""city"": """", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": """", ""company"": """", ""country"": """", ""lastName"": ""Vasquez"", ""firstName"": ""Edwin""}","{""zip"": """", ""city"": """", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": """", ""company"": """", ""country"": """", ""lastName"": ""Vasquez"", ""firstName"": ""Edwin""}",cash,FAC-20260127-151322,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260127-151322</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .items-table { table-layout: fixed; }
+    .items-table th:nth-child(2), .items-table td:nth-child(2) { text-align:center; width:80px; }
+    .items-table th:nth-child(3), .items-table td:nth-child(3) { text-align:right; width:120px; }
+    .items-table th:nth-child(4), .items-table td:nth-child(4) { text-align:right; width:120px; }
+    .items-table tfoot td { padding:6px 8px; border-bottom:none; }
+    .items-table tfoot td:last-child { text-align:right; }
+    .items-table tfoot tr.total td { font-weight:700; font-size:14px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""https://paramascotasec.com/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260127-151322</div>
+      <div>Fecha: 27/01/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Edwin Vasquez</div>
+      <div>edwin.eduardo.vm@gmail.com</div>
+      <div>0962782126</div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>cash</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Edwin Vasquez</div><div>0962782126</div><div>edwin.eduardo.vm@gmail.com</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>No aplica</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table class=""items-table"">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Champú Natural para Perro</td><td>1</td><td>$13,00</td><td>$13,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan=""3"">Subtotal sin IVA</td><td>$13,00</td></tr>
+        <tr><td colspan=""3"">IVA (15,00%)</td><td>$1,95</td></tr>
+        <tr><td colspan=""3"">Envío</td><td>$0,00</td></tr>
+        <tr class=""total""><td colspan=""3"">Total</td><td>$14,95</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</body>
+</html>",2026-01-27 08:46:55.731,"{""items"": [{""price"": 14.95, ""total"": 14.95, ""quantity"": 1, ""product_id"": ""cmj8w10390010prxyxmycdh4c"", ""product_name"": ""Champú Natural para Perro"", ""product_image"": ""/images/product/19.jpg""}], ""company"": """", ""customer"": {""name"": ""Edwin Vasquez"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126""}, ""payment_method"": ""cash"", ""billing_address"": {""zip"": """", ""city"": """", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": """", ""company"": """", ""country"": """", ""lastName"": ""Vasquez"", ""firstName"": ""Edwin""}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}",,14.95,13.00,15.00,1.95,0.00,0.00,15.00,0.00,,paramascotasec,,0.00,
+ORD-17696397708410,c64a137ebd7456ac9a17,canceled,120.75,2026-01-28 17:36:10.102,"{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""firstName"": ""Edwin""}","{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""firstName"": ""Edwin""}",cash,FAC-20260128-708410,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260128-708410</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .items-table { table-layout: fixed; }
+    .items-table th:nth-child(2), .items-table td:nth-child(2) { text-align:center; width:80px; }
+    .items-table th:nth-child(3), .items-table td:nth-child(3) { text-align:right; width:120px; }
+    .items-table th:nth-child(4), .items-table td:nth-child(4) { text-align:right; width:120px; }
+    .items-table tfoot td { padding:6px 8px; border-bottom:none; }
+    .items-table tfoot td:last-child { text-align:right; }
+    .items-table tfoot tr.total td { font-weight:700; font-size:14px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""https://paramascotasec.com/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260128-708410</div>
+      <div>Fecha: 28/01/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Edwin Vasquez</div>
+      <div>edwin.eduardo.vm@gmail.com</div>
+      <div>0962782126</div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>cash</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Edwin Vasquez</div><div>La Candelaria Caracas</div><div>Caracas, 1010</div><div>Ecuador</div><div>0962782126</div><div>edwin.eduardo.vm@gmail.com</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>No aplica</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table class=""items-table"">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Abrigo Forrado para Perro</td><td>1</td><td>$100,00</td><td>$100,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan=""3"">Subtotal sin IVA</td><td>$100,00</td></tr>
+        <tr><td colspan=""3"">IVA (15,00%)</td><td>$15,00</td></tr>
+        <tr><td colspan=""3"">Envío</td><td>$5,75</td></tr>
+        <tr class=""total""><td colspan=""3"">Total</td><td>$120,75</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</body>
+</html>",2026-01-28 17:36:10.102,"{""items"": [{""price"": 115, ""total"": 115, ""quantity"": 1, ""product_id"": ""cmj8w103c0012prxy17kkex47"", ""product_name"": ""Abrigo Forrado para Perro"", ""product_image"": ""/images/product/20.jpg""}], ""company"": """", ""customer"": {""name"": ""Edwin Vasquez"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126""}, ""payment_method"": ""cash"", ""billing_address"": {""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""firstName"": ""Edwin""}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}",,115.00,100.00,15.00,15.00,5.75,5.00,15.00,0.75,,paramascotasec,,0.00,
+ORD-17696439971642,user_admin,canceled,25.30,2026-01-28 18:46:37.647,"{""zip"": """", ""city"": """", ""email"": ""admin@example.com"", ""phone"": """", ""state"": """", ""street"": """", ""company"": """", ""country"": """", ""lastName"": """", ""firstName"": ""Admin""}","{""zip"": """", ""city"": """", ""email"": ""admin@example.com"", ""phone"": """", ""state"": """", ""street"": """", ""company"": """", ""country"": """", ""lastName"": """", ""firstName"": ""Admin""}",cash,FAC-20260128-971642,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260128-971642</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .items-table { table-layout: fixed; }
+    .items-table th:nth-child(2), .items-table td:nth-child(2) { text-align:center; width:80px; }
+    .items-table th:nth-child(3), .items-table td:nth-child(3) { text-align:right; width:120px; }
+    .items-table th:nth-child(4), .items-table td:nth-child(4) { text-align:right; width:120px; }
+    .items-table tfoot td { padding:6px 8px; border-bottom:none; }
+    .items-table tfoot td:last-child { text-align:right; }
+    .items-table tfoot tr.total td { font-weight:700; font-size:14px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""https://paramascotasec.com/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260128-971642</div>
+      <div>Fecha: 28/01/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Admin</div>
+      <div>admin@example.com</div>
+      <div></div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>cash</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Admin</div><div>admin@example.com</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>No aplica</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table class=""items-table"">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Arnés Ajustable para Perro</td><td>1</td><td>$22,00</td><td>$22,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan=""3"">Subtotal sin IVA</td><td>$22,00</td></tr>
+        <tr><td colspan=""3"">IVA (15,00%)</td><td>$3,30</td></tr>
+        <tr><td colspan=""3"">Envío</td><td>$0,00</td></tr>
+        <tr class=""total""><td colspan=""3"">Total</td><td>$25,30</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</body>
+</html>",2026-01-28 18:46:37.647,"{""items"": [{""price"": 25.3, ""total"": 25.3, ""quantity"": 1, ""product_id"": ""cmj8w102y000sprxygnq54w0r"", ""product_name"": ""Arnés Ajustable para Perro"", ""product_image"": ""/images/product/15.jpg""}], ""company"": """", ""customer"": {""name"": ""Admin"", ""email"": ""admin@example.com"", ""phone"": """"}, ""payment_method"": ""cash"", ""billing_address"": {""zip"": """", ""city"": """", ""email"": ""admin@example.com"", ""phone"": """", ""state"": """", ""street"": """", ""company"": """", ""country"": """", ""lastName"": """", ""firstName"": ""Admin""}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}",,25.30,22.00,15.00,3.30,0.00,0.00,15.00,0.00,,paramascotasec,,0.00,
+ORD-17697178648471,c64a137ebd7456ac9a17,canceled,19.95,2026-01-29 15:17:44.997,"{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": ""OrAcleSETECPRO09"", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": ""Cédula"", ""documentNumber"": ""1759625104"", ""confirmPassword"": ""OrAcleSETECPRO09""}","{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": ""OrAcleSETECPRO09"", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": ""Cédula"", ""documentNumber"": ""1759625104"", ""confirmPassword"": ""OrAcleSETECPRO09""}",cash,FAC-20260129-648471,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260129-648471</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .items-table { table-layout: fixed; }
+    .items-table th:nth-child(2), .items-table td:nth-child(2) { text-align:center; width:80px; }
+    .items-table th:nth-child(3), .items-table td:nth-child(3) { text-align:right; width:120px; }
+    .items-table th:nth-child(4), .items-table td:nth-child(4) { text-align:right; width:120px; }
+    .items-table tfoot td { padding:6px 8px; border-bottom:none; }
+    .items-table tfoot td:last-child { text-align:right; }
+    .items-table tfoot tr.total td { font-weight:700; font-size:14px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""https://paramascotasec.com/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260129-648471</div>
+      <div>Fecha: 29/01/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Edwin Vasquez</div>
+      <div>edwin.eduardo.vm@gmail.com</div>
+      <div>0962782126</div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>cash</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Edwin Vasquez</div><div>Identificación: Cédula 1759625104</div><div>La Candelaria Caracas</div><div>Caracas, 1010</div><div>Ecuador</div><div>0962782126</div><div>edwin.eduardo.vm@gmail.com</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>No aplica</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table class=""items-table"">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Champú Natural para Perro</td><td>1</td><td>$13,00</td><td>$13,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan=""3"">Subtotal sin IVA</td><td>$13,00</td></tr>
+        <tr><td colspan=""3"">IVA (15,00%)</td><td>$1,95</td></tr>
+        <tr><td colspan=""3"">Envío</td><td>$5,00</td></tr>
+        <tr class=""total""><td colspan=""3"">Total</td><td>$19,95</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</body>
+</html>",2026-01-29 15:17:44.997,"{""items"": [{""price"": 14.95, ""total"": 14.95, ""quantity"": 1, ""product_id"": ""cmj8w10390010prxyxmycdh4c"", ""product_name"": ""Champú Natural para Perro"", ""product_image"": ""/images/product/19.jpg""}], ""company"": """", ""customer"": {""name"": ""Edwin Vasquez"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126""}, ""order_notes"": ""asdasd asasdasd"", ""payment_method"": ""cash"", ""billing_address"": {""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": ""OrAcleSETECPRO09"", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": ""Cédula"", ""documentNumber"": ""1759625104"", ""confirmPassword"": ""OrAcleSETECPRO09""}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}",,14.95,13.00,15.00,1.95,5.00,5.00,0.00,0.00,asdasd asasdasd,paramascotasec,,0.00,
+ORD-17697191456266,c64a137ebd7456ac9a17,canceled,25.70,2026-01-29 15:39:05.929,"{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": ""OrAcleSETECPRO09"", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": ""Cédula"", ""documentNumber"": ""1759625104"", ""confirmPassword"": ""OrAcleSETECPRO09""}","{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": ""OrAcleSETECPRO09"", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": ""Cédula"", ""documentNumber"": ""1759625104"", ""confirmPassword"": ""OrAcleSETECPRO09""}",cash,FAC-20260129-456266,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260129-456266</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .items-table { table-layout: fixed; }
+    .items-table th:nth-child(2), .items-table td:nth-child(2) { text-align:center; width:80px; }
+    .items-table th:nth-child(3), .items-table td:nth-child(3) { text-align:right; width:120px; }
+    .items-table th:nth-child(4), .items-table td:nth-child(4) { text-align:right; width:120px; }
+    .items-table tfoot td { padding:6px 8px; border-bottom:none; }
+    .items-table tfoot td:last-child { text-align:right; }
+    .items-table tfoot tr.total td { font-weight:700; font-size:14px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""https://paramascotasec.com/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260129-456266</div>
+      <div>Fecha: 29/01/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Edwin Vasquez</div>
+      <div>edwin.eduardo.vm@gmail.com</div>
+      <div>0962782126</div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>cash</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Edwin Vasquez</div><div>Identificación: Cédula 1759625104</div><div>La Candelaria Caracas</div><div>Caracas, 1010</div><div>Ecuador</div><div>0962782126</div><div>edwin.eduardo.vm@gmail.com</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>No aplica</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table class=""items-table"">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Collar de Cuero para Perro</td><td>1</td><td>$18,00</td><td>$18,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan=""3"">Subtotal sin IVA</td><td>$18,00</td></tr>
+        <tr><td colspan=""3"">IVA (15,00%)</td><td>$2,70</td></tr>
+        <tr><td colspan=""3"">Envío</td><td>$5,00</td></tr>
+        <tr class=""total""><td colspan=""3"">Total</td><td>$25,70</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</body>
+</html>",2026-01-29 15:39:05.929,"{""items"": [{""price"": 20.7, ""total"": 20.7, ""quantity"": 1, ""product_id"": ""cmj8w102v000qprxyxfmm8jxs"", ""product_name"": ""Collar de Cuero para Perro"", ""product_image"": ""/images/product/14.jpg""}], ""company"": """", ""customer"": {""name"": ""Edwin Vasquez"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126""}, ""order_notes"": ""asdasdaa"", ""payment_method"": ""cash"", ""billing_address"": {""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": ""OrAcleSETECPRO09"", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": ""Cédula"", ""documentNumber"": ""1759625104"", ""confirmPassword"": ""OrAcleSETECPRO09""}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}",,20.70,18.00,15.00,2.70,5.00,5.00,0.00,0.00,asdasdaa,paramascotasec,,0.00,
+ORD-17702484109724,c64a137ebd7456ac9a17,canceled,19.95,2026-02-04 18:40:10.732,"{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": ""OrAcleSETECPRO09$"", ""firstName"": ""Edwin"", ""businessName"": ""OrAcleSETECPRO09$"", ""documentType"": ""Cédula"", ""documentNumber"": ""1759625104"", ""confirmPassword"": ""OrAcleSETECPRO09$""}","{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": ""OrAcleSETECPRO09$"", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": ""OrAcleSETECPRO09$"", ""firstName"": ""Edwin"", ""businessName"": ""OrAcleSETECPRO09$"", ""documentType"": ""Cédula"", ""documentNumber"": ""1759625104"", ""confirmPassword"": ""OrAcleSETECPRO09$""}",cash,FAC-20260204-109724,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260204-109724</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .items-table { table-layout: fixed; }
+    .items-table th:nth-child(2), .items-table td:nth-child(2) { text-align:center; width:80px; }
+    .items-table th:nth-child(3), .items-table td:nth-child(3) { text-align:right; width:120px; }
+    .items-table th:nth-child(4), .items-table td:nth-child(4) { text-align:right; width:120px; }
+    .items-table tfoot td { padding:6px 8px; border-bottom:none; }
+    .items-table tfoot td:last-child { text-align:right; }
+    .items-table tfoot tr.total td { font-weight:700; font-size:14px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""http://localhost:8080/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260204-109724</div>
+      <div>Fecha: 04/02/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Edwin Vasquez</div>
+      <div>edwin.eduardo.vm@gmail.com</div>
+      <div>0962782126</div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>cash</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Edwin Vasquez</div><div>OrAcleSETECPRO09$</div><div>Identificación: Cédula 1759625104</div><div>La Candelaria Caracas</div><div>Caracas, 1010</div><div>Ecuador</div><div>0962782126</div><div>edwin.eduardo.vm@gmail.com</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>OrAcleSETECPRO09$</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table class=""items-table"">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Champú Natural para Perro</td><td>1</td><td>$13,00</td><td>$13,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan=""3"">Subtotal sin IVA</td><td>$13,00</td></tr>
+        <tr><td colspan=""3"">IVA (15,00%)</td><td>$1,95</td></tr>
+        <tr><td colspan=""3"">Envío</td><td>$5,00</td></tr>
+        <tr class=""total""><td colspan=""3"">Total</td><td>$19,95</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</body>
+</html>",2026-02-04 18:40:10.732,"{""items"": [{""price"": 14.95, ""total"": 14.95, ""quantity"": 1, ""product_id"": ""cmj8w10390010prxyxmycdh4c"", ""product_name"": ""Champú Natural para Perro"", ""product_image"": ""/images/product/19.jpg""}], ""company"": ""OrAcleSETECPRO09$"", ""customer"": {""name"": ""Edwin Vasquez"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126""}, ""order_notes"": null, ""payment_method"": ""cash"", ""billing_address"": {""zip"": ""1010"", ""city"": ""Caracas"", ""email"": ""edwin.eduardo.vm@gmail.com"", ""phone"": ""0962782126"", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": ""OrAcleSETECPRO09$"", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": ""OrAcleSETECPRO09$"", ""firstName"": ""Edwin"", ""businessName"": ""OrAcleSETECPRO09$"", ""documentType"": ""Cédula"", ""documentNumber"": ""1759625104"", ""confirmPassword"": ""OrAcleSETECPRO09$""}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}",,14.95,13.00,15.00,1.95,5.00,5.00,0.00,0.00,,paramascotasec,,0.00,
+ORD-17702487543543,c64a137ebd7456ac9a17,canceled,139.15,2026-02-04 18:45:54.626,"{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": """", ""phone"": """", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": """", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": """", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": """", ""documentNumber"": """", ""confirmPassword"": """"}","{""zip"": ""1010"", ""city"": ""Caracas"", ""email"": """", ""phone"": """", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": ""OrAcleSETECPRO09$"", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": """", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": """", ""documentNumber"": """", ""confirmPassword"": """"}",cash,FAC-20260204-543543,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260204-543543</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .items-table { table-layout: fixed; }
+    .items-table th:nth-child(2), .items-table td:nth-child(2) { text-align:center; width:80px; }
+    .items-table th:nth-child(3), .items-table td:nth-child(3) { text-align:right; width:120px; }
+    .items-table th:nth-child(4), .items-table td:nth-child(4) { text-align:right; width:120px; }
+    .items-table tfoot td { padding:6px 8px; border-bottom:none; }
+    .items-table tfoot td:last-child { text-align:right; }
+    .items-table tfoot tr.total td { font-weight:700; font-size:14px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""http://localhost:8080/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260204-543543</div>
+      <div>Fecha: 04/02/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Edwin Vasquez</div>
+      <div></div>
+      <div></div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>cash</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Edwin Vasquez</div><div>OrAcleSETECPRO09$</div><div>La Candelaria Caracas</div><div>Caracas, 1010</div><div>Ecuador</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>OrAcleSETECPRO09$</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table class=""items-table"">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Cepillo de Aseo para Perro</td><td>11</td><td>$11,00</td><td>$121,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan=""3"">Subtotal sin IVA</td><td>$121,00</td></tr>
+        <tr><td colspan=""3"">IVA (15,00%)</td><td>$18,15</td></tr>
+        <tr><td colspan=""3"">Envío</td><td>$0,00</td></tr>
+        <tr class=""total""><td colspan=""3"">Total</td><td>$139,15</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</body>
+</html>",2026-02-04 18:45:54.626,"{""items"": [{""price"": 12.65, ""total"": 139.15, ""quantity"": 11, ""product_id"": ""cmj8w1036000yprxy2fyzfqor"", ""product_name"": ""Cepillo de Aseo para Perro"", ""product_image"": ""/images/product/18.jpg""}], ""company"": ""OrAcleSETECPRO09$"", ""customer"": {""name"": ""Edwin Vasquez"", ""email"": """", ""phone"": """"}, ""order_notes"": null, ""payment_method"": ""cash"", ""billing_address"": {""zip"": ""1010"", ""city"": ""Caracas"", ""email"": """", ""phone"": """", ""state"": """", ""street"": ""La Candelaria Caracas"", ""company"": ""OrAcleSETECPRO09$"", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": """", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": """", ""documentNumber"": """", ""confirmPassword"": """"}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}",,139.15,121.00,15.00,18.15,0.00,0.00,0.00,0.00,,paramascotasec,,0.00,
+ORD-17704793938016,c64a137ebd7456ac9a17,delivered,13.80,2026-02-07 10:49:53.45,"{""zip"": """", ""city"": """", ""email"": """", ""phone"": """", ""state"": """", ""street"": """", ""company"": """", ""country"": """", ""lastName"": ""Vasquez"", ""password"": """", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": """", ""documentNumber"": """", ""confirmPassword"": """"}","{""zip"": """", ""city"": """", ""email"": """", ""phone"": """", ""state"": """", ""street"": """", ""company"": ""OrAcleSETECPRO09$"", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": """", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": """", ""documentNumber"": """", ""confirmPassword"": """"}",cash,FAC-20260207-938016,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260207-938016</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .items-table { table-layout: fixed; }
+    .items-table th:nth-child(2), .items-table td:nth-child(2) { text-align:center; width:80px; }
+    .items-table th:nth-child(3), .items-table td:nth-child(3) { text-align:right; width:120px; }
+    .items-table th:nth-child(4), .items-table td:nth-child(4) { text-align:right; width:120px; }
+    .items-table tfoot td { padding:6px 8px; border-bottom:none; }
+    .items-table tfoot td:last-child { text-align:right; }
+    .items-table tfoot tr.total td { font-weight:700; font-size:14px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""http://localhost:8080/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260207-938016</div>
+      <div>Fecha: 07/02/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Edwin Vasquez</div>
+      <div></div>
+      <div></div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>cash</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Edwin Vasquez</div><div>OrAcleSETECPRO09$</div><div>Ecuador</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>OrAcleSETECPRO09$</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table class=""items-table"">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Set Comederos de Cerámica</td><td>1</td><td>$12,00</td><td>$12,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan=""3"">Subtotal sin IVA</td><td>$12,00</td></tr>
+        <tr><td colspan=""3"">IVA (15,00%)</td><td>$1,80</td></tr>
+        <tr><td colspan=""3"">Envío</td><td>$0,00</td></tr>
+        <tr class=""total""><td colspan=""3"">Total</td><td>$13,80</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</body>
+</html>",2026-02-07 10:49:53.45,"{""items"": [{""price"": 13.8, ""total"": 13.8, ""quantity"": 1, ""product_id"": ""cmj8w1033000wprxy4w55k3ve"", ""product_name"": ""Set Comederos de Cerámica"", ""product_image"": ""/images/product/17.jpg""}], ""company"": ""OrAcleSETECPRO09$"", ""customer"": {""name"": ""Edwin Vasquez"", ""email"": """", ""phone"": """"}, ""order_notes"": null, ""payment_method"": ""cash"", ""billing_address"": {""zip"": """", ""city"": """", ""email"": """", ""phone"": """", ""state"": """", ""street"": """", ""company"": ""OrAcleSETECPRO09$"", ""country"": ""Ecuador"", ""lastName"": ""Vasquez"", ""password"": """", ""firstName"": ""Edwin"", ""businessName"": """", ""documentType"": """", ""documentNumber"": """", ""confirmPassword"": """"}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}",,13.80,12.00,15.00,1.80,0.00,0.00,0.00,0.00,,paramascotasec,,0.00,
+ORD-20260302195545-75B8F1E4,user_cliente,canceled,21.56,2026-03-02 14:55:45.271,"{""zip"": ""170101"", ""city"": ""Quito"", ""email"": ""ana@example.com"", ""phone"": ""0999999999"", ""state"": ""Pichincha"", ""street"": ""Av Siempre Viva"", ""country"": ""EC"", ""lastName"": ""Perez"", ""firstName"": ""Ana""}","{""zip"": ""170101"", ""city"": ""Quito"", ""email"": ""ana@example.com"", ""phone"": ""0999999999"", ""state"": ""Pichincha"", ""street"": ""Av Siempre Viva"", ""country"": ""EC"", ""lastName"": ""Perez"", ""firstName"": ""Ana""}",cash,FAC-20260302-B8F1E4,"<!doctype html>
+<html lang=""es"">
+<head>
+  <!-- invoice_v2_tax_net -->
+  <meta charset=""utf-8"" />
+  <title>Factura FAC-20260302-B8F1E4</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+    .brand { display:flex; align-items:center; }
+    .brand img { height:36px; }
+    .meta { text-align:right; font-size:12px; color:#4b5563; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px; }
+    .box { border:1px solid #e5e7eb; padding:12px; border-radius:8px; }
+    table { width:100%; border-collapse: collapse; margin-top:12px; font-size:12px; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px; text-align:left; }
+    th { background:#f9fafb; text-transform: uppercase; font-size:11px; }
+    .items-table { table-layout: fixed; }
+    .items-table th:nth-child(2), .items-table td:nth-child(2) { text-align:center; width:80px; }
+    .items-table th:nth-child(3), .items-table td:nth-child(3) { text-align:right; width:120px; }
+    .items-table th:nth-child(4), .items-table td:nth-child(4) { text-align:right; width:120px; }
+    .items-table tfoot td { padding:6px 8px; border-bottom:none; }
+    .items-table tfoot td:last-child { text-align:right; }
+    .items-table tfoot tr.total td { font-weight:700; font-size:14px; }
+    .total { font-weight:700; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class=""header"">
+    <div class=""brand"">
+      <img src=""https://paramascotasec.com/images/brand/LogoVerde150.png"" alt=""Para Mascotas EC"" />
+    </div>
+    <div class=""meta"">
+      <div>Factura: FAC-20260302-B8F1E4</div>
+      <div>Fecha: 02/03/2026</div>
+    </div>
+  </div>
+  <div class=""grid"">
+    <div class=""box"">
+      <strong>Cliente</strong>
+      <div>Ana Perez</div>
+      <div>ana@example.com</div>
+      <div>0999999999</div>
+    </div>
+    <div class=""box"">
+      <strong>Método de pago</strong>
+      <div>cash</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de envío</strong>
+      <div>Local Para Mascotas EC</div><div>Retiro en tienda</div>
+    </div>
+    <div class=""box"">
+      <strong>Dirección de facturación</strong>
+      <div>Ana Perez</div><div>Av Siempre Viva</div><div>Quito, Pichincha, 170101</div><div>EC</div><div>0999999999</div><div>ana@example.com</div>
+    </div>
+    <div class=""box"">
+      <strong>Empresa</strong>
+      <div>No aplica</div>
+    </div>
+  </div>
+  <div class=""section"">
+    <strong>Artículos</strong>
+    <table class=""items-table"">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Precio</th>
+          <th>Sub total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Pelota para Perro 3</td><td>2</td><td>$8,00</td><td>$16,00</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan=""3"">Subtotal sin IVA</td><td>$14,40</td></tr>
+        <tr><td colspan=""3"">IVA (15,00%)</td><td>$2,16</td></tr>
+        <tr><td colspan=""3"">Descuento (MASCO10)</td><td>-$1,84</td></tr>
+        <tr><td colspan=""3"">Envío</td><td>$5,00</td></tr>
+        <tr class=""total""><td colspan=""3"">Total</td><td>$21,56</td></tr>
+      </tfoot>
+    </table>
+  </div>
+</body>
+</html>",2026-03-02 14:55:45.271,"{""items"": [{""price"": 9.2, ""total"": 18.4, ""quantity"": 2, ""product_id"": ""cmj8w10070000prxy5mj60yfy"", ""product_name"": ""Pelota para Perro 3"", ""product_image"": ""/images/product/1.jpg""}], ""company"": null, ""customer"": {""name"": ""Ana Perez"", ""email"": ""ana@example.com"", ""phone"": ""0999999999""}, ""order_notes"": null, ""payment_method"": ""cash"", ""billing_address"": {""zip"": ""170101"", ""city"": ""Quito"", ""email"": ""ana@example.com"", ""phone"": ""0999999999"", ""state"": ""Pichincha"", ""street"": ""Av Siempre Viva"", ""country"": ""EC"", ""lastName"": ""Perez"", ""firstName"": ""Ana""}, ""shipping_address"": {""line1"": ""Local Para Mascotas EC"", ""line2"": ""Retiro en tienda""}}",,16.56,14.40,15.00,2.16,5.00,5.00,0.00,0.00,,paramascotasec,MASCO10,1.84,"[{""id"": ""dc_69a5eb0a61d3b"", ""code"": ""MASCO10"", ""name"": ""Promo de prueba"", ""type"": ""percent"", ""value"": 10, ""amount"": 1.84, ""ends_at"": null, ""max_uses"": 50, ""starts_at"": null, ""description"": ""10% en subtotal"", ""max_discount"": null, ""min_subtotal"": 10, ""used_count_before"": 0}]"

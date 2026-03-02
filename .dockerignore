@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+vendor/
+node_modules/
+
+db/backup.sql
+logs/
+*.log

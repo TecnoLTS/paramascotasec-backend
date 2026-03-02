@@ -9,12 +9,50 @@ use Firebase\JWT\Key;
 class Auth {
     private static ?array $payload = null;
 
+    private static function getJwtSecretOrFail(): string {
+        $secretKey = (string)($_ENV['JWT_SECRET'] ?? '');
+        if ($secretKey === '') {
+            Response::error('Configuración JWT inválida', 500, 'AUTH_CONFIG_INVALID');
+            exit;
+        }
+        if ($secretKey === 'default_secret') {
+            error_log('[SECURITY] JWT_SECRET is using insecure default value.');
+        }
+        return $secretKey;
+    }
+
     public static function requireUser(): array {
         $payload = self::decodeFromRequest(true);
         if (!$payload) {
             Response::error('No autorizado', 401, 'AUTH_REQUIRED');
             exit;
         }
+        return $payload;
+    }
+
+    public static function requireAdmin(): array {
+        $payload = self::requireUser();
+        $sub = $payload['sub'] ?? null;
+        $role = strtolower((string)($payload['role'] ?? 'customer'));
+
+        if ($sub === 'service') {
+            if (in_array($role, ['admin', 'service'], true)) {
+                return $payload;
+            }
+            Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
+            exit;
+        }
+
+        $repo = new UserRepository();
+        $state = $repo->getAuthState($sub ?? '');
+        $dbRole = strtolower((string)($state['role'] ?? 'customer'));
+        if ($dbRole !== 'admin') {
+            Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
+            exit;
+        }
+
+        $payload['role'] = $dbRole;
+        self::$payload = $payload;
         return $payload;
     }
 
@@ -31,7 +69,7 @@ class Auth {
             return $required ? null : null;
         }
         $jwt = $matches[1];
-        $secretKey = $_ENV['JWT_SECRET'] ?? 'default_secret';
+        $secretKey = self::getJwtSecretOrFail();
         try {
             $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
         } catch (\Exception $e) {
@@ -52,7 +90,7 @@ class Auth {
             exit;
         }
         $jwt = $matches[1];
-        $secretKey = $_ENV['JWT_SECRET'] ?? 'default_secret';
+        $secretKey = self::getJwtSecretOrFail();
         try {
             $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
         } catch (\Exception $e) {
@@ -78,16 +116,38 @@ class Auth {
         }
     }
 
-    private static function assertActiveToken(array $payload): void {
+    private static function assertActiveToken(array &$payload): void {
         $sub = $payload['sub'] ?? null;
         $jti = $payload['jti'] ?? null;
-        if ($sub && $sub !== 'service') {
-            $repo = new UserRepository();
-            $activeTokenId = $repo->getActiveTokenId($sub);
-            if (!$activeTokenId || !$jti || $activeTokenId !== $jti) {
-                Response::error('Token inválido', 401, 'AUTH_TOKEN_REVOKED');
-                exit;
-            }
+        if (!$sub) {
+            Response::error('Token inválido', 401, 'AUTH_TOKEN_INVALID');
+            exit;
         }
+
+        if ($sub === 'service') {
+            return;
+        }
+
+        $repo = new UserRepository();
+        $state = $repo->getAuthState($sub);
+        if (!$state) {
+            Response::error('Token inválido', 401, 'AUTH_TOKEN_REVOKED');
+            exit;
+        }
+
+        $activeTokenId = $state['active_token_id'] ?? null;
+        if (!$activeTokenId || !$jti || $activeTokenId !== $jti) {
+            Response::error('Token inválido', 401, 'AUTH_TOKEN_REVOKED');
+            exit;
+        }
+
+        $tokenRole = strtolower((string)($payload['role'] ?? 'customer'));
+        $dbRole = strtolower((string)($state['role'] ?? 'customer'));
+        if ($tokenRole !== $dbRole) {
+            Response::error('Token inválido', 401, 'AUTH_TOKEN_REVOKED');
+            exit;
+        }
+
+        $payload['role'] = $dbRole;
     }
 }

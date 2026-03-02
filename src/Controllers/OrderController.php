@@ -3,12 +3,22 @@
 namespace App\Controllers;
 
 use App\Repositories\OrderRepository;
+use App\Repositories\SettingsRepository;
 use App\Core\Response;
 use App\Core\Auth;
 use App\Core\TenantContext;
 
 class OrderController {
     private $orderRepository;
+    private $forbiddenDiscountPayloadKeys = [
+        'discount',
+        'discounts',
+        'coupon',
+        'promo',
+        'promo_code',
+        'promotion',
+        'promotions'
+    ];
 
     public function __construct() {
         $this->orderRepository = new OrderRepository();
@@ -85,35 +95,26 @@ class OrderController {
             return;
         }
 
+        $allowedStatuses = ['pending', 'processing', 'shipped', 'delivered', 'canceled'];
+        $newStatus = strtolower(trim((string)$data['status']));
+        if (!in_array($newStatus, $allowedStatuses, true)) {
+            Response::error('Estado inválido', 400, 'ORDER_STATUS_INVALID');
+            return;
+        }
+
         try {
             $order = $this->orderRepository->getById($id);
             if (!$order) {
                 Response::error('Pedido no encontrado', 404, 'ORDER_NOT_FOUND');
                 return;
             }
-            // Only owner or admin (fallback to email match if user_id is missing)
             $isAdmin = (($user['role'] ?? 'customer') === 'admin');
-            $isOwner = (!empty($order['user_id']) && $order['user_id'] === $user['sub']);
-            $emailMatch = false;
-            if (!$isOwner && !$isAdmin) {
-                $shipping = $this->decodeAddress($order['shipping_address'] ?? null);
-                $billing = $this->decodeAddress($order['billing_address'] ?? null);
-                $orderEmail = $shipping['email'] ?? $billing['email'] ?? null;
-                if ($orderEmail && isset($user['email']) && $orderEmail === $user['email']) {
-                    $emailMatch = true;
-                }
+            if (!$isAdmin) {
+                Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
+                return;
             }
 
-            // If we can't prove ownership but user is authenticated, allow for now
-            if (!($isAdmin || $isOwner || $emailMatch)) {
-                $emailAllow = !empty($user['email']);
-                if (!$emailAllow) {
-                    Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
-                    return;
-                }
-            }
-
-            $updated = $this->orderRepository->updateStatus($id, $data['status']);
+            $updated = $this->orderRepository->updateStatus($id, $newStatus);
             Response::json($updated);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 500, 'ORDER_STATUS_UPDATE_FAILED');
@@ -162,7 +163,8 @@ class OrderController {
                         $subtotalGross += (float)($item['price'] ?? 0) * (int)($item['quantity'] ?? 1);
                     }
                 }
-                $expectedShipping = (float)($order['total'] ?? $subtotalGross) - $subtotalGross;
+                $discountTotal = max(0, (float)($order['discount_total'] ?? 0));
+                $expectedShipping = (float)($order['total'] ?? $subtotalGross) - max(0, ($subtotalGross - $discountTotal));
                 if ($expectedShipping < 0) {
                     $expectedShipping = 0;
                 }
@@ -201,13 +203,118 @@ class OrderController {
         return is_array($decoded) ? $decoded : [];
     }
 
+    private function hasMeaningfulDiscountValue($value) {
+        if ($value === null) {
+            return false;
+        }
+        if (is_string($value)) {
+            return trim($value) !== '';
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return abs((float)$value) > 0;
+        }
+        if (is_array($value)) {
+            return count($value) > 0;
+        }
+        return true;
+    }
+
+    private function rejectUnexpectedDiscountFields(array $data) {
+        $unexpected = [];
+        foreach ($this->forbiddenDiscountPayloadKeys as $key) {
+            if (!array_key_exists($key, $data)) {
+                continue;
+            }
+            if ($this->hasMeaningfulDiscountValue($data[$key])) {
+                $unexpected[] = $key;
+            }
+        }
+        if (count($unexpected) === 0) {
+            return false;
+        }
+
+        Response::error(
+            'Descuento rechazado. Solo se aceptan descuentos registrados y trazables. Campos no permitidos: ' . implode(', ', $unexpected),
+            400,
+            'ORDER_DISCOUNT_UNREGISTERED'
+        );
+        return true;
+    }
+
+    private function normalizeDiscountCodeValue($value) {
+        if ($value === null) return null;
+        $normalized = strtoupper(trim((string)$value));
+        if ($normalized === '') return null;
+        return preg_replace('/\s+/', '', $normalized);
+    }
+
+    private function extractDiscountCode(array $data, ?bool &$hasError = null) {
+        $hasError = false;
+        $couponCode = $this->normalizeDiscountCodeValue($data['coupon_code'] ?? null);
+        $discountCode = $this->normalizeDiscountCodeValue($data['discount_code'] ?? null);
+
+        if ($couponCode && $discountCode && $couponCode !== $discountCode) {
+            Response::error(
+                'Se enviaron dos códigos de descuento distintos. Usa solo uno.',
+                400,
+                'ORDER_DISCOUNT_CODE_CONFLICT'
+            );
+            $hasError = true;
+            return null;
+        }
+
+        return $couponCode ?: $discountCode;
+    }
+
+    private function isStoreSalesEnabled() {
+        $settings = new SettingsRepository();
+        $enabledRaw = $settings->get('store_sales_enabled');
+        $messageRaw = $settings->get('store_sales_message');
+        $salesEnabled = $enabledRaw === null ? true : in_array(strtolower(trim((string)$enabledRaw)), ['1', 'true', 'yes', 'y', 'on'], true);
+        $message = trim((string)($messageRaw ?? 'Tienda temporalmente en mantenimiento. Intenta más tarde.'));
+        if ($message === '') {
+            $message = 'Tienda temporalmente en mantenimiento. Intenta más tarde.';
+        }
+        return ['enabled' => $salesEnabled, 'message' => $message];
+    }
+
+    private function enforceSalesEnabled() {
+        $status = $this->isStoreSalesEnabled();
+        if ($status['enabled']) {
+            return true;
+        }
+        Response::error($status['message'], 503, 'STORE_SALES_DISABLED');
+        return false;
+    }
+
     public function quote() {
         try {
-            $data = json_decode(file_get_contents('php://input'), true);
+            $data = json_decode(file_get_contents('php://input'), true) ?: [];
+            if ($this->rejectUnexpectedDiscountFields($data)) {
+                return;
+            }
+            if (!$this->enforceSalesEnabled()) {
+                return;
+            }
+            $hasDiscountCodeError = false;
+            $discountCode = $this->extractDiscountCode($data, $hasDiscountCodeError);
+            if ($hasDiscountCodeError) {
+                return;
+            }
             if (!isset($data['items'])) {
                 throw new \Exception("Items required");
             }
-            $quote = $this->orderRepository->calculateQuote($data['items'], $data['delivery_method'] ?? 'delivery');
+            $quote = $this->orderRepository->calculateQuote(
+                $data['items'],
+                $data['delivery_method'] ?? 'delivery',
+                $discountCode,
+                'quote',
+                null,
+                null
+            );
             Response::json($quote);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 400, 'ORDER_QUOTE_FAILED');
@@ -217,17 +324,27 @@ class OrderController {
     public function store() {
         $user = $this->authenticate();
         try {
-            $data = json_decode(file_get_contents('php://input'), true);
+            $data = json_decode(file_get_contents('php://input'), true) ?: [];
+            if ($this->rejectUnexpectedDiscountFields($data)) {
+                return;
+            }
+            if (!$this->enforceSalesEnabled()) {
+                return;
+            }
+            $hasDiscountCodeError = false;
+            $discountCode = $this->extractDiscountCode($data, $hasDiscountCodeError);
+            if ($hasDiscountCodeError) {
+                return;
+            }
+            $data['coupon_code'] = $discountCode;
             if (($user['role'] ?? 'customer') === 'guest' || empty($user['sub'])) {
                 Response::error('Debes iniciar sesión para comprar', 403, 'GUEST_PURCHASE_DISABLED');
                 return;
             }
             $data['user_id'] = $user['sub'];
-            
-            // Generate basic ID if not provided
-            if (!isset($data['id'])) {
-                $data['id'] = 'ORD-' . time() . mt_rand(1000, 9999);
-            }
+
+            // Always generate a server-side order id to avoid collisions/tampering.
+            $data['id'] = 'ORD-' . date('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(4)));
 
             $baseUrl = TenantContext::appUrl() ?? ($_ENV['APP_URL'] ?? null);
             if (!$baseUrl) {

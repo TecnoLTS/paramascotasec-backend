@@ -1,0 +1,21 @@
+key,value,tenant_id
+paramascotasec:pricing_calc_include_vat,1,paramascotasec
+paramascotasec:pricing_calc_rounding,0.05,paramascotasec
+paramascotasec:pricing_calc_shipping_buffer,0,paramascotasec
+paramascotasec:pricing_calc_strategy,cost_plus,paramascotasec
+paramascotasec:pricing_margin_base,30,paramascotasec
+paramascotasec:pricing_margin_min,15,paramascotasec
+paramascotasec:pricing_margin_promo_buffer,5,paramascotasec
+paramascotasec:pricing_margin_target,35,paramascotasec
+paramascotasec:pricing_rule_bulk_discount,5,paramascotasec
+paramascotasec:pricing_rule_bulk_threshold,10,paramascotasec
+paramascotasec:pricing_rule_clearance_discount,15,paramascotasec
+paramascotasec:pricing_rule_clearance_threshold,25,paramascotasec
+paramascotasec:shipping_delivery,5,paramascotasec
+paramascotasec:shipping_pickup,0,paramascotasec
+paramascotasec:shipping_tax_rate,0,paramascotasec
+paramascotasec:store_sales_enabled,0,paramascotasec
+paramascotasec:store_sales_message,Tienda temporalmente en mantenimiento. Intenta más tarde.,paramascotasec
+paramascotasec:store_sales_updated_at,2026-03-02T20:24:55+00:00,paramascotasec
+paramascotasec:store_sales_updated_by,user_admin,paramascotasec
+paramascotasec:vat_rate,15,paramascotasec

@@ -18,6 +18,7 @@ class UserController {
     }
 
     public function index() {
+        Auth::requireAdmin();
         try {
             $users = $this->userRepository->getAll();
             Response::json($users);
@@ -118,6 +119,48 @@ class UserController {
             Response::json(['name' => $savedName, 'profile' => $profile]);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 500, 'USER_PROFILE_UPDATE_FAILED');
+        }
+    }
+
+    public function updatePassword() {
+        $user = $this->authenticate();
+        $data = json_decode(file_get_contents('php://input'), true);
+
+        $currentPassword = trim((string)($data['currentPassword'] ?? ''));
+        $newPassword = trim((string)($data['newPassword'] ?? ''));
+
+        if ($currentPassword === '' || $newPassword === '') {
+            Response::error('La contraseña actual y la nueva son obligatorias', 400, 'USER_PASSWORD_REQUIRED');
+            return;
+        }
+
+        if (mb_strlen($newPassword) < 12) {
+            Response::error('La nueva contraseña debe tener al menos 12 caracteres', 400, 'USER_PASSWORD_WEAK');
+            return;
+        }
+
+        if ($currentPassword === $newPassword) {
+            Response::error('La nueva contraseña debe ser diferente a la actual', 400, 'USER_PASSWORD_SAME');
+            return;
+        }
+
+        try {
+            $passwordHash = $this->userRepository->getPasswordHash($user['sub']);
+            if (!$passwordHash || !password_verify($currentPassword, $passwordHash)) {
+                Response::error('La contraseña actual es incorrecta', 400, 'USER_PASSWORD_INVALID_CURRENT');
+                return;
+            }
+
+            $newTokenId = bin2hex(random_bytes(16));
+            $this->userRepository->updatePassword(
+                $user['sub'],
+                password_hash($newPassword, PASSWORD_DEFAULT),
+                $newTokenId
+            );
+
+            Response::json(['passwordUpdated' => true], 200, null, 'Contraseña actualizada correctamente.');
+        } catch (\Exception $e) {
+            Response::error($e->getMessage(), 500, 'USER_PASSWORD_UPDATE_FAILED');
         }
     }
 }

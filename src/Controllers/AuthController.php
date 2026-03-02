@@ -15,6 +15,27 @@ class AuthController {
         $this->userRepository = new UserRepository();
     }
 
+    private function isDevelopment(): bool {
+        $env = strtolower((string)($_ENV['APP_ENV'] ?? 'production'));
+        if ($env === 'development' || $env === 'dev' || $env === 'local') {
+            return true;
+        }
+        $debug = strtolower((string)($_ENV['APP_DEBUG'] ?? 'false'));
+        return in_array($debug, ['1', 'true', 'yes', 'on'], true);
+    }
+
+    private function getJwtSecretOrFail(): ?string {
+        $secretKey = (string)($_ENV['JWT_SECRET'] ?? '');
+        if ($secretKey === '') {
+            Response::error('Configuración JWT inválida', 500, 'AUTH_CONFIG_INVALID');
+            return null;
+        }
+        if ($secretKey === 'default_secret') {
+            error_log('[SECURITY] JWT_SECRET is using insecure default value.');
+        }
+        return $secretKey;
+    }
+
     public function login() {
         $data = json_decode(file_get_contents('php://input'), true);
 
@@ -35,7 +56,10 @@ class AuthController {
             return;
         }
 
-        $secretKey = $_ENV['JWT_SECRET'] ?? 'default_secret';
+        $secretKey = $this->getJwtSecretOrFail();
+        if (!$secretKey) {
+            return;
+        }
         $tokenId = bin2hex(random_bytes(16));
         $payload = [
             'iat' => time(),
@@ -99,18 +123,22 @@ class AuthController {
             if (!$skipVerificationEmail) {
                 if (!$this->sendVerificationEmail($data['email'], $data['name'], $result['token'])) {
                     $this->userRepository->markEmailVerifiedById($result['id']);
-                    Response::json([
+                    $payload = [
                         'id' => $result['id'],
-                        'debug_token' => $result['token'],
                         'email_verified' => true
-                    ], 201, null, 'Cuenta creada. No se pudo enviar el correo de verificación, pero tu cuenta quedó activa. Inicia sesión para continuar.');
+                    ];
+                    if ($this->isDevelopment()) {
+                        $payload['debug_token'] = $result['token'];
+                    }
+                    Response::json($payload, 201, null, 'Cuenta creada. No se pudo enviar el correo de verificación, pero tu cuenta quedó activa. Inicia sesión para continuar.');
                     return;
                 }
             }
-            Response::json([
-                'id' => $result['id'],
-                'debug_token' => $result['token'] // Solo para desarrollo
-            ], 201, null, 'Usuario registrado exitosamente. Por favor, revisa tu correo para confirmar tu cuenta.');
+            $payload = ['id' => $result['id']];
+            if ($this->isDevelopment()) {
+                $payload['debug_token'] = $result['token'];
+            }
+            Response::json($payload, 201, null, 'Usuario registrado exitosamente. Por favor, revisa tu correo para confirmar tu cuenta.');
         } catch (\Exception $e) {
             Response::error('No se pudo registrar el usuario: ' . $e->getMessage(), 500, 'AUTH_REGISTER_FAILED');
         }
@@ -119,7 +147,10 @@ class AuthController {
     public function guestToken() {
         Response::error('Compra como invitado deshabilitada', 403, 'GUEST_DISABLED');
         return;
-        $secretKey = $_ENV['JWT_SECRET'] ?? 'default_secret';
+        $secretKey = $this->getJwtSecretOrFail();
+        if (!$secretKey) {
+            return;
+        }
         $payload = [
             'iat' => time(),
             'exp' => time() + (60 * 15), // 15 minutes
@@ -164,7 +195,8 @@ class AuthController {
 
         $user = $this->userRepository->getByEmail($email);
         if (!$user) {
-            Response::error('Usuario no encontrado', 404, 'AUTH_OTP_USER_NOT_FOUND');
+            // Avoid user enumeration.
+            Response::json(['sent' => true], 200, null, 'Si el correo existe, se enviará un código de verificación.');
             return;
         }
 

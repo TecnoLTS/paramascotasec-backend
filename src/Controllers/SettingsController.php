@@ -109,6 +109,70 @@ class SettingsController {
         ]);
     }
 
+    public function getStoreStatus() {
+        $settings = new SettingsRepository();
+
+        $enabledRaw = $settings->get('store_sales_enabled');
+        $messageRaw = $settings->get('store_sales_message');
+        $updatedAt = $settings->get('store_sales_updated_at');
+        $updatedBy = $settings->get('store_sales_updated_by');
+
+        $salesEnabled = $enabledRaw === null ? true : $this->parseBool($enabledRaw, true);
+        $message = trim((string)($messageRaw ?? 'Tienda temporalmente en mantenimiento. Intenta más tarde.'));
+        if ($message === '') {
+            $message = 'Tienda temporalmente en mantenimiento. Intenta más tarde.';
+        }
+
+        if ($enabledRaw === null) {
+            $settings->set('store_sales_enabled', '1');
+        }
+        if ($messageRaw === null) {
+            $settings->set('store_sales_message', $message);
+        }
+
+        Response::json([
+            'salesEnabled' => $salesEnabled,
+            'message' => $message,
+            'updatedAt' => $updatedAt ?: null,
+            'updatedBy' => $updatedBy ?: null
+        ]);
+    }
+
+    public function updateStoreStatus() {
+        $user = $this->authenticate();
+        $this->requireAdmin($user);
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+
+        if (!array_key_exists('salesEnabled', $data)) {
+            Response::error('Campo salesEnabled requerido', 400, 'SETTINGS_STORE_STATUS_REQUIRED');
+            return;
+        }
+
+        $salesEnabled = $this->parseBool($data['salesEnabled'], true);
+        $message = trim((string)($data['message'] ?? ''));
+        if ($message === '') {
+            $message = 'Tienda temporalmente en mantenimiento. Intenta más tarde.';
+        }
+
+        if (!$salesEnabled && trim($message) === '') {
+            Response::error('Debes indicar un mensaje claro de mantenimiento', 400, 'SETTINGS_STORE_MESSAGE_REQUIRED');
+            return;
+        }
+
+        $settings = new SettingsRepository();
+        $settings->set('store_sales_enabled', $salesEnabled ? '1' : '0');
+        $settings->set('store_sales_message', $message);
+        $settings->set('store_sales_updated_at', date('c'));
+        $settings->set('store_sales_updated_by', (string)($user['sub'] ?? 'admin'));
+
+        Response::json([
+            'salesEnabled' => $salesEnabled,
+            'message' => $message,
+            'updatedAt' => $settings->get('store_sales_updated_at'),
+            'updatedBy' => $settings->get('store_sales_updated_by')
+        ]);
+    }
+
     public function getProductPage() {
         $user = $this->authenticate();
         $this->requireAdmin($user);

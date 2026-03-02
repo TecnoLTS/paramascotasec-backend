@@ -12,9 +12,6 @@ class ProductRepository {
 
     public function __construct() {
         $this->db = Database::getInstance();
-        $this->ensureTenantColumn();
-        $this->ensureAttributesColumns();
-        $this->ensureImageColumns();
     }
 
     private function getBaseQuery() {
@@ -214,50 +211,8 @@ class ProductRepository {
         return $this->getPublicBaseUrl() . '/' . ltrim($url, '/');
     }
 
-    private function ensureAttributesColumns() {
-        $checkType = $this->db->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Product' AND column_name = 'product_type'");
-        $checkType->execute();
-        if (!$checkType->fetch()) {
-            $this->db->exec('ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS product_type text');
-        }
-
-        $checkAttrs = $this->db->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Product' AND column_name = 'attributes'");
-        $checkAttrs->execute();
-        if (!$checkAttrs->fetch()) {
-            $this->db->exec('ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS attributes jsonb');
-        }
-    }
-
-    private function ensureTenantColumn() {
-        $check = $this->db->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Product' AND column_name = 'tenant_id'");
-        $check->execute();
-        if ($check->fetch()) {
-            return;
-        }
-        $this->db->exec('ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS tenant_id text');
-        $this->db->exec('UPDATE "Product" SET tenant_id = COALESCE(tenant_id, \'' . $this->getTenantId() . '\')');
-    }
-
     private function getTenantId() {
         return TenantContext::id() ?? ($_ENV['DEFAULT_TENANT'] ?? 'paramascotasec');
-    }
-
-    private function ensureImageColumns() {
-        $checkKind = $this->db->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Image' AND column_name = 'kind'");
-        $checkKind->execute();
-        if (!$checkKind->fetch()) {
-            $this->db->exec('ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS kind text');
-        }
-        $checkWidth = $this->db->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Image' AND column_name = 'width'");
-        $checkWidth->execute();
-        if (!$checkWidth->fetch()) {
-            $this->db->exec('ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS width integer');
-        }
-        $checkHeight = $this->db->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Image' AND column_name = 'height'");
-        $checkHeight->execute();
-        if (!$checkHeight->fetch()) {
-            $this->db->exec('ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS height integer');
-        }
     }
 
     private function normalizeImageEntries($items, $defaultKind) {

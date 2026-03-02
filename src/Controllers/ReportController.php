@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Repositories\OrderRepository;
 use App\Core\Response;
+use App\Core\Auth;
 
 class ReportController {
     private $orderRepository;
@@ -13,6 +14,7 @@ class ReportController {
     }
 
     public function recentOrders() {
+        Auth::requireAdmin();
         $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 5;
         if ($limit <= 0 || $limit > 50) {
             Response::error('Limit inválido', 400, 'REPORTS_LIMIT_INVALID');

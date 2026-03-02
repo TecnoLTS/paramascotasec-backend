@@ -17,7 +17,7 @@ class DashboardController {
     }
 
     private function authenticate() {
-        Auth::requireUser();
+        Auth::requireAdmin();
     }
 
     public function stats() {
@@ -25,7 +25,8 @@ class DashboardController {
         
         try {
             $biService = new \App\Services\BusinessIntelligenceService();
-            $response = $biService->getFullDashboardStats();
+            $selectedMonth = isset($_GET['month']) ? (string)$_GET['month'] : null;
+            $response = $biService->getFullDashboardStats($selectedMonth);
             Response::json($response);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 500, 'DASHBOARD_STATS_FAILED');

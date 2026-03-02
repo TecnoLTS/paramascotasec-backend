@@ -1,0 +1,2 @@
+id,tenant_id,code,name,description,type,value,min_subtotal,max_discount,max_uses,used_count,starts_at,ends_at,is_active,created_by,metadata,created_at,updated_at
+dc_69a5eb0a61d3b,paramascotasec,MASCO10,Promo de prueba,10% en subtotal,percent,10.00,10.00,2.50,50,1,,,f,service,,2026-03-02 14:54:50.40596,2026-03-02 14:58:01.469115

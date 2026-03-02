@@ -1,79 +1,56 @@
-# Backend API for paramascotasec
+# Backend API (`paramascotasec-backend`)
 
-Este es el backend de la tienda en linea, construido con PHP (FPM) y Nginx, conectándose a la base de datos PostgreSQL existente.
+Backend PHP-FPM + Nginx para `paramascotasec`, con soporte multi-tenant por dominio.
 
 ## Requisitos
 - Docker
 - Docker Compose
 
-## Instalación y Ejecución
+## Variables de entorno
+1. Copia `.env.example` a `.env`.
+2. Ajusta credenciales reales (DB, JWT, SMTP).
+3. No subas `.env` al repositorio.
 
-1.  **Levantar los contenedores**:
-    ```bash
-    docker compose up -d --build
-    ```
-
-2.  **Instalar dependencias de PHP**:
-    ```bash
-    docker exec -it paramascotasec-backend-app composer install
-    ```
-
-## Estructura del Proyecto
-
-- `public/index.php`: Punto de entrada de la API.
-- `src/Core`: Clases esenciales como el Router y la conexión a la Base de Datos.
-- `src/Controllers`: Controladores que manejan las solicitudes HTTP.
-- `src/Repositories`: Capa de abstracción para el acceso a datos.
-- `src/Models`: Entidades de datos (opcional si se usan arreglos).
-
-## Endpoints Disponibles
-
-- `GET /api/products`: Lista todos los productos.
-- `GET /api/users`: Lista todos los usuarios.
-- `GET /api/health`: Estado de salud de la API.
-
-## Formato de Respuesta Estándar
-
-Todas las respuestas JSON siguen el mismo envelope:
-
-```json
-{
-  "ok": true,
-  "data": {}
-}
-```
-
-En errores:
-
-```json
-{
-  "ok": false,
-  "error": {
-    "message": "Descripción del error",
-    "code": "CODIGO_OPCIONAL",
-    "details": {}
-  }
-}
-```
-
-## Seguridad (Token requerido)
-
-Todas las rutas bajo `/api` requieren `Authorization: Bearer <token>` excepto:
-- `/api/auth/login`
-- `/api/auth/register`
-- `/api/auth/verify`
-
-Para solicitudes server-side (SSR), define `BACKEND_SERVICE_TOKEN` en el frontend con un JWT válido.
-Puedes generarlo con:
-
+## Despliegue
 ```bash
-php scripts/generate_service_token.php
+docker compose up -d --build
 ```
 
-### Un solo token activo por usuario
-Al iniciar sesión se genera un nuevo token y se guarda como `active_token_id` en la tabla `User`.
-Si el mismo usuario inicia sesión en otro dispositivo, el token anterior queda inválido automáticamente.
+El contenedor `app` ejecuta automáticamente:
+- `scripts/bootstrap_schema.php` (idempotente, prepara esquema/columnas/indexes).
+- `php-fpm`.
 
-## Integración con el Frontend
+Si quieres desactivar bootstrap de esquema:
+```bash
+RUN_DB_BOOTSTRAP=0 docker compose up -d --build
+```
 
-El frontend debe apuntar a `http://localhost:8080/api/` (o la URL del proxy si se usa uno) para obtener los datos.
+## Token de servicio (SSR)
+Para llamadas server-side desde el frontend:
+```bash
+docker exec -it paramascotasec-backend-app php /var/www/html/scripts/generate_service_token.php
+```
+
+El token incluye `tenant_id` usando `DEFAULT_TENANT` (por defecto `paramascotasec`).
+
+## Seguridad
+- Errores `5xx` no exponen detalles internos en producción.
+- JWT requiere `JWT_SECRET` explícito.
+- CORS/tenant resuelven host real y soportan entorno local por IP.
+- Nginx aplica headers de seguridad y bloquea archivos ocultos.
+
+## Endpoints básicos
+- `GET /api/health`
+- `GET /api/products`
+- `POST /api/auth/login`
+
+## Descuentos registrados (admin)
+- `GET /api/admin/discounts`
+- `POST /api/admin/discounts`
+- `PUT /api/admin/discounts/{id}`
+- `PATCH /api/admin/discounts/{id}/status`
+- `GET /api/admin/discounts/audit`
+
+Checkout/cotización:
+- `POST /api/orders/quote` acepta opcional `coupon_code` o `discount_code`.
+- `POST /api/orders` acepta opcional `coupon_code` o `discount_code`.

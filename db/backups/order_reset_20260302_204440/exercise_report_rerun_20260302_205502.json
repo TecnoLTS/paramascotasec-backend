@@ -1,0 +1,170 @@
+{
+    "tenant_id": "paramascotasec",
+    "started_at": "2026-03-02T20:55:02+00:00",
+    "created_orders": [
+        {
+            "id": "TST-20260302-001",
+            "user_id": "f741a97f92bcb42bbe64",
+            "email": "asdasdian@genasasdm.ec3",
+            "status": "delivered",
+            "delivery_method": "delivery",
+            "payment_method": "credit",
+            "discount_code": null,
+            "discount_total": 0,
+            "items_subtotal": 142.6,
+            "vat_subtotal": 124,
+            "vat_amount": 18.6,
+            "shipping": 5,
+            "total": 147.6,
+            "created_at": "2026-03-01 10:30:00",
+            "checks": {
+                "total_equals_items_plus_shipping": true,
+                "items_equals_vat_subtotal_plus_vat_amount": true
+            }
+        },
+        {
+            "id": "TST-20260302-002",
+            "user_id": "user_cliente",
+            "email": "cliente@example.com",
+            "status": "pending",
+            "delivery_method": "pickup",
+            "payment_method": "transfer",
+            "discount_code": null,
+            "discount_total": 0,
+            "items_subtotal": 41.4,
+            "vat_subtotal": 36,
+            "vat_amount": 5.4,
+            "shipping": 0,
+            "total": 41.4,
+            "created_at": "2026-03-02 11:00:00",
+            "checks": {
+                "total_equals_items_plus_shipping": true,
+                "items_equals_vat_subtotal_plus_vat_amount": true
+            }
+        },
+        {
+            "id": "TST-20260302-003",
+            "user_id": "c64a137ebd7456ac9a17",
+            "email": "edwin.eduardo.vm@gmail.com",
+            "status": "completed",
+            "delivery_method": "delivery",
+            "payment_method": "cash",
+            "discount_code": "TEST10",
+            "discount_total": 8.05,
+            "items_subtotal": 72.45,
+            "vat_subtotal": 63,
+            "vat_amount": 9.45,
+            "shipping": 5,
+            "total": 77.45,
+            "created_at": "2026-02-15 09:15:00",
+            "checks": {
+                "total_equals_items_plus_shipping": true,
+                "items_equals_vat_subtotal_plus_vat_amount": true
+            }
+        },
+        {
+            "id": "TST-20260302-004",
+            "user_id": "f741a97f92bcb42bbe64",
+            "email": "asdasdian@genasasdm.ec3",
+            "status": "canceled",
+            "delivery_method": "delivery",
+            "payment_method": "credit",
+            "discount_code": null,
+            "discount_total": 0,
+            "items_subtotal": 113.85,
+            "vat_subtotal": 99,
+            "vat_amount": 14.85,
+            "shipping": 5,
+            "total": 118.85,
+            "created_at": "2026-02-20 14:45:00",
+            "checks": {
+                "total_equals_items_plus_shipping": true,
+                "items_equals_vat_subtotal_plus_vat_amount": true
+            }
+        },
+        {
+            "id": "TST-20260302-005",
+            "user_id": "user_cliente",
+            "email": "cliente@example.com",
+            "status": "processing",
+            "delivery_method": "pickup",
+            "payment_method": "credit",
+            "discount_code": "FIX5",
+            "discount_total": 5,
+            "items_subtotal": 47.9,
+            "vat_subtotal": 41.65,
+            "vat_amount": 6.25,
+            "shipping": 0,
+            "total": 47.9,
+            "created_at": "2026-01-28 08:20:00",
+            "checks": {
+                "total_equals_items_plus_shipping": true,
+                "items_equals_vat_subtotal_plus_vat_amount": true
+            }
+        },
+        {
+            "id": "TST-20260302-006",
+            "user_id": "c64a137ebd7456ac9a17",
+            "email": "edwin.eduardo.vm@gmail.com",
+            "status": "delivered",
+            "delivery_method": "delivery",
+            "payment_method": "transfer",
+            "discount_code": null,
+            "discount_total": 0,
+            "items_subtotal": 80.5,
+            "vat_subtotal": 70,
+            "vat_amount": 10.5,
+            "shipping": 5,
+            "total": 85.5,
+            "created_at": "2026-03-02 12:40:00",
+            "checks": {
+                "total_equals_items_plus_shipping": true,
+                "items_equals_vat_subtotal_plus_vat_amount": true
+            }
+        }
+    ],
+    "failed_scenarios": [
+        {
+            "scenario": "TST-20260302-007",
+            "status": "expected_failure",
+            "message": "Código de descuento no registrado.",
+            "matches_expected": true
+        },
+        {
+            "scenario": "TST-20260302-008",
+            "status": "expected_failure",
+            "message": "El subtotal no cumple el mínimo requerido para este descuento.",
+            "matches_expected": true
+        }
+    ],
+    "validations": {
+        "canceled_order_inventory_check": {
+            "name": "Cama Acogedora para Perro",
+            "quantity": 40,
+            "sold": 0
+        },
+        "discount_usage": [
+            {
+                "code": "FIX5",
+                "is_active": true,
+                "used_count": 1
+            },
+            {
+                "code": "TEST10",
+                "is_active": true,
+                "used_count": 1
+            }
+        ]
+    },
+    "order_summary": {
+        "orders_total": 6,
+        "orders_canceled": 1,
+        "orders_active": 5,
+        "gross_total": "518.70",
+        "items_subtotal_total": "498.70",
+        "vat_total": "65.05",
+        "shipping_total": "20.00",
+        "discount_total": "13.05"
+    },
+    "finished_at": "2026-03-02T20:55:03+00:00"
+}
