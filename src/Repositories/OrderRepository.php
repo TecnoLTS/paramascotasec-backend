@@ -429,6 +429,26 @@ class OrderRepository {
     public function create($data, $baseUrl = null) {
         $this->db->beginTransaction();
         try {
+            $paymentDetails = $data['payment_details'] ?? null;
+            if (is_string($paymentDetails)) {
+                $decoded = json_decode($paymentDetails, true);
+                $paymentDetails = is_array($decoded) ? $decoded : null;
+            }
+            $channel = strtolower(trim((string)($paymentDetails['channel'] ?? '')));
+            if ($channel === 'local_pos') {
+                $posRepository = new PosRepository();
+                $activeShift = $posRepository->getActiveShift();
+                if (!$activeShift) {
+                    throw new \Exception('No hay una caja abierta para registrar ventas en local.');
+                }
+                $requestedShiftId = trim((string)($paymentDetails['shift_id'] ?? ''));
+                if ($requestedShiftId !== '' && $requestedShiftId !== (string)$activeShift['id']) {
+                    throw new \Exception('La venta local no corresponde al turno de caja activo.');
+                }
+                $paymentDetails['shift_id'] = (string)$activeShift['id'];
+                $data['payment_details'] = $paymentDetails;
+            }
+
             // Inteligencia de Negocio: El Backend recalcula y valida TODO.
             $quote = $this->calculateQuote(
                 $data['items'],

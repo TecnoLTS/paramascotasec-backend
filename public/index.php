@@ -158,6 +158,13 @@ $router->add('GET', '/api/admin/discounts/audit', 'DiscountController@audit');
 $router->add('GET', '/api/admin/discounts/{id}', 'DiscountController@show');
 $router->add('PUT', '/api/admin/discounts/{id}', 'DiscountController@update');
 $router->add('PATCH', '/api/admin/discounts/{id}/status', 'DiscountController@updateStatus');
+$router->add('GET', '/api/admin/pos/shift/active', 'PosController@activeShift');
+$router->add('GET', '/api/admin/pos/shifts', 'PosController@shifts');
+$router->add('GET', '/api/admin/pos/movements', 'PosController@movements');
+$router->add('GET', '/api/admin/pos/customer-by-document', 'PosController@customerByDocument');
+$router->add('POST', '/api/admin/pos/shift/open', 'PosController@openShift');
+$router->add('POST', '/api/admin/pos/shift/close', 'PosController@closeShift');
+$router->add('POST', '/api/admin/pos/movements', 'PosController@addMovement');
 $router->add('GET', '/api/shipments', 'ShippingController@index');
 
 // Reports (guide/example)
