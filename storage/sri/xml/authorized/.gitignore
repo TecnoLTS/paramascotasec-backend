@@ -1,0 +1,5 @@
+# Ignorar todos los archivos XML de autorización
+*.xml
+
+# Excepto este gitignore
+!.gitignore

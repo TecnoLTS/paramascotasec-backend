@@ -1,0 +1,5 @@
+# Ignorar todos los archivos XML generados
+*.xml
+
+# Excepto este gitignore
+!.gitignore

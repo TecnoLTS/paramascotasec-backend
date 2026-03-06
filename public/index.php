@@ -167,6 +167,9 @@ $router->add('POST', '/api/admin/pos/shift/close', 'PosController@closeShift');
 $router->add('POST', '/api/admin/pos/movements', 'PosController@addMovement');
 $router->add('GET', '/api/shipments', 'ShippingController@index');
 
+// SRI Routes - Facturación Electrónica
+$router->add('POST', '/api/admin/sri/invoice/{id}/generate', 'SriController@generateXmlForOrder');
+
 // Reports (guide/example)
 $router->add('GET', '/api/reports/recent-orders', 'ReportController@recentOrders');
 

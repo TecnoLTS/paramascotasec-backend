@@ -1,0 +1,5 @@
+# Ignorar todos los archivos XML firmados
+*.xml
+
+# Excepto este gitignore
+!.gitignore

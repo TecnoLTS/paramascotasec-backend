@@ -7,6 +7,7 @@ use App\Repositories\SettingsRepository;
 use App\Core\Response;
 use App\Core\Auth;
 use App\Core\TenantContext;
+use App\Controllers\SriController;
 
 class OrderController {
     private $orderRepository;
@@ -353,6 +354,63 @@ class OrderController {
                 $baseUrl = $proto . '://' . $host;
             }
             $order = $this->orderRepository->create($data, $baseUrl);
+            
+            // Generar XML del SRI automáticamente
+            if ($order && $order['id']) {
+                try {
+                    error_log("[SRI] Iniciando generación de XML para orden {$order['id']}");
+                    
+                    $sriController = new SriController();
+                    $reflection = new \ReflectionClass($sriController);
+                    
+                    // Preparar datos del XML
+                    $prepareMethod = $reflection->getMethod('prepareOrderDataForSri');
+                    $prepareMethod->setAccessible(true);
+                    $xmlData = $prepareMethod->invoke($sriController, $order);
+                    error_log("[SRI] Datos preparados, secuencial: {$xmlData['secuencial']}");
+                    
+                    // Obtener el generador de XML
+                    $xmlGeneratorProp = $reflection->getProperty('xmlGenerator');
+                    $xmlGeneratorProp->setAccessible(true);
+                    $xmlGenerator = $xmlGeneratorProp->getValue($sriController);
+                    
+                    // Generar XML
+                    $xml = $xmlGenerator->generateInvoiceXml($xmlData);
+                    error_log("[SRI] XML generado, tamaño: " . strlen($xml) . " bytes");
+                    
+                    // Guardar XML
+                    $xmlDir = __DIR__ . '/../../storage/sri/xml';
+                    if (!is_dir($xmlDir)) {
+                        mkdir($xmlDir, 0775, true);
+                        error_log("[SRI] Directorio creado: {$xmlDir}");
+                    }
+                    
+                    $secuencial = str_pad($xmlData['secuencial'], 9, '0', STR_PAD_LEFT);
+                    $timestamp = date('YmdHis');
+                    $filename = "factura_{$secuencial}_{$timestamp}.xml";
+                    $filepath = $xmlDir . '/' . $filename;
+                    
+                    $bytesWritten = file_put_contents($filepath, $xml);
+                    
+                    if ($bytesWritten !== false) {
+                        error_log("[SRI] ✅ XML guardado exitosamente: {$filename} ({$bytesWritten} bytes) en {$filepath}");
+                        // Verificar que el archivo existe
+                        if (file_exists($filepath)) {
+                            error_log("[SRI] ✅ Archivo verificado existe: {$filepath}");
+                        } else {
+                            error_log("[SRI] ⚠️ ADVERTENCIA: file_put_contents retornó {$bytesWritten} pero el archivo NO existe!");
+                        }
+                    } else {
+                        error_log("[SRI] ❌ ERROR: file_put_contents retornó FALSE");
+                    }
+                    
+                } catch (\Exception $e) {
+                    // No fallar la orden si el XML falla
+                    error_log("[SRI] ❌ Excepción generando XML para orden {$order['id']}: " . $e->getMessage());
+                    error_log("[SRI] Stack trace: " . $e->getTraceAsString());
+                }
+            }
+            
             Response::json($order, 201);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 400, 'ORDER_CREATE_FAILED');
