@@ -1,15 +1,25 @@
 FROM php:8.2-fpm-alpine
 
-# Install system dependencies
+# Install system dependencies (incluye openssl-dev para trabajar con certificados)
 RUN apk add --no-cache \
     postgresql-dev \
     libzip-dev \
     zip \
     unzip \
-    git
+    git \
+    openssl-dev \
+    libxml2-dev \
+    tzdata
 
-# Install PHP extensions
+# Configurar zona horaria para Ecuador
+ENV TZ=America/Guayaquil
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Install PHP extensions (openssl ya viene habilitado por defecto)
 RUN docker-php-ext-install pdo pdo_pgsql zip
+
+# Configurar zona horaria de PHP
+RUN echo "date.timezone = America/Guayaquil" > /usr/local/etc/php/conf.d/timezone.ini
 
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
@@ -29,6 +39,7 @@ RUN mkdir -p /var/www/html/storage/sri/xml \
     /var/www/html/storage/sri/signed \
     /var/www/html/storage/sri/authorized \
     /var/www/html/storage/sri/ride \
+    /var/www/html/storage/sri/certs \
     /var/www/html/storage/logs \
     && chown -R www-data:www-data /var/www/html/storage \
     && chmod -R 755 /var/www/html/storage \

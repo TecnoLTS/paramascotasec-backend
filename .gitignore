@@ -8,3 +8,14 @@ node_modules/
 logs/
 *.log
 db/backup.sql
+
+# SRI certificates and sensitive files
+storage/sri/certs/*.p12
+storage/sri/certs/*.key
+storage/sri/xml/*.xml
+storage/sri/signed/*.xml
+storage/sri/authorized/*.xml
+storage/sri/ride/*.pdf
+
+# Keep directory structure
+!storage/sri/**/.gitkeep

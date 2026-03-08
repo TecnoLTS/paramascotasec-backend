@@ -27,7 +27,7 @@ return [
         
         // Certificado de firma electrónica
         'certificado' => [
-            'path' => __DIR__ . '/../certs/firma_electronica.p12',
+            'path' => getenv('SRI_CERT_PATH') ?: __DIR__ . '/../storage/sri/certs/certificado.p12',
             'password' => getenv('SRI_CERT_PASSWORD') ?: '',
             'expiration_date' => '2026-12-31', // Para alertas
         ],
