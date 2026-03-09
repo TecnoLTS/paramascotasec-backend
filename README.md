@@ -16,13 +16,16 @@ Backend PHP-FPM + Nginx para `paramascotasec`, con soporte multi-tenant por domi
 docker compose up -d --build
 ```
 
-El contenedor `app` ejecuta automáticamente:
-- `scripts/bootstrap_schema.php` (idempotente, prepara esquema/columnas/indexes).
+El contenedor `app` ejecuta por defecto:
 - `php-fpm`.
 
-Si quieres desactivar bootstrap de esquema:
+Tareas opcionales de arranque (para evitar levantar lento en cada restart):
+- `RUN_COMPOSER_INSTALL=1` para forzar `composer install`.
+- `RUN_DB_BOOTSTRAP=1` para ejecutar `scripts/bootstrap_schema.php` (idempotente).
+
+Ejemplo (arranque completo en una ejecución puntual):
 ```bash
-RUN_DB_BOOTSTRAP=0 docker compose up -d --build
+RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 docker compose up -d --build
 ```
 
 ## Token de servicio (SSR)

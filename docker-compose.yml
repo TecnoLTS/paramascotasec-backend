@@ -13,8 +13,8 @@ services:
       && mkdir -p /var/www/html/storage/sri/xml /var/www/html/storage/sri/signed /var/www/html/storage/sri/authorized /var/www/html/storage/sri/ride /var/www/html/storage/sri/certs /var/www/html/storage/logs/sri
       && chown -R www-data:www-data /var/www/html/storage
       && chmod -R 775 /var/www/html/storage/sri /var/www/html/storage/logs
-      && composer install --no-interaction --prefer-dist --optimize-autoloader
-      && if [ \"${RUN_DB_BOOTSTRAP:-1}\" = \"1\" ]; then php /var/www/html/scripts/bootstrap_schema.php; fi
+      && if [ \"${RUN_COMPOSER_INSTALL:-0}\" = \"1\" ] || [ ! -f /var/www/html/vendor/autoload.php ]; then composer install --no-interaction --prefer-dist --optimize-autoloader; fi
+      && if [ \"${RUN_DB_BOOTSTRAP:-0}\" = \"1\" ]; then php /var/www/html/scripts/bootstrap_schema.php; fi
       && php-fpm"
     volumes:
       - .:/var/www/html
@@ -24,7 +24,8 @@ services:
       DB_DATABASE: ${DB_DATABASE:-paramascotasec}
       DB_USERNAME: ${DB_USERNAME:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-}
-      RUN_DB_BOOTSTRAP: ${RUN_DB_BOOTSTRAP:-1}
+      RUN_COMPOSER_INSTALL: ${RUN_COMPOSER_INSTALL:-0}
+      RUN_DB_BOOTSTRAP: ${RUN_DB_BOOTSTRAP:-0}
       JWT_SECRET: ${JWT_SECRET}
       APP_ENV: ${APP_ENV:-production}
       APP_URL: ${APP_URL}
