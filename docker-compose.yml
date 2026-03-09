@@ -10,6 +10,10 @@ services:
       sh -c "mkdir -p /var/www/html/public/uploads/products
       && chown -R www-data:www-data /var/www/html/public/uploads
       && chmod -R 775 /var/www/html/public/uploads
+      && mkdir -p /var/www/html/storage/sri/xml /var/www/html/storage/sri/signed /var/www/html/storage/sri/authorized /var/www/html/storage/sri/ride /var/www/html/storage/sri/certs /var/www/html/storage/logs/sri
+      && chown -R www-data:www-data /var/www/html/storage
+      && chmod -R 775 /var/www/html/storage/sri /var/www/html/storage/logs
+      && composer install --no-interaction --prefer-dist --optimize-autoloader
       && if [ \"${RUN_DB_BOOTSTRAP:-1}\" = \"1\" ]; then php /var/www/html/scripts/bootstrap_schema.php; fi
       && php-fpm"
     volumes:
@@ -21,6 +25,21 @@ services:
       DB_USERNAME: ${DB_USERNAME:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-}
       RUN_DB_BOOTSTRAP: ${RUN_DB_BOOTSTRAP:-1}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_ENV: ${APP_ENV:-production}
+      APP_URL: ${APP_URL}
+      APP_TIMEZONE: ${APP_TIMEZONE:-America/Guayaquil}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SRI_ENVIRONMENT: ${SRI_ENVIRONMENT:-test}
+      SRI_RUC: ${SRI_RUC}
+      SRI_CERT_PATH: ${SRI_CERT_PATH}
+      SRI_CERT_PASSWORD: ${SRI_CERT_PASSWORD}
     networks:
       edge:
 

@@ -30,7 +30,18 @@ class SriXmlGenerator {
         $ambiente = $this->config['environment'] === 'production' ? '2' : '1';
         $serie = $this->config['emisor']['codigo_establecimiento'] . $this->config['emisor']['punto_emision'];
         $secuencial = str_pad($data['secuencial'], 9, '0', STR_PAD_LEFT);
-        $codigoNumerico = str_pad(rand(10000000, 99999999), 8, '0', STR_PAD_LEFT);
+        
+        // Generar código numérico único pero menos predecible
+        // Usamos timestamp + secuencial para garantizar unicidad
+        $timestamp = time() % 100000; // Últimos 5 dígitos del timestamp
+        $codigoBase = ($timestamp * 1000) + ($data['secuencial'] % 1000);
+        $codigoNumerico = str_pad($codigoBase % 100000000, 8, '0', STR_PAD_LEFT);
+        
+        // Si el código queda muy pequeño, sumarle un offset
+        if ($codigoNumerico < 10000000) {
+            $codigoNumerico = str_pad(10000000 + intval($codigoNumerico), 8, '0', STR_PAD_LEFT);
+        }
+        
         $tipoEmision = '1'; // 1=Normal
         
         // Construir 48 dígitos
@@ -43,23 +54,33 @@ class SriXmlGenerator {
     }
     
     /**
-     * Calcula dígito verificador módulo 11
+     * Calcula dígito verificador módulo 11 según especificación SRI
+     * 
+     * Aplica factores de derecha a izquierda: 2, 3, 4, 5, 6, 7 (repite)
+     * Ejemplo SRI: cadena "41261533" -> dígito verificador "6"
+     * 
+     * @param string $cadena Cadena de 48 dígitos (clave de acceso sin dígito verificador)
+     * @return string Dígito verificador (0-9)
      */
     private function calcularModulo11(string $cadena): string {
-        $factor = 7;
+        $factor = 2;
         $suma = 0;
         
-        for ($i = 0; $i < strlen($cadena); $i++) {
+        // Calcular de derecha a izquierda
+        for ($i = strlen($cadena) - 1; $i >= 0; $i--) {
             $suma += intval($cadena[$i]) * $factor;
-            $factor--;
-            if ($factor === 1) {
-                $factor = 7;
+            
+            // Incrementar factor: 2, 3, 4, 5, 6, 7, 2, 3, ...
+            $factor++;
+            if ($factor > 7) {
+                $factor = 2;
             }
         }
         
         $residuo = $suma % 11;
         $resultado = 11 - $residuo;
         
+        // Casos especiales según ficha técnica SRI
         if ($resultado === 11) {
             return '0';
         } elseif ($resultado === 10) {
@@ -77,21 +98,26 @@ class SriXmlGenerator {
         $ambiente = $this->config['environment'] === 'production' ? '2' : '1';
         $tipoEmision = '1'; // 1=Normal
         
-        // Generar clave de acceso
-        $accessKey = $this->generateAccessKey([
+        // ✅ FIX: Usar la clave de acceso ya generada en prepareOrderDataForSri
+        // No generar nuevamente porque rand() daría un código numérico diferente
+        $accessKey = $orderData['access_key'] ?? $this->generateAccessKey([
             'fecha_emision' => $orderData['fecha_emision'],
             'tipo_comprobante' => '01',
             'secuencial' => $orderData['secuencial']
         ]);
         
-        // Crear XML
+        // ✅ FIX CRÍTICO: NO formatear el XML para firmas digitales
+        // formatOutput=true agrega espacios/saltos que invalidan la firma
+        // El XML debe mantenerse compacto para que la firma sea consistente
         $xml = new \DOMDocument('1.0', 'UTF-8');
-        $xml->formatOutput = true;
+        $xml->formatOutput = false;
+        $xml->preserveWhiteSpace = false;
         
-        // Nodo raíz
+        // Nodo raíz con namespaces requeridos por el SRI
         $factura = $xml->createElement('factura');
+        // Usar 'id' minúscula - el SRI rechaza 'Id' mayúscula pero puede aceptar 'id'
         $factura->setAttribute('id', 'comprobante');
-        $factura->setAttribute('version', '1.0.0');
+        $factura->setAttribute('version', '1.1.0');  // Versión 1.1.0 como en ejemplos del SRI
         $xml->appendChild($factura);
         
         // Info Tributaria
@@ -128,15 +154,17 @@ class SriXmlGenerator {
         $infoFactura->appendChild($xml->createElement('razonSocialComprador', $this->escapeXml($customer['name'])));
         $infoFactura->appendChild($xml->createElement('identificacionComprador', $customer['document_number']));
         
-        if (!empty($customer['email'])) {
-            $infoFactura->appendChild($xml->createElement('correoComprador', $customer['email']));
-        }
-        if (!empty($customer['address'])) {
-            $infoFactura->appendChild($xml->createElement('direccionComprador', $this->escapeXml($customer['address'])));
-        }
-        if (!empty($customer['phone'])) {
-            $infoFactura->appendChild($xml->createElement('telefonoComprador', $customer['phone']));
-        }
+        // ❌ CAMPOS OPCIONALES COMENTADOS - El XSD del SRI NO los acepta aquí
+        // Según error del SRI: después de identificacionComprador debe ir totalSinImpuestos
+        // if (!empty($customer['address'])) {
+        //     $infoFactura->appendChild($xml->createElement('direccionComprador', $this->escapeXml($customer['address'])));
+        // }
+        // if (!empty($customer['phone'])) {
+        //     $infoFactura->appendChild($xml->createElement('telefonoComprador', $customer['phone']));
+        // }
+        // if (!empty($customer['email'])) {
+        //     $infoFactura->appendChild($xml->createElement('correoComprador', $customer['email']));
+        // }
         
         // Totales
         $infoFactura->appendChild($xml->createElement('totalSinImpuestos', number_format($orderData['subtotal_sin_impuestos'], 2, '.', '')));
@@ -213,7 +241,13 @@ class SriXmlGenerator {
             $factura->appendChild($infoAdicional);
         }
         
-        return $xml->saveXML();
+        // ✅ FIX CRÍTICO: NO modificar el XML después de generarlo
+        // DOMDocument::saveXML() genera el formato natural con salto de línea
+        // Este formato debe mantenerse consistente durante todo el proceso de firma
+        // Cualquier modificación posterior invalida la firma digital
+        $xmlString = $xml->saveXML();
+        
+        return $xmlString;
     }
     
     /**

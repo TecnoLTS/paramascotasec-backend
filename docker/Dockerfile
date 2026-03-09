@@ -15,8 +15,11 @@ RUN apk add --no-cache \
 ENV TZ=America/Guayaquil
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
+# Habilitar provider legacy de OpenSSL (necesario para certificados .p12 del SRI)
+RUN sed -i 's/^openssl_conf = openssl_init$/openssl_conf = openssl_init\n\n[openssl_init]\nproviders = provider_sect\n\n[provider_sect]\ndefault = default_sect\nlegacy = legacy_sect\n\n[default_sect]\nactivate = 1\n\n[legacy_sect]\nactivate = 1/' /etc/ssl/openssl.cnf
+
 # Install PHP extensions (openssl ya viene habilitado por defecto)
-RUN docker-php-ext-install pdo pdo_pgsql zip
+RUN docker-php-ext-install pdo pdo_pgsql zip soap
 
 # Configurar zona horaria de PHP
 RUN echo "date.timezone = America/Guayaquil" > /usr/local/etc/php/conf.d/timezone.ini
@@ -40,8 +43,10 @@ RUN mkdir -p /var/www/html/storage/sri/xml \
     /var/www/html/storage/sri/authorized \
     /var/www/html/storage/sri/ride \
     /var/www/html/storage/sri/certs \
-    /var/www/html/storage/logs \
-    && chown -R www-data:www-data /var/www/html/storage \
+    /var/www/html/storage/logs/sri
+
+# Force correct ownership for all storage directories
+RUN chown -R www-data:www-data /var/www/html/storage \
     && chmod -R 755 /var/www/html/storage \
     && chmod -R 775 /var/www/html/storage/sri \
     && chmod -R 775 /var/www/html/storage/logs

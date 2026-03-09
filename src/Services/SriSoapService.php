@@ -13,6 +13,7 @@ class SriSoapService {
     private $config;
     private $environment;
     private $endpoints;
+    private $logDir;
     
     public function __construct() {
         $tenantId = TenantContext::id() ?? 'paramascotasec';
@@ -25,6 +26,83 @@ class SriSoapService {
         $this->config = $sriConfig[$tenantId];
         $this->environment = $this->config['environment'];
         $this->endpoints = $this->config['endpoints'][$this->environment];
+        
+        // Configurar directorio de logs
+        $this->logDir = __DIR__ . '/../../storage/logs/sri';
+        if (!is_dir($this->logDir)) {
+            mkdir($this->logDir, 0775, true);
+        }
+    }
+    
+    /**
+     * Guarda logs de comunicación SOAP con el SRI
+     */
+    private function guardarLog(string $operacion, string $claveAcceso, array $datos): void {
+        try {
+            $timestamp = date('Y-m-d_H-i-s');
+            $filename = "{$timestamp}_{$operacion}_{$claveAcceso}.txt";
+            $filepath = $this->logDir . '/' . $filename;
+            
+            $logContent = "=".str_repeat("=", 78)."=\n";
+            $logContent .= "COMUNICACIÓN SRI - " . strtoupper($operacion) . "\n";
+            $logContent .= "=".str_repeat("=", 78)."=\n";
+            $logContent .= "Fecha/Hora: " . date('Y-m-d H:i:s') . "\n";
+            $logContent .= "Ambiente: " . $this->environment . "\n";
+            $logContent .= "Clave Acceso: {$claveAcceso}\n";
+            $logContent .= "Endpoint: " . ($datos['endpoint'] ?? 'N/A') . "\n";
+            $logContent .= "\n";
+            
+            if (isset($datos['request'])) {
+                $logContent .= str_repeat("-", 80) . "\n";
+                $logContent .= "REQUEST (SOAP)\n";
+                $logContent .= str_repeat("-", 80) . "\n";
+                $logContent .= $this->formatearXml($datos['request']) . "\n\n";
+            }
+            
+            if (isset($datos['response'])) {
+                $logContent .= str_repeat("-", 80) . "\n";
+                $logContent .= "RESPONSE (SOAP)\n";
+                $logContent .= str_repeat("-", 80) . "\n";
+                $logContent .= $this->formatearXml($datos['response']) . "\n\n";
+            }
+            
+            if (isset($datos['resultado'])) {
+                $logContent .= str_repeat("-", 80) . "\n";
+                $logContent .= "RESULTADO PARSEADO\n";
+                $logContent .= str_repeat("-", 80) . "\n";
+                $logContent .= print_r($datos['resultado'], true) . "\n\n";
+            }
+            
+            if (isset($datos['error'])) {
+                $logContent .= str_repeat("-", 80) . "\n";
+                $logContent .= "ERROR\n";
+                $logContent .= str_repeat("-", 80) . "\n";
+                $logContent .= $datos['error'] . "\n\n";
+            }
+            
+            $logContent .= "=".str_repeat("=", 78)."=\n";
+            
+            file_put_contents($filepath, $logContent);
+            error_log("[SRI] Log guardado: {$filename}");
+            
+        } catch (Exception $e) {
+            error_log("[SRI] Error guardando log: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Formatea XML para mejor legibilidad
+     */
+    private function formatearXml(string $xml): string {
+        try {
+            $dom = new \DOMDocument('1.0');
+            $dom->preserveWhiteSpace = false;
+            $dom->formatOutput = true;
+            $dom->loadXML($xml);
+            return $dom->saveXML();
+        } catch (Exception $e) {
+            return $xml; // Si falla, retornar sin formato
+        }
     }
     
     /**
@@ -34,18 +112,26 @@ class SriSoapService {
      * @return array ['estado' => 'RECIBIDA|DEVUELTA', 'mensajes' => [...]]
      */
     public function enviarComprobante(string $xmlFirmado): array {
+        $claveAcceso = $this->extraerClaveAcceso($xmlFirmado);
+        
         try {
             $client = new SoapClient(
                 $this->endpoints['recepcion'], 
                 $this->config['soap_options']
             );
             
-            // Convertir XML a Base64 como requiere el SRI
-            $xmlBase64 = base64_encode($xmlFirmado);
+            // ✅ FIX CRÍTICO: NO codificar en base64 manualmente
+            // El WSDL define el parámetro como xs:base64Binary, por lo tanto
+            // SoapClient lo codificará AUTOMÁTICAMENTE. Si nosotros lo codificamos,
+            // se genera DOBLE CODIFICACIÓN y el SRI rechaza con Error 35.
             
-            // Preparar parámetros para el método validarComprobante
+            error_log("[SRI-SOAP] 📤 Enviando XML RAW (SoapClient lo codificará automáticamente)");
+            error_log("[SRI-SOAP] 📏 Tamaño XML: " . strlen($xmlFirmado) . " bytes");
+            error_log("[SRI-SOAP] 🔍 Primeros 80 chars: " . substr($xmlFirmado, 0, 80));
+            
+            // Preparar parámetros - enviar XML RAW, NO base64
             $params = [
-                'xml' => $xmlBase64
+                'xml' => $xmlFirmado  // ✅ SOAP lo codificará por xs:base64Binary
             ];
             
             // Llamar al servicio SOAP
@@ -77,7 +163,7 @@ class SriSoapService {
                 }
             }
             
-            return [
+            $resultado = [
                 'success' => $estado === 'RECIBIDA',
                 'estado' => $estado,
                 'mensajes' => $mensajes,
@@ -86,8 +172,18 @@ class SriSoapService {
                 'soap_response' => $client->__getLastResponse()
             ];
             
+            // Guardar log
+            $this->guardarLog('recepcion', $claveAcceso, [
+                'endpoint' => $this->endpoints['recepcion'],
+                'request' => $client->__getLastRequest(),
+                'response' => $client->__getLastResponse(),
+                'resultado' => $resultado
+            ]);
+            
+            return $resultado;
+            
         } catch (Exception $e) {
-            return [
+            $resultado = [
                 'success' => false,
                 'estado' => 'ERROR',
                 'mensajes' => [
@@ -99,6 +195,29 @@ class SriSoapService {
                 ],
                 'exception' => $e->getMessage()
             ];
+            
+            // Guardar log de error
+            $this->guardarLog('recepcion', $claveAcceso, [
+                'endpoint' => $this->endpoints['recepcion'],
+                'error' => $e->getMessage() . "\n\nStack Trace:\n" . $e->getTraceAsString(),
+                'resultado' => $resultado
+            ]);
+            
+            return $resultado;
+        }
+    }
+    
+    /**
+     * Extrae la clave de acceso del XML
+     */
+    private function extraerClaveAcceso(string $xml): string {
+        try {
+            $dom = new \DOMDocument();
+            $dom->loadXML($xml);
+            $claveAccesoNode = $dom->getElementsByTagName('claveAcceso')->item(0);
+            return $claveAccesoNode ? $claveAccesoNode->nodeValue : 'DESCONOCIDA';
+        } catch (Exception $e) {
+            return 'DESCONOCIDA';
         }
     }
     
@@ -127,11 +246,21 @@ class SriSoapService {
             $autorizaciones = $response->RespuestaAutorizacionComprobante->autorizaciones ?? null;
             
             if (!$autorizaciones || !isset($autorizaciones->autorizacion)) {
-                return [
+                $resultado = [
                     'success' => false,
                     'estado' => 'NO_ENCONTRADO',
                     'mensajes' => [['mensaje' => 'No se encontró información de autorización']]
                 ];
+                
+                // Guardar log
+                $this->guardarLog('autorizacion', $claveAcceso, [
+                    'endpoint' => $this->endpoints['autorizacion'],
+                    'request' => $client->__getLastRequest(),
+                    'response' => $client->__getLastResponse(),
+                    'resultado' => $resultado
+                ]);
+                
+                return $resultado;
             }
             
             $autorizacion = $autorizaciones->autorizacion;
@@ -166,7 +295,7 @@ class SriSoapService {
                 }
             }
             
-            return [
+            $resultado = [
                 'success' => $estado === 'AUTORIZADO',
                 'estado' => $estado,
                 'numero_autorizacion' => $numeroAutorizacion,
@@ -179,8 +308,18 @@ class SriSoapService {
                 'soap_response' => $client->__getLastResponse()
             ];
             
+            // Guardar log
+            $this->guardarLog('autorizacion', $claveAcceso, [
+                'endpoint' => $this->endpoints['autorizacion'],
+                'request' => $client->__getLastRequest(),
+                'response' => $client->__getLastResponse(),
+                'resultado' => $resultado
+            ]);
+            
+            return $resultado;
+            
         } catch (Exception $e) {
-            return [
+            $resultado = [
                 'success' => false,
                 'estado' => 'ERROR',
                 'mensajes' => [
@@ -192,6 +331,15 @@ class SriSoapService {
                 ],
                 'exception' => $e->getMessage()
             ];
+            
+            // Guardar log de error
+            $this->guardarLog('autorizacion', $claveAcceso, [
+                'endpoint' => $this->endpoints['autorizacion'],
+                'error' => $e->getMessage() . "\n\nStack Trace:\n" . $e->getTraceAsString(),
+                'resultado' => $resultado
+            ]);
+            
+            return $resultado;
         }
     }
     
@@ -214,12 +362,27 @@ class SriSoapService {
         // Paso 1: Enviar a recepción
         $recepcion = $this->enviarComprobante($xmlFirmado);
         
+        // Error 70: "CLAVE EN PROCESAMIENTO" significa que el SRI ya la tiene
+        // No es un error fatal, debemos consultar autorización
+        $error70 = false;
         if (!$recepcion['success']) {
-            return [
-                'success' => false,
-                'paso' => 'recepcion',
-                'resultado' => $recepcion
-            ];
+            // Verificar si es Error 70
+            foreach ($recepcion['mensajes'] as $msg) {
+                if ($msg['identificador'] == '70') {
+                    error_log("[SRI] ⚠️ Error 70 detectado: Clave en procesamiento. Consultando autorización...");
+                    $error70 = true;
+                    break;
+                }
+            }
+            
+            // Si NO es Error 70, fallar inmediatamente
+            if (!$error70) {
+                return [
+                    'success' => false,
+                    'paso' => 'recepcion',
+                    'resultado' => $recepcion
+                ];
+            }
         }
         
         // Paso 2: Esperar y consultar autorización

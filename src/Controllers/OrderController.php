@@ -394,9 +394,117 @@ class OrderController {
                     
                     if ($bytesWritten !== false) {
                         error_log("[SRI] ✅ XML guardado exitosamente: {$filename} ({$bytesWritten} bytes) en {$filepath}");
+                        
                         // Verificar que el archivo existe
                         if (file_exists($filepath)) {
                             error_log("[SRI] ✅ Archivo verificado existe: {$filepath}");
+                            
+                            // === PASO 2: FIRMAR XML ===
+                            try {
+                                error_log("[SRI] Iniciando firma digital del XML...");
+                                $xmlSigner = new \App\Services\SriXmlSigner();
+                                $resultadoFirma = $xmlSigner->firmarXml($filepath);
+                                
+                                if ($resultadoFirma['success']) {
+                                    error_log("[SRI] ✅ XML firmado exitosamente: {$resultadoFirma['xml_path']}");
+                                    
+                                    // === PASO 3: ENVIAR AL SRI ===
+                                    try {
+                                        error_log("[SRI] Enviando comprobante al SRI (ambiente TEST)...");
+                                        $soapService = new \App\Services\SriSoapService();
+                                        
+                                        // Enviar y esperar autorización
+                                        $resultadoSri = $soapService->enviarYAutorizar(
+                                            $resultadoFirma['xml_firmado'],
+                                            $xmlData['access_key'],
+                                            3, // Reintentos
+                                            3  // Delay entre intentos en segundos
+                                        );
+                                        
+                                        if ($resultadoSri['success']) {
+                                            $autorizacion = $resultadoSri['autorizacion'];
+                                            error_log("[SRI] ✅ FACTURA AUTORIZADA por el SRI!");
+                                            error_log("[SRI] Número de autorización: {$autorizacion['numero_autorizacion']}");
+                                            error_log("[SRI] Fecha autorización: {$autorizacion['fecha_autorizacion']}");
+                                            
+                                            // Guardar XML autorizado
+                                            $authorizedDir = __DIR__ . '/../../storage/sri/authorized';
+                                            if (!is_dir($authorizedDir)) {
+                                                mkdir($authorizedDir, 0775, true);
+                                            }
+                                            $authorizedPath = $authorizedDir . '/' . $filename;
+                                            file_put_contents($authorizedPath, $autorizacion['xml_autorizado']);
+                                            
+                                            // === PASO 4: GENERAR PDF (RIDE) ===
+                                            try {
+                                                error_log("[SRI] Generando PDF RIDE...");
+                                                $rideGenerator = new \App\Services\SriRideGenerator();
+                                                $pdfContent = $rideGenerator->generarRide($autorizacion['xml_autorizado']);
+                                                
+                                                // Guardar PDF
+                                                $rideDir = __DIR__ . '/../../storage/sri/ride';
+                                                if (!is_dir($rideDir)) {
+                                                    mkdir($rideDir, 0775, true);
+                                                }
+                                                $pdfFilename = str_replace('.xml', '.pdf', $filename);
+                                                $pdfPath = $rideDir . '/' . $pdfFilename;
+                                                file_put_contents($pdfPath, $pdfContent);
+                                                
+                                                error_log("[SRI] ✅ PDF RIDE generado: {$pdfFilename}");
+                                                
+                                            } catch (\Exception $e) {
+                                                error_log("[SRI] ⚠️ Error generando PDF RIDE: " . $e->getMessage());
+                                            }
+                                            
+                                        } else {
+                                            error_log("[SRI] ❌ Factura NO autorizada por el SRI");
+                                            error_log("[SRI] Paso fallido: " . ($resultadoSri['paso'] ?? 'desconocido'));
+                                            error_log("[SRI] Intentos: " . ($resultadoSri['intentos'] ?? 0));
+                                            
+                                            // Log detalles de recepción
+                                            if (isset($resultadoSri['recepcion'])) {
+                                                $recepcion = $resultadoSri['recepcion'];
+                                                error_log("[SRI] Recepción - Estado: " . ($recepcion['estado'] ?? 'N/A'));
+                                                if (!empty($recepcion['mensajes'])) {
+                                                    error_log("[SRI] Recepción - Mensajes:");
+                                                    foreach ($recepcion['mensajes'] as $msg) {
+                                                        error_log("[SRI]   - [{$msg['tipo']}] {$msg['mensaje']}");
+                                                    }
+                                                }
+                                                if (isset($recepcion['exception'])) {
+                                                    error_log("[SRI] Recepción - Excepción: " . $recepcion['exception']);
+                                                }
+                                            }
+                                            
+                                            // Log detalles de autorización
+                                            if (isset($resultadoSri['autorizacion'])) {
+                                                $autorizacion = $resultadoSri['autorizacion'];
+                                                $estado = $autorizacion['estado'] ?? 'DESCONOCIDO';
+                                                error_log("[SRI] Autorización - Estado: {$estado}");
+                                                if (!empty($autorizacion['mensajes'])) {
+                                                    error_log("[SRI] Autorización - Mensajes:");
+                                                    foreach ($autorizacion['mensajes'] as $msg) {
+                                                        error_log("[SRI]   - [{$msg['tipo']}] {$msg['mensaje']}");
+                                                    }
+                                                }
+                                                if (isset($autorizacion['exception'])) {
+                                                    error_log("[SRI] Autorización - Excepción: " . $autorizacion['exception']);
+                                                }
+                                            }
+                                        }
+                                        
+                                    } catch (\Exception $e) {
+                                        error_log("[SRI] ❌ Error enviando al SRI: " . $e->getMessage());
+                                    }
+                                    
+                                } else {
+                                    error_log("[SRI] ❌ Error firmando XML: {$resultadoFirma['error']}");
+                                }
+                                
+                            } catch (\Exception $e) {
+                                error_log("[SRI] ❌ Excepción en firma digital: " . $e->getMessage());
+                            }
+                            
                         } else {
                             error_log("[SRI] ⚠️ ADVERTENCIA: file_put_contents retornó {$bytesWritten} pero el archivo NO existe!");
                         }

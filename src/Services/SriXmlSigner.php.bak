@@ -1,0 +1,336 @@
+<?php
+
+namespace App\Services;
+
+use App\Core\TenantContext;
+use phpseclib3\File\X509;
+use phpseclib3\Crypt\RSA;
+use DOMDocument;
+use DOMXPath;
+use Exception;
+
+/**
+ * Servicio para firma digital de comprobantes electrónicos SRI
+ * Usa phpseclib para firmar XMLs con certificado .p12
+ */
+class SriXmlSigner {
+    
+    private array $config;
+    private string $certPath;
+    private string $certPassword;
+    
+    public function __construct() {
+        $tenantId = TenantContext::id() ?? 'paramascotasec';
+        $sriConfig = require __DIR__ . '/../../config/sri.php';
+        
+        if (!isset($sriConfig[$tenantId])) {
+            throw new Exception("Configuración SRI no encontrada para tenant: {$tenantId}");
+        }
+        
+        $this->config = $sriConfig[$tenantId];
+        
+        // Obtener certificado desde variables de entorno o config
+        $this->certPath = getenv('SRI_CERT_PATH') ?: $this->config['certificado']['path'];
+        $this->certPassword = getenv('SRI_CERT_PASSWORD') ?: $this->config['certificado']['password'];
+        
+        if (empty($this->certPassword)) {
+            throw new Exception("Contraseña del certificado no configurada. Define SRI_CERT_PASSWORD en .env");
+        }
+    }
+    
+    /**
+     * Firma un XML de comprobante electrónico
+     * 
+     * @param string $xmlPath Ruta al archivo XML sin firmar
+     * @return array ['success' => bool, 'xml_firmado' => string, 'xml_path' => string, 'error' => string]
+     */
+    public function firmarXml(string $xmlPath): array {
+        try {
+            // Validar que el archivo existe
+            if (!file_exists($xmlPath)) {
+                throw new Exception("Archivo XML no encontrado: {$xmlPath}");
+            }
+            
+            // Leer el XML
+            $xmlContent = file_get_contents($xmlPath);
+            if ($xmlContent === false) {
+                throw new Exception("No se pudo leer el archivo XML");
+            }
+            
+            // Cargar certificado
+            $certData = $this->cargarCertificado();
+            
+            // Firmar el XML
+            $xmlFirmado = $this->firmarXmlContent($xmlContent, $certData);
+            
+            // Guardar XML firmado
+            $signedPath = $this->guardarXmlFirmado($xmlPath, $xmlFirmado);
+            
+            return [
+                'success' => true,
+                'xml_firmado' => $xmlFirmado,
+                'xml_path' => $signedPath,
+                'message' => 'XML firmado exitosamente'
+            ];
+            
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'xml_firmado' => null,
+                'xml_path' => null,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * Carga el certificado .p12 y extrae la clave privada y el certificado
+     */
+    private function cargarCertificado(): array {
+        // Validar que el certificado existe
+        if (!file_exists($this->certPath)) {
+            throw new Exception("Certificado no encontrado: {$this->certPath}");
+        }
+        
+        // Leer el archivo .p12
+        $p12Content = file_get_contents($this->certPath);
+        if ($p12Content === false) {
+            throw new Exception("No se pudo leer el certificado");
+        }
+        
+        // Extraer certificado y clave privada usando OpenSSL
+        $certs = [];
+        if (!openssl_pkcs12_read($p12Content, $certs, $this->certPassword)) {
+            throw new Exception("Error al leer el certificado .p12. Verifica la contraseña.");
+        }
+        
+        if (!isset($certs['pkey']) || !isset($certs['cert'])) {
+            throw new Exception("El certificado no contiene la clave privada o el certificado público");
+        }
+        
+        // Cargar la clave privada con phpseclib
+        $privateKey = RSA::load($certs['pkey']);
+        
+        // Cargar el certificado X.509
+        $x509 = new X509();
+        $cert = $x509->loadX509($certs['cert']);
+        
+        return [
+            'private_key' => $privateKey,
+            'certificate' => $cert,
+            'cert_pem' => $certs['cert'],
+            'x509' => $x509
+        ];
+    }
+    
+    /**
+     * Firma el contenido XML usando XML-DSig
+     */
+    private function firmarXmlContent(string $xmlContent, array $certData): string {
+        // Cargar el XML en DOMDocument
+        $doc = new DOMDocument('1.0', 'UTF-8');
+        $doc->preserveWhiteSpace = false;
+        $doc->formatOutput = false;
+        
+        if (!$doc->loadXML($xmlContent)) {
+            throw new Exception("XML inválido");
+        }
+        
+        // Obtener el nodo raíz (factura, notaCredito, etc.)
+        $root = $doc->documentElement;
+        if (!$root) {
+            throw new Exception("No se encontró el elemento raíz del XML");
+        }
+        
+        // Canonicalizar el XML para firma (sin la firma)
+        $canonicalXml = $root->C14N(false, false);
+        
+        // Generar hash SHA-256 del XML canonicalizado
+        $hash = hash('sha256', $canonicalXml, true);
+        $digestValue = base64_encode($hash);
+        
+        // Preparar SignedInfo para firmar
+        $signedInfo = $this->generarSignedInfo($digestValue);
+        
+        // Canonicalizar SignedInfo
+        $signedInfoDoc = new DOMDocument('1.0', 'UTF-8');
+        $signedInfoDoc->loadXML($signedInfo);
+        $canonicalSignedInfo = $signedInfoDoc->documentElement->C14N(false, false);
+        
+        // Firmar SignedInfo con la clave privada
+        $signature = $certData['private_key']
+            ->withPadding(RSA::SIGNATURE_PKCS1)
+            ->withHash('sha256')
+            ->sign($canonicalSignedInfo);
+        
+        $signatureValue = base64_encode($signature);
+        
+        // Obtener información del certificado
+        $certData['x509']->loadX509($certData['cert_pem']);
+        $certInfo = $certData['x509']->getCurrentCert();
+        
+        // Extraer número de serie y emisor
+        $serialNumber = $certInfo['tbsCertificate']['serialNumber']->toString();
+        $issuer = $this->formatIssuerName($certInfo['tbsCertificate']['issuer']);
+        
+        // Extraer modulus y exponent del certificado
+        $publicKey = $certData['x509']->getPublicKey();
+        $modulus = base64_encode($publicKey->getModulus()->toBytes());
+        $exponent = base64_encode($publicKey->getExponent()->toBytes());
+        
+        // Obtener el certificado en base64
+        $certBase64 = $this->extractCertBase64($certData['cert_pem']);
+        
+        // Crear el nodo Signature completo
+        $signatureNode = $this->crearNodoSignature(
+            $digestValue,
+            $signatureValue,
+            $modulus,
+            $exponent,
+            $certBase64,
+            $serialNumber,
+            $issuer
+        );
+        
+        // Importar el nodo Signature al documento original
+        $signatureElement = $doc->importNode($signatureNode->documentElement, true);
+        
+        // Agregar Signature como último hijo del elemento raíz
+        $root->appendChild($signatureElement);
+        
+        // Retornar XML firmado
+        return $doc->saveXML();
+    }
+    
+    /**
+     * Genera el elemento SignedInfo
+     */
+    private function generarSignedInfo(string $digestValue): string {
+        return <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+    <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+    <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+    <Reference URI="">
+        <Transforms>
+            <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+        </Transforms>
+        <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+        <DigestValue>{$digestValue}</DigestValue>
+    </Reference>
+</SignedInfo>
+XML;
+    }
+    
+    /**
+     * Crea el nodo Signature completo
+     */
+    private function crearNodoSignature(
+        string $digestValue,
+        string $signatureValue,
+        string $modulus,
+        string $exponent,
+        string $certBase64,
+        string $serialNumber,
+        string $issuer
+    ): DOMDocument {
+        $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+    <SignedInfo>
+        <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+        <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+        <Reference URI="">
+            <Transforms>
+                <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+            </Transforms>
+            <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+            <DigestValue>{$digestValue}</DigestValue>
+        </Reference>
+    </SignedInfo>
+    <SignatureValue>{$signatureValue}</SignatureValue>
+    <KeyInfo>
+        <X509Data>
+            <X509Certificate>{$certBase64}</X509Certificate>
+        </X509Data>
+        <KeyValue>
+            <RSAKeyValue>
+                <Modulus>{$modulus}</Modulus>
+                <Exponent>{$exponent}</Exponent>
+            </RSAKeyValue>
+        </KeyValue>
+    </KeyInfo>
+</Signature>
+XML;
+        
+        $doc = new DOMDocument('1.0', 'UTF-8');
+        $doc->loadXML($xml);
+        return $doc;
+    }
+    
+    /**
+     * Formatea el nombre del emisor del certificado
+     */
+    private function formatIssuerName(array $issuer): string {
+        $parts = [];
+        
+        // Orden estándar: CN, O, OU, C
+        if (isset($issuer['rdnSequence'])) {
+            foreach ($issuer['rdnSequence'] as $rdn) {
+                foreach ($rdn as $attr) {
+                    $type = $attr['type'];
+                    $value = $attr['value']['utf8String'] ?? $attr['value']['printableString'] ?? '';
+                    
+                    // Mapear OIDs comunes
+                    $typeMap = [
+                        '2.5.4.3' => 'CN',
+                        '2.5.4.10' => 'O',
+                        '2.5.4.11' => 'OU',
+                        '2.5.4.6' => 'C',
+                        '2.5.4.7' => 'L',
+                        '2.5.4.8' => 'ST',
+                    ];
+                    
+                    $typeName = $typeMap[$type] ?? $type;
+                    $parts[] = "{$typeName}={$value}";
+                }
+            }
+        }
+        
+        return implode(', ', $parts);
+    }
+    
+    /**
+     * Extrae el certificado en formato Base64 sin headers
+     */
+    private function extractCertBase64(string $certPem): string {
+        $cert = str_replace(['-----BEGIN CERTIFICATE-----', '-----END CERTIFICATE-----'], '', $certPem);
+        $cert = str_replace(["\r", "\n", " "], '', $cert);
+        return $cert;
+    }
+    
+    /**
+     * Guarda el XML firmado en el directorio de firmados
+     */
+    private function guardarXmlFirmado(string $originalPath, string $xmlFirmado): string {
+        // Determinar el directorio de firmados
+        $signedDir = dirname(dirname($originalPath)) . '/signed';
+        
+        if (!is_dir($signedDir)) {
+            mkdir($signedDir, 0775, true);
+        }
+        
+        // Generar nombre del archivo firmado
+        $filename = basename($originalPath);
+        $signedPath = $signedDir . '/' . $filename;
+        
+        // Guardar
+        $bytesWritten = file_put_contents($signedPath, $xmlFirmado);
+        
+        if ($bytesWritten === false) {
+            throw new Exception("No se pudo guardar el XML firmado");
+        }
+        
+        return $signedPath;
+    }
+}

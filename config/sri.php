@@ -14,9 +14,9 @@ return [
         // Datos del emisor (RUC registrado en el SRI)
         'emisor' => [
             'ruc' => getenv('SRI_RUC') ?: '1234567890001',
-            'razon_social' => 'PARA MASCOTAS ECUADOR S.A.',
-            'nombre_comercial' => 'Para Mascotas EC',
-            'direccion_matriz' => 'Av. Principal 123 y Secundaria',
+            'razon_social' => 'VASQUEZ ALVAREZ GLAYMEL CAROLINA',
+            'nombre_comercial' => 'PARA MASCOTAS',
+            'direccion_matriz' => 'PICHINCHA / QUITO / LA CONCEPCIÓN / AVENIDA DE LA PRENSA OE3-11 Y N49B JUAN PAZ Y MIÑO',
             'codigo_establecimiento' => '001',
             'punto_emision' => '001',
             'obligado_contabilidad' => 'NO', // SI o NO
@@ -48,14 +48,14 @@ return [
             ],
         ],
         
-        // Configuración SOAP (deshabilitada temporalmente hasta implementar envío al SRI)
+        // Configuración SOAP
         'soap_options' => [
-            // 'soap_version' => SOAP_1_1,
-            // 'trace' => true,
-            // 'exceptions' => true,
-            // 'connection_timeout' => 30,
-            // 'cache_wsdl' => WSDL_CACHE_NONE, // En producción usar WSDL_CACHE_BOTH
-            // 'compression' => SOAP_COMPRESSION_ACCEPT | SOAP_COMPRESSION_GZIP,
+            'soap_version' => SOAP_1_1,
+            'trace' => true,
+            'exceptions' => true,
+            'connection_timeout' => 30,
+            'cache_wsdl' => WSDL_CACHE_NONE, // En producción usar WSDL_CACHE_BOTH
+            'compression' => SOAP_COMPRESSION_ACCEPT | SOAP_COMPRESSION_GZIP,
         ],
         
         // Configuración de reintentos
@@ -103,12 +103,12 @@ return [
             ],
         ],
         'soap_options' => [
-            // 'soap_version' => SOAP_1_1,
-            // 'trace' => true,
-            // 'exceptions' => true,
-            // 'connection_timeout' => 30,
-            // 'cache_wsdl' => WSDL_CACHE_NONE,
-            // 'compression' => SOAP_COMPRESSION_ACCEPT | SOAP_COMPRESSION_GZIP,
+            'soap_version' => SOAP_1_1,
+            'trace' => true,
+            'exceptions' => true,
+            'connection_timeout' => 30,
+            'cache_wsdl' => WSDL_CACHE_NONE,
+            'compression' => SOAP_COMPRESSION_ACCEPT | SOAP_COMPRESSION_GZIP,
         ],
         'retry' => [
             'max_attempts' => 3,

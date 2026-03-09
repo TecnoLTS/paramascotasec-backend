@@ -244,12 +244,32 @@ class SriController {
     }
     
     /**
-     * Obtiene el siguiente secuencial
-     * TODO: Implementar control de secuenciales en BD
+     * Obtiene el siguiente secuencial de forma secuencial e incremental
+     * Usa un archivo para persistencia (en producción debería ser BD)
      */
     private function getNextSecuencial(): int {
-        // Por ahora retorna un número aleatorio para pruebas
-        // En producción esto debe venir de una tabla de secuenciales
-        return rand(1, 999999);
+        $storageDir = __DIR__ . '/../../storage/sri';
+        $secuencialFile = $storageDir . '/last_secuencial.txt';
+        
+        // Crear directorio si no existe
+        if (!is_dir($storageDir)) {
+            mkdir($storageDir, 0775, true);
+        }
+        
+        // Leer último secuencial o empezar en un número alto para evitar colisiones con pruebas anteriores
+        if (file_exists($secuencialFile)) {
+            $lastSecuencial = (int)file_get_contents($secuencialFile);
+        } else {
+            // Empezar en 900000 para evitar colisiones con números aleatorios anteriores (1-999999)
+            $lastSecuencial = 900000;
+        }
+        
+        // Incrementar
+        $nextSecuencial = $lastSecuencial + 1;
+        
+        // Guardar nuevo secuencial
+        file_put_contents($secuencialFile, $nextSecuencial);
+        
+        return $nextSecuencial;
     }
 }
