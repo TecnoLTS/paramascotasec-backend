@@ -78,6 +78,36 @@ class ProductController {
                     return;
                 }
             }
+            $expirationDateRaw = trim((string)($attributes['expirationDate'] ?? $attributes['expiryDate'] ?? ''));
+            if ($productType === 'comida' && $expirationDateRaw === '') {
+                Response::error('La fecha de vencimiento es obligatoria para productos de comida.', 400, 'PRODUCT_EXPIRY_DATE_REQUIRED');
+                return;
+            }
+            if ($expirationDateRaw !== '') {
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $expirationDateRaw) !== 1) {
+                    Response::error('Fecha de vencimiento inválida. Usa formato YYYY-MM-DD.', 400, 'PRODUCT_EXPIRY_DATE_INVALID');
+                    return;
+                }
+                $expirationDate = \DateTimeImmutable::createFromFormat('Y-m-d', $expirationDateRaw);
+                if (!($expirationDate instanceof \DateTimeImmutable)) {
+                    Response::error('Fecha de vencimiento inválida.', 400, 'PRODUCT_EXPIRY_DATE_INVALID');
+                    return;
+                }
+                $attributes['expirationDate'] = $expirationDate->format('Y-m-d');
+
+                $alertRaw = $attributes['expirationAlertDays'] ?? $attributes['expiryAlertDays'] ?? null;
+                if ($alertRaw === null || $alertRaw === '') {
+                    $attributes['expirationAlertDays'] = '30';
+                } elseif (!is_numeric($alertRaw) || intval($alertRaw) < 0) {
+                    Response::error('Días de alerta de vencimiento inválidos.', 400, 'PRODUCT_EXPIRY_ALERT_DAYS_INVALID');
+                    return;
+                } else {
+                    $attributes['expirationAlertDays'] = (string)min(3650, max(0, intval($alertRaw)));
+                }
+            } else {
+                unset($attributes['expirationDate'], $attributes['expiryDate'], $attributes['expirationAlertDays'], $attributes['expiryAlertDays']);
+            }
+            $data['attributes'] = $attributes;
             $product = $this->productRepository->create($data);
             Response::json($product, 201);
         } catch (\Exception $e) {
@@ -121,7 +151,16 @@ class ProductController {
                 }
             }
             if (isset($data['productType']) || isset($data['product_type']) || isset($data['attributes'])) {
-                $attributes = $data['attributes'] ?? [];
+                $currentProduct = $this->productRepository->getById($id);
+                if (!$currentProduct) {
+                    Response::error('Producto no encontrado', 404, 'PRODUCT_NOT_FOUND');
+                    return;
+                }
+
+                $attributes = $data['attributes'] ?? ($currentProduct['attributes'] ?? []);
+                if (!is_array($attributes)) {
+                    $attributes = [];
+                }
                 $required = ['sku', 'tag', 'species'];
                 foreach ($required as $key) {
                     if (!isset($attributes[$key]) || trim((string)$attributes[$key]) === '') {
@@ -129,6 +168,37 @@ class ProductController {
                         return;
                     }
                 }
+                $effectiveType = $productType ?? strtolower((string)($currentProduct['productType'] ?? ''));
+                $expirationDateRaw = trim((string)($attributes['expirationDate'] ?? $attributes['expiryDate'] ?? ''));
+                if ($effectiveType === 'comida' && $expirationDateRaw === '') {
+                    Response::error('La fecha de vencimiento es obligatoria para productos de comida.', 400, 'PRODUCT_EXPIRY_DATE_REQUIRED');
+                    return;
+                }
+                if ($expirationDateRaw !== '') {
+                    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $expirationDateRaw) !== 1) {
+                        Response::error('Fecha de vencimiento inválida. Usa formato YYYY-MM-DD.', 400, 'PRODUCT_EXPIRY_DATE_INVALID');
+                        return;
+                    }
+                    $expirationDate = \DateTimeImmutable::createFromFormat('Y-m-d', $expirationDateRaw);
+                    if (!($expirationDate instanceof \DateTimeImmutable)) {
+                        Response::error('Fecha de vencimiento inválida.', 400, 'PRODUCT_EXPIRY_DATE_INVALID');
+                        return;
+                    }
+                    $attributes['expirationDate'] = $expirationDate->format('Y-m-d');
+
+                    $alertRaw = $attributes['expirationAlertDays'] ?? $attributes['expiryAlertDays'] ?? null;
+                    if ($alertRaw === null || $alertRaw === '') {
+                        $attributes['expirationAlertDays'] = '30';
+                    } elseif (!is_numeric($alertRaw) || intval($alertRaw) < 0) {
+                        Response::error('Días de alerta de vencimiento inválidos.', 400, 'PRODUCT_EXPIRY_ALERT_DAYS_INVALID');
+                        return;
+                    } else {
+                        $attributes['expirationAlertDays'] = (string)min(3650, max(0, intval($alertRaw)));
+                    }
+                } else {
+                    unset($attributes['expirationDate'], $attributes['expiryDate'], $attributes['expirationAlertDays'], $attributes['expiryAlertDays']);
+                }
+                $data['attributes'] = $attributes;
             }
             $product = $this->productRepository->update($id, $data);
             if (!$product) {

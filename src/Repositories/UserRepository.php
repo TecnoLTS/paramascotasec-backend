@@ -13,8 +13,64 @@ class UserRepository {
     }
 
     public function getAll() {
-        $stmt = $this->db->prepare('SELECT id, name, email, role FROM "User" WHERE tenant_id = :tenant_id');
-        $stmt->execute(['tenant_id' => $this->getTenantId()]);
+        $stmt = $this->db->prepare('
+            SELECT
+                u.id,
+                u.name,
+                u.email,
+                u.role,
+                u.email_verified,
+                u.document_type,
+                u.document_number,
+                u.business_name,
+                u.profile,
+                u.addresses,
+                u.created_at,
+                u.updated_at,
+                COALESCE(stats.orders_total, 0)::int AS orders_total,
+                COALESCE(stats.orders_active, 0)::int AS orders_active,
+                COALESCE(stats.orders_completed, 0)::int AS orders_completed,
+                COALESCE(stats.total_spent, 0)::numeric(12,2) AS total_spent,
+                stats.last_order_at,
+                stats.last_order_id,
+                o_last.shipping_address AS last_shipping_address,
+                o_last.billing_address AS last_billing_address
+            FROM "User" u
+            LEFT JOIN (
+                SELECT
+                    o.user_id,
+                    COUNT(*) AS orders_total,
+                    COUNT(*) FILTER (
+                        WHERE LOWER(COALESCE(o.status, \'pending\')) NOT IN (\'canceled\', \'cancelled\')
+                    ) AS orders_active,
+                    COUNT(*) FILTER (
+                        WHERE LOWER(COALESCE(o.status, \'pending\')) IN (\'completed\', \'delivered\')
+                    ) AS orders_completed,
+                    SUM(
+                        CASE
+                            WHEN LOWER(COALESCE(o.status, \'pending\')) NOT IN (\'canceled\', \'cancelled\')
+                            THEN COALESCE(o.total, 0)
+                            ELSE 0
+                        END
+                    ) AS total_spent,
+                    MAX(o.created_at) AS last_order_at,
+                    (ARRAY_AGG(o.id ORDER BY o.created_at DESC))[1] AS last_order_id
+                FROM "Order" o
+                WHERE o.tenant_id = :tenant_id_orders
+                GROUP BY o.user_id
+            ) stats ON stats.user_id = u.id
+            LEFT JOIN "Order" o_last
+                ON o_last.id = stats.last_order_id
+                AND o_last.tenant_id = :tenant_id_orders_latest
+            WHERE u.tenant_id = :tenant_id_users
+            ORDER BY u.created_at DESC, u.name ASC
+        ');
+        $tenantId = $this->getTenantId();
+        $stmt->execute([
+            'tenant_id_orders' => $tenantId,
+            'tenant_id_orders_latest' => $tenantId,
+            'tenant_id_users' => $tenantId
+        ]);
         return $stmt->fetchAll();
     }
 

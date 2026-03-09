@@ -91,6 +91,16 @@ class ProductRepository {
         $row['imageMeta'] = json_decode($row['imageMeta'] ?? '[]', true);
         $row['variations'] = json_decode($row['variations'] ?? '[]', true);
         $row['attributes'] = json_decode($row['attributes'] ?? '{}', true) ?: [];
+        $expirationDate = $this->normalizeExpirationDate(
+            $row['attributes']['expirationDate']
+                ?? $row['attributes']['expiryDate']
+                ?? null
+        );
+        $expirationAlertDays = $this->normalizeExpirationAlertDays(
+            $row['attributes']['expirationAlertDays']
+                ?? $row['attributes']['expiryAlertDays']
+                ?? null
+        );
 
         $row['images'] = array_map([$this, 'normalizeImageUrl'], $row['images']);
         $row['thumbImage'] = array_map([$this, 'normalizeImageUrl'], $row['thumbImage']);
@@ -188,6 +198,106 @@ class ProductRepository {
                 ]
             ];
         }
+
+        $row['expirationDate'] = $expirationDate;
+        $row['expirationAlertDays'] = $expirationAlertDays;
+        $row['daysToExpire'] = null;
+        $row['expirationStatus'] = 'none';
+        if ($expirationDate !== null) {
+            $today = new \DateTimeImmutable('today');
+            $expiry = \DateTimeImmutable::createFromFormat('Y-m-d', $expirationDate);
+            if ($expiry instanceof \DateTimeImmutable) {
+                $daysToExpire = (int)$today->diff($expiry)->format('%r%a');
+                $row['daysToExpire'] = $daysToExpire;
+                if ($daysToExpire < 0) {
+                    $row['expirationStatus'] = 'expired';
+                } elseif ($daysToExpire <= $expirationAlertDays) {
+                    $row['expirationStatus'] = 'expiring';
+                } else {
+                    $row['expirationStatus'] = 'ok';
+                }
+            }
+        }
+
+        $stockQty = max(0, (int)($row['quantity'] ?? 0));
+        $soldHistorical = max(0, (int)($row['sold'] ?? 0));
+        $reorderPoint = $this->normalizeIntAttribute(
+            $row['attributes']['reorderPoint'] ?? $row['attributes']['stockMin'] ?? null,
+            5,
+            1,
+            20000
+        );
+        $overstockThreshold = $this->normalizeIntAttribute(
+            $row['attributes']['overstockThreshold'] ?? $row['attributes']['stockMax'] ?? null,
+            max(20, $reorderPoint * 3),
+            $reorderPoint + 1,
+            50000
+        );
+        $stockMax = $this->normalizeIntAttribute(
+            $row['attributes']['stockMax'] ?? $row['attributes']['idealStock'] ?? null,
+            $overstockThreshold,
+            $overstockThreshold,
+            50000
+        );
+        $criticalPoint = max(1, (int)floor($reorderPoint / 2));
+        $stockStatus = 'healthy';
+        if ($stockQty <= 0) {
+            $stockStatus = 'out_of_stock';
+        } elseif ($stockQty <= $criticalPoint) {
+            $stockStatus = 'critical';
+        } elseif ($stockQty <= $reorderPoint) {
+            $stockStatus = 'low';
+        } elseif ($stockQty >= $overstockThreshold) {
+            $stockStatus = 'overstock';
+        }
+        $velocityWindowMonths = $this->normalizeIntAttribute(
+            $row['attributes']['velocityWindowMonths'] ?? null,
+            6,
+            1,
+            24
+        );
+        $avgMonthlySales = $velocityWindowMonths > 0 ? ($soldHistorical / $velocityWindowMonths) : 0;
+        $coverageDays = $avgMonthlySales >= 1
+            ? min(720, round(($stockQty / $avgMonthlySales) * 30, 1))
+            : null;
+        $costTotal = round($cost * $stockQty, 2);
+        $saleTotalNet = round($priceNet * $stockQty, 2);
+        $saleTotalGross = round($price * $stockQty, 2);
+
+        $row['inventoryStatus'] = $stockStatus;
+        $row['inventory'] = [
+            'onHand' => $stockQty,
+            'reserved' => 0,
+            'available' => $stockQty,
+            'soldHistorical' => $soldHistorical,
+            'reorderPoint' => $reorderPoint,
+            'criticalPoint' => $criticalPoint,
+            'overstockThreshold' => $overstockThreshold,
+            'stockMax' => $stockMax,
+            'status' => $stockStatus,
+            'coverage' => [
+                'days' => $coverageDays,
+                'avgMonthlySales' => round($avgMonthlySales, 2),
+                'windowMonths' => $velocityWindowMonths,
+                'confidence' => $avgMonthlySales >= 1 ? 'medium' : 'low'
+            ],
+            'valuation' => [
+                'costTotal' => $costTotal,
+                'saleTotalNet' => $saleTotalNet,
+                'saleTotalGross' => $saleTotalGross
+            ],
+            'lot' => [
+                'code' => $row['attributes']['lotCode'] ?? null,
+                'location' => $row['attributes']['storageLocation'] ?? ($row['attributes']['warehouseLocation'] ?? null),
+                'supplier' => $row['attributes']['supplier'] ?? null
+            ],
+            'expiration' => [
+                'date' => $expirationDate,
+                'alertDays' => $expirationAlertDays,
+                'daysToExpire' => $row['daysToExpire'],
+                'status' => $row['expirationStatus']
+            ]
+        ];
 
         return $row;
     }
@@ -340,6 +450,40 @@ class ProductRepository {
         if (in_array($normalized, ['1', 'true', 'yes', 'y', 'on'], true)) return true;
         if (in_array($normalized, ['0', 'false', 'no', 'n', 'off'], true)) return false;
         return $default;
+    }
+
+    private function normalizeExpirationDate($value): ?string {
+        if ($value === null) return null;
+        $raw = trim((string)$value);
+        if ($raw === '') return null;
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw) !== 1) {
+            return null;
+        }
+        $dt = \DateTimeImmutable::createFromFormat('Y-m-d', $raw);
+        if (!($dt instanceof \DateTimeImmutable)) {
+            return null;
+        }
+        return $dt->format('Y-m-d');
+    }
+
+    private function normalizeExpirationAlertDays($value): int {
+        if ($value === null || $value === '') {
+            return 30;
+        }
+        if (!is_numeric($value)) {
+            return 30;
+        }
+        return max(0, (int)$value);
+    }
+
+    private function normalizeIntAttribute($value, int $default, int $min, int $max): int {
+        if ($value === null || $value === '') {
+            return $default;
+        }
+        if (!is_numeric($value)) {
+            return $default;
+        }
+        return max($min, min($max, (int)$value));
     }
 
     private function priceFromMargin($cost, $marginPct) {

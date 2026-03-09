@@ -122,12 +122,40 @@ class BusinessIntelligenceService {
     private function generateAlerts($inventory = null, $salesProgress = null, $productAnalysis = null, $ordersByStatus = null) {
         $alerts = [];
         $inventory = is_array($inventory) ? $inventory : $this->orderRepo->getInventoryDeepDive();
+        $health = is_array($inventory['health'] ?? null) ? $inventory['health'] : [];
+        $expiredCount = (int)($health['expired_products'] ?? 0);
+        $expiringCount = (int)($health['expiring_products'] ?? 0);
         
-        if ($inventory['health']['out_of_stock'] > 0) {
+        if ((int)($health['out_of_stock'] ?? 0) > 0) {
             $alerts[] = [
                 'type' => 'critical',
-                'message' => "Tienes {$inventory['health']['out_of_stock']} productos sin stock. Riesgo de pérdida de ventas.",
+                'message' => "Tienes " . (int)$health['out_of_stock'] . " productos sin stock. Riesgo de pérdida de ventas.",
                 'action' => 'Ver inventario'
+            ];
+        }
+
+        if ($expiredCount > 0) {
+            $alerts[] = [
+                'type' => 'critical',
+                'message' => "Hay {$expiredCount} productos vencidos con stock. Retíralos de venta y gestiona devolución o merma.",
+                'action' => 'Revisar vencimientos'
+            ];
+        }
+
+        if ($expiringCount > 0) {
+            $nearestExpiry = null;
+            if (!empty($inventory['expiringItems']) && is_array($inventory['expiringItems'])) {
+                $nearestExpiry = $inventory['expiringItems'][0];
+            }
+            $daysToExpire = isset($nearestExpiry['days_to_expire']) ? (int)$nearestExpiry['days_to_expire'] : null;
+            $soonText = ($daysToExpire !== null && $daysToExpire >= 0)
+                ? " El más próximo vence en {$daysToExpire} día(s)."
+                : '';
+
+            $alerts[] = [
+                'type' => 'warning',
+                'message' => "Tienes {$expiringCount} productos próximos a vencer." . $soonText,
+                'action' => 'Planificar rotación'
             ];
         }
 

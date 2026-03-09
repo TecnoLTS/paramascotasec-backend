@@ -312,7 +312,7 @@ class OrderRepository {
             }
 
             $stmt = $this->db->prepare('
-                SELECT p.id, p.legacy_id, p.price, p.name, p.quantity,
+                SELECT p.id, p.legacy_id, p.price, p.name, p.quantity, p.attributes,
                        (SELECT url FROM "Image" WHERE product_id = p.id ORDER BY id LIMIT 1) as image
                 FROM "Product" p 
                 WHERE (p.id = :id OR p.legacy_id = :id) AND p.tenant_id = :tenant_id
@@ -330,6 +330,24 @@ class OrderRepository {
             $availableQty = (int)($product['quantity'] ?? 0);
             if ($availableQty < $quantity) {
                 throw new \Exception('Stock insuficiente para: ' . $product['name']);
+            }
+
+            $attributes = [];
+            if (!empty($product['attributes'])) {
+                $decoded = json_decode((string)$product['attributes'], true);
+                if (is_array($decoded)) {
+                    $attributes = $decoded;
+                }
+            }
+            $expirationDateRaw = trim((string)($attributes['expirationDate'] ?? $attributes['expiryDate'] ?? ''));
+            if ($expirationDateRaw !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $expirationDateRaw) === 1) {
+                $expirationDate = \DateTimeImmutable::createFromFormat('Y-m-d', $expirationDateRaw);
+                if ($expirationDate instanceof \DateTimeImmutable) {
+                    $today = new \DateTimeImmutable('today');
+                    if ($expirationDate < $today) {
+                        throw new \Exception('Producto vencido: ' . $product['name']);
+                    }
+                }
             }
 
             $priceWithTax = round(floatval($product['price']) * $taxMultiplier, 2);
@@ -1692,14 +1710,109 @@ class OrderRepository {
         $stockRiskStmt->execute(['tenant_id' => $this->getTenantId()]);
         $stockRisk = $stockRiskStmt->fetchAll();
 
+        // Expiration analysis (only products with stock and valid YYYY-MM-DD expiration date in attributes)
+        $expiringSoonStmt = $this->db->prepare("
+            SELECT
+                t.id,
+                t.legacy_id,
+                t.name,
+                t.quantity,
+                t.expiration_date,
+                t.expiration_alert_days,
+                (t.expiration_date - CURRENT_DATE) AS days_to_expire
+            FROM (
+                SELECT
+                    id,
+                    legacy_id,
+                    name,
+                    quantity,
+                    CASE
+                        WHEN COALESCE(attributes->>'expirationDate', attributes->>'expiryDate') ~ '^\d{4}-\d{2}-\d{2}$'
+                            THEN (COALESCE(attributes->>'expirationDate', attributes->>'expiryDate'))::date
+                        ELSE NULL
+                    END AS expiration_date,
+                    CASE
+                        WHEN COALESCE(attributes->>'expirationAlertDays', attributes->>'expiryAlertDays') ~ '^\d+$'
+                            THEN GREATEST(0, (COALESCE(attributes->>'expirationAlertDays', attributes->>'expiryAlertDays'))::int)
+                        ELSE 30
+                    END AS expiration_alert_days
+                FROM \"Product\"
+                WHERE tenant_id = :tenant_id
+                  AND quantity > 0
+            ) t
+            WHERE t.expiration_date IS NOT NULL
+              AND t.expiration_date >= CURRENT_DATE
+              AND t.expiration_date <= (CURRENT_DATE + t.expiration_alert_days)
+            ORDER BY t.expiration_date ASC, t.quantity DESC
+            LIMIT 8
+        ");
+        $expiringSoonStmt->execute(['tenant_id' => $this->getTenantId()]);
+        $expiringSoon = $expiringSoonStmt->fetchAll();
+
+        $expiredStmt = $this->db->prepare("
+            SELECT
+                t.id,
+                t.legacy_id,
+                t.name,
+                t.quantity,
+                t.expiration_date,
+                (CURRENT_DATE - t.expiration_date) AS days_expired
+            FROM (
+                SELECT
+                    id,
+                    legacy_id,
+                    name,
+                    quantity,
+                    CASE
+                        WHEN COALESCE(attributes->>'expirationDate', attributes->>'expiryDate') ~ '^\d{4}-\d{2}-\d{2}$'
+                            THEN (COALESCE(attributes->>'expirationDate', attributes->>'expiryDate'))::date
+                        ELSE NULL
+                    END AS expiration_date
+                FROM \"Product\"
+                WHERE tenant_id = :tenant_id
+                  AND quantity > 0
+            ) t
+            WHERE t.expiration_date IS NOT NULL
+              AND t.expiration_date < CURRENT_DATE
+            ORDER BY t.expiration_date ASC, t.quantity DESC
+            LIMIT 8
+        ");
+        $expiredStmt->execute(['tenant_id' => $this->getTenantId()]);
+        $expired = $expiredStmt->fetchAll();
+
         // Stock Health Summary
         $summaryStmt = $this->db->prepare("
-            SELECT 
-                COUNT(*) FILTER (WHERE quantity = 0) as out_of_stock,
-                COUNT(*) FILTER (WHERE quantity > 0 AND quantity <= 5) as low_stock,
-                COUNT(*) FILTER (WHERE quantity > 50) as overstock
-            FROM \"Product\"
-            WHERE tenant_id = :tenant_id
+            SELECT
+                COUNT(*) FILTER (WHERE t.quantity = 0) AS out_of_stock,
+                COUNT(*) FILTER (WHERE t.quantity > 0 AND t.quantity <= 5) AS low_stock,
+                COUNT(*) FILTER (WHERE t.quantity > 50) AS overstock,
+                COUNT(*) FILTER (
+                    WHERE t.quantity > 0
+                      AND t.expiration_date IS NOT NULL
+                      AND t.expiration_date < CURRENT_DATE
+                ) AS expired_products,
+                COUNT(*) FILTER (
+                    WHERE t.quantity > 0
+                      AND t.expiration_date IS NOT NULL
+                      AND t.expiration_date >= CURRENT_DATE
+                      AND t.expiration_date <= (CURRENT_DATE + t.expiration_alert_days)
+                ) AS expiring_products
+            FROM (
+                SELECT
+                    quantity,
+                    CASE
+                        WHEN COALESCE(attributes->>'expirationDate', attributes->>'expiryDate') ~ '^\d{4}-\d{2}-\d{2}$'
+                            THEN (COALESCE(attributes->>'expirationDate', attributes->>'expiryDate'))::date
+                        ELSE NULL
+                    END AS expiration_date,
+                    CASE
+                        WHEN COALESCE(attributes->>'expirationAlertDays', attributes->>'expiryAlertDays') ~ '^\d+$'
+                            THEN GREATEST(0, (COALESCE(attributes->>'expirationAlertDays', attributes->>'expiryAlertDays'))::int)
+                        ELSE 30
+                    END AS expiration_alert_days
+                FROM \"Product\"
+                WHERE tenant_id = :tenant_id
+            ) t
         ");
         $summaryStmt->execute(['tenant_id' => $this->getTenantId()]);
         $summary = $summaryStmt->fetch();
@@ -1707,6 +1820,8 @@ class OrderRepository {
         return [
             'highValueItems' => $highValue,
             'riskItems' => $stockRisk,
+            'expiringItems' => $expiringSoon,
+            'expiredItems' => $expired,
             'health' => $summary
         ];
     }
