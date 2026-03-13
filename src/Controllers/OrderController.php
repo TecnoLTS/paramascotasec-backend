@@ -7,7 +7,7 @@ use App\Repositories\SettingsRepository;
 use App\Core\Response;
 use App\Core\Auth;
 use App\Core\TenantContext;
-use App\Controllers\SriController;
+use App\Services\FacturadorApiService;
 
 class OrderController {
     private $orderRepository;
@@ -204,6 +204,216 @@ class OrderController {
         return is_array($decoded) ? $decoded : [];
     }
 
+    private function emitInvoiceWithFacturador(array $order): void {
+        if (empty($order['id'])) {
+            return;
+        }
+
+        try {
+            $payload = $this->buildFacturadorPayload($order);
+            $facturador = new FacturadorApiService();
+            $invoice = $facturador->emitInvoice($payload);
+
+            $this->orderRepository->updateBillingMetadata((string)$order['id'], [
+                'provider' => 'facturador',
+                'status' => 'issued',
+                'invoice_status' => $invoice['status'] ?? null,
+                'access_key' => $invoice['access_key'] ?? null,
+                'sequential' => $invoice['sequential'] ?? null,
+                'issue_date' => $invoice['issue_date'] ?? null,
+                'total' => $invoice['total'] ?? null,
+                'authorization_number' => $invoice['authorization_number'] ?? null,
+                'authorization_date' => $invoice['authorization_date'] ?? null,
+                'pdf_url' => $invoice['pdf_url'] ?? null,
+                'xml_url' => $invoice['xml_url'] ?? null,
+                'last_attempt_at' => date('c'),
+                'last_error' => null,
+            ]);
+
+            error_log(sprintf(
+                '[FACTURADOR] Factura emitida para orden %s. Clave=%s',
+                $order['id'],
+                $invoice['access_key'] ?? 'N/A'
+            ));
+        } catch (\Throwable $e) {
+            $this->orderRepository->updateBillingMetadata((string)$order['id'], [
+                'provider' => 'facturador',
+                'status' => 'failed',
+                'last_attempt_at' => date('c'),
+                'last_error' => $e->getMessage(),
+            ]);
+
+            error_log(sprintf(
+                '[FACTURADOR] Error facturando orden %s: %s',
+                $order['id'],
+                $e->getMessage()
+            ));
+        }
+    }
+
+    private function buildFacturadorPayload(array $order): array {
+        $billingAddress = $this->decodeAddress($order['billing_address'] ?? null);
+        $shippingAddress = $this->decodeAddress($order['shipping_address'] ?? null);
+        $customerAddressData = $billingAddress ?: $shippingAddress;
+
+        $customerName = trim(($customerAddressData['firstName'] ?? '') . ' ' . ($customerAddressData['lastName'] ?? ''));
+        if ($customerName === '') {
+            $customerName = trim((string)($order['user_name'] ?? '')) ?: 'CONSUMIDOR FINAL';
+        }
+
+        $customerIdentification = trim((string)($customerAddressData['documentNumber'] ?? ''));
+        if ($customerIdentification === '') {
+            $customerIdentification = '9999999999999';
+        }
+
+        $customerAddress = implode(', ', array_filter([
+            $customerAddressData['street'] ?? null,
+            $customerAddressData['city'] ?? null,
+            $customerAddressData['state'] ?? null,
+            $customerAddressData['country'] ?? null,
+        ]));
+        if ($customerAddress === '') {
+            $customerAddress = 'Ecuador';
+        }
+
+        $grossItems = is_array($order['items'] ?? null) ? array_values($order['items']) : [];
+        $discountAllocations = $this->allocateOrderDiscountAcrossItems($grossItems, (float)($order['discount_total'] ?? 0));
+        $orderVatRate = isset($order['vat_rate']) && is_numeric($order['vat_rate']) ? (float)$order['vat_rate'] : 15.0;
+        $taxDivisor = 1 + (($orderVatRate > 0 ? $orderVatRate : 15.0) / 100);
+
+        $items = [];
+        foreach ($grossItems as $index => $item) {
+            $quantity = max(1, (int)($item['quantity'] ?? 1));
+            $grossUnitPrice = (float)($item['price'] ?? 0);
+            $grossLineTotal = round($grossUnitPrice * $quantity, 2);
+            $allocatedDiscount = (float)($discountAllocations[$index] ?? 0);
+            $discountedGrossLine = max(0, $grossLineTotal - $allocatedDiscount);
+            $netUnitPrice = $taxDivisor > 0 ? ($discountedGrossLine / $quantity) / $taxDivisor : ($discountedGrossLine / $quantity);
+
+            $items[] = [
+                'code' => (string)($item['product_id'] ?? ('ITEM-' . ($index + 1))),
+                'description' => (string)($item['product_name'] ?? 'Producto'),
+                'quantity' => $quantity,
+                'unit_price' => round($netUnitPrice, 6),
+                'discount' => 0,
+            ];
+        }
+
+        $shipping = max(0, (float)($order['shipping'] ?? 0));
+        if ($shipping > 0) {
+            $shippingBase = isset($order['shipping_base']) && is_numeric($order['shipping_base'])
+                ? (float)$order['shipping_base']
+                : ($taxDivisor > 0 ? $shipping / $taxDivisor : $shipping);
+
+            $items[] = [
+                'code' => 'ENVIO',
+                'description' => 'Servicio de envio',
+                'quantity' => 1,
+                'unit_price' => round($shippingBase, 6),
+                'discount' => 0,
+            ];
+        }
+
+        $paymentMethod = $this->resolveSriPaymentMethod((string)($order['payment_method'] ?? ''));
+
+        return [
+            'customer_identification' => $customerIdentification,
+            'customer_name' => $customerName,
+            'customer_address' => $customerAddress,
+            'customer_email' => (string)($customerAddressData['email'] ?? $order['user_email'] ?? ''),
+            'payment_method' => $paymentMethod['label'],
+            'payment_method_code' => $paymentMethod['code'],
+            'items' => $items,
+            'additional_info' => array_filter([
+                'order_id' => $order['id'] ?? null,
+                'tenant_id' => TenantContext::id(),
+                'payment_method' => $paymentMethod['label'],
+                'payment_method_code' => $paymentMethod['code'],
+                'notes' => $order['order_notes'] ?? null,
+            ], static fn($value) => $value !== null && $value !== ''),
+        ];
+    }
+
+    private function allocateOrderDiscountAcrossItems(array $items, float $discountTotal): array {
+        $itemCount = count($items);
+        if ($itemCount === 0) {
+            return [];
+        }
+
+        $normalizedDiscount = round(max(0, $discountTotal), 2);
+        if ($normalizedDiscount <= 0) {
+            return array_fill(0, $itemCount, 0.0);
+        }
+
+        $grossTotals = [];
+        $grossSum = 0.0;
+        foreach ($items as $item) {
+            $lineGross = round((float)($item['price'] ?? 0) * max(1, (int)($item['quantity'] ?? 1)), 2);
+            $grossTotals[] = $lineGross;
+            $grossSum += $lineGross;
+        }
+
+        if ($grossSum <= 0) {
+            return array_fill(0, $itemCount, 0.0);
+        }
+
+        $allocations = array_fill(0, $itemCount, 0.0);
+        $allocated = 0.0;
+        $lastIndex = $itemCount - 1;
+
+        foreach ($grossTotals as $index => $grossLine) {
+            if ($index === $lastIndex) {
+                $allocations[$index] = round(min(max(0, $normalizedDiscount - $allocated), $grossLine), 2);
+                continue;
+            }
+
+            $share = round(($normalizedDiscount * $grossLine) / $grossSum, 2);
+            $share = min($share, $grossLine);
+            $allocations[$index] = $share;
+            $allocated += $share;
+        }
+
+        return $allocations;
+    }
+
+    private function translatePaymentMethod(string $method): string {
+        return $this->resolveSriPaymentMethod($method)['label'];
+    }
+
+    private function resolveSriPaymentMethod(string $method): array {
+        $value = strtolower(trim($method));
+        if ($value === 'credit' || $value === 'card' || $value === 'credit_card') {
+            return [
+                'code' => '19',
+                'label' => 'Tarjeta de credito',
+            ];
+        }
+        if ($value === 'transfer' || $value === 'bank_transfer') {
+            return [
+                'code' => '20',
+                'label' => 'Otros con utilizacion del sistema financiero',
+            ];
+        }
+        if ($value === 'cash' || $value === 'cod') {
+            return [
+                'code' => '01',
+                'label' => 'Sin utilizacion del sistema financiero',
+            ];
+        }
+
+        if (preg_match('/^\d{2}$/', $method) === 1) {
+            return [
+                'code' => $method,
+                'label' => $method,
+            ];
+        }
+
+        return [
+            'code' => '20',
+            'label' => $method !== '' ? $method : 'Otros con utilizacion del sistema financiero',
+        ];
+    }
+
     private function hasMeaningfulDiscountValue($value) {
         if ($value === null) {
             return false;
@@ -354,168 +564,12 @@ class OrderController {
                 $baseUrl = $proto . '://' . $host;
             }
             $order = $this->orderRepository->create($data, $baseUrl);
-            
-            // Generar XML del SRI automáticamente
+
             if ($order && $order['id']) {
-                try {
-                    error_log("[SRI] Iniciando generación de XML para orden {$order['id']}");
-                    
-                    $sriController = new SriController();
-                    $reflection = new \ReflectionClass($sriController);
-                    
-                    // Preparar datos del XML
-                    $prepareMethod = $reflection->getMethod('prepareOrderDataForSri');
-                    $prepareMethod->setAccessible(true);
-                    $xmlData = $prepareMethod->invoke($sriController, $order);
-                    error_log("[SRI] Datos preparados, secuencial: {$xmlData['secuencial']}");
-                    
-                    // Obtener el generador de XML
-                    $xmlGeneratorProp = $reflection->getProperty('xmlGenerator');
-                    $xmlGeneratorProp->setAccessible(true);
-                    $xmlGenerator = $xmlGeneratorProp->getValue($sriController);
-                    
-                    // Generar XML
-                    $xml = $xmlGenerator->generateInvoiceXml($xmlData);
-                    error_log("[SRI] XML generado, tamaño: " . strlen($xml) . " bytes");
-                    
-                    // Guardar XML
-                    $xmlDir = __DIR__ . '/../../storage/sri/xml';
-                    if (!is_dir($xmlDir)) {
-                        mkdir($xmlDir, 0775, true);
-                        error_log("[SRI] Directorio creado: {$xmlDir}");
-                    }
-                    
-                    $secuencial = str_pad($xmlData['secuencial'], 9, '0', STR_PAD_LEFT);
-                    $timestamp = date('YmdHis');
-                    $filename = "factura_{$secuencial}_{$timestamp}.xml";
-                    $filepath = $xmlDir . '/' . $filename;
-                    
-                    $bytesWritten = file_put_contents($filepath, $xml);
-                    
-                    if ($bytesWritten !== false) {
-                        error_log("[SRI] ✅ XML guardado exitosamente: {$filename} ({$bytesWritten} bytes) en {$filepath}");
-                        
-                        // Verificar que el archivo existe
-                        if (file_exists($filepath)) {
-                            error_log("[SRI] ✅ Archivo verificado existe: {$filepath}");
-                            
-                            // === PASO 2: FIRMAR XML ===
-                            try {
-                                error_log("[SRI] Iniciando firma digital del XML...");
-                                $xmlSigner = new \App\Services\SriXmlSigner();
-                                $resultadoFirma = $xmlSigner->firmarXml($filepath);
-                                
-                                if ($resultadoFirma['success']) {
-                                    error_log("[SRI] ✅ XML firmado exitosamente: {$resultadoFirma['xml_path']}");
-                                    
-                                    // === PASO 3: ENVIAR AL SRI ===
-                                    try {
-                                        error_log("[SRI] Enviando comprobante al SRI (ambiente TEST)...");
-                                        $soapService = new \App\Services\SriSoapService();
-                                        
-                                        // Enviar y esperar autorización
-                                        $resultadoSri = $soapService->enviarYAutorizar(
-                                            $resultadoFirma['xml_firmado'],
-                                            $xmlData['access_key'],
-                                            3, // Reintentos
-                                            3  // Delay entre intentos en segundos
-                                        );
-                                        
-                                        if ($resultadoSri['success']) {
-                                            $autorizacion = $resultadoSri['autorizacion'];
-                                            error_log("[SRI] ✅ FACTURA AUTORIZADA por el SRI!");
-                                            error_log("[SRI] Número de autorización: {$autorizacion['numero_autorizacion']}");
-                                            error_log("[SRI] Fecha autorización: {$autorizacion['fecha_autorizacion']}");
-                                            
-                                            // Guardar XML autorizado
-                                            $authorizedDir = __DIR__ . '/../../storage/sri/authorized';
-                                            if (!is_dir($authorizedDir)) {
-                                                mkdir($authorizedDir, 0775, true);
-                                            }
-                                            $authorizedPath = $authorizedDir . '/' . $filename;
-                                            file_put_contents($authorizedPath, $autorizacion['xml_autorizado']);
-                                            
-                                            // === PASO 4: GENERAR PDF (RIDE) ===
-                                            try {
-                                                error_log("[SRI] Generando PDF RIDE...");
-                                                $rideGenerator = new \App\Services\SriRideGenerator();
-                                                $pdfContent = $rideGenerator->generarRide($autorizacion['xml_autorizado']);
-                                                
-                                                // Guardar PDF
-                                                $rideDir = __DIR__ . '/../../storage/sri/ride';
-                                                if (!is_dir($rideDir)) {
-                                                    mkdir($rideDir, 0775, true);
-                                                }
-                                                $pdfFilename = str_replace('.xml', '.pdf', $filename);
-                                                $pdfPath = $rideDir . '/' . $pdfFilename;
-                                                file_put_contents($pdfPath, $pdfContent);
-                                                
-                                                error_log("[SRI] ✅ PDF RIDE generado: {$pdfFilename}");
-                                                
-                                            } catch (\Exception $e) {
-                                                error_log("[SRI] ⚠️ Error generando PDF RIDE: " . $e->getMessage());
-                                            }
-                                            
-                                        } else {
-                                            error_log("[SRI] ❌ Factura NO autorizada por el SRI");
-                                            error_log("[SRI] Paso fallido: " . ($resultadoSri['paso'] ?? 'desconocido'));
-                                            error_log("[SRI] Intentos: " . ($resultadoSri['intentos'] ?? 0));
-                                            
-                                            // Log detalles de recepción
-                                            if (isset($resultadoSri['recepcion'])) {
-                                                $recepcion = $resultadoSri['recepcion'];
-                                                error_log("[SRI] Recepción - Estado: " . ($recepcion['estado'] ?? 'N/A'));
-                                                if (!empty($recepcion['mensajes'])) {
-                                                    error_log("[SRI] Recepción - Mensajes:");
-                                                    foreach ($recepcion['mensajes'] as $msg) {
-                                                        error_log("[SRI]   - [{$msg['tipo']}] {$msg['mensaje']}");
-                                                    }
-                                                }
-                                                if (isset($recepcion['exception'])) {
-                                                    error_log("[SRI] Recepción - Excepción: " . $recepcion['exception']);
-                                                }
-                                            }
-                                            
-                                            // Log detalles de autorización
-                                            if (isset($resultadoSri['autorizacion'])) {
-                                                $autorizacion = $resultadoSri['autorizacion'];
-                                                $estado = $autorizacion['estado'] ?? 'DESCONOCIDO';
-                                                error_log("[SRI] Autorización - Estado: {$estado}");
-                                                if (!empty($autorizacion['mensajes'])) {
-                                                    error_log("[SRI] Autorización - Mensajes:");
-                                                    foreach ($autorizacion['mensajes'] as $msg) {
-                                                        error_log("[SRI]   - [{$msg['tipo']}] {$msg['mensaje']}");
-                                                    }
-                                                }
-                                                if (isset($autorizacion['exception'])) {
-                                                    error_log("[SRI] Autorización - Excepción: " . $autorizacion['exception']);
-                                                }
-                                            }
-                                        }
-                                        
-                                    } catch (\Exception $e) {
-                                        error_log("[SRI] ❌ Error enviando al SRI: " . $e->getMessage());
-                                    }
-                                    
-                                } else {
-                                    error_log("[SRI] ❌ Error firmando XML: {$resultadoFirma['error']}");
-                                }
-                                
-                            } catch (\Exception $e) {
-                                error_log("[SRI] ❌ Excepción en firma digital: " . $e->getMessage());
-                            }
-                            
-                        } else {
-                            error_log("[SRI] ⚠️ ADVERTENCIA: file_put_contents retornó {$bytesWritten} pero el archivo NO existe!");
-                        }
-                    } else {
-                        error_log("[SRI] ❌ ERROR: file_put_contents retornó FALSE");
-                    }
-                    
-                } catch (\Exception $e) {
-                    // No fallar la orden si el XML falla
-                    error_log("[SRI] ❌ Excepción generando XML para orden {$order['id']}: " . $e->getMessage());
-                    error_log("[SRI] Stack trace: " . $e->getTraceAsString());
+                $this->emitInvoiceWithFacturador($order);
+                $reloadedOrder = $this->orderRepository->getById($order['id']);
+                if ($reloadedOrder) {
+                    $order = $reloadedOrder;
                 }
             }
             

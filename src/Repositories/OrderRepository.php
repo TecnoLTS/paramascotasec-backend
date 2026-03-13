@@ -1359,6 +1359,33 @@ class OrderRepository {
         ];
     }
 
+    public function updateBillingMetadata(string $orderId, array $billingMetadata): void {
+        $stmt = $this->db->prepare('SELECT invoice_data FROM "Order" WHERE id = :id AND tenant_id = :tenant_id');
+        $stmt->execute([
+            'id' => $orderId,
+            'tenant_id' => $this->getTenantId()
+        ]);
+        $row = $stmt->fetch();
+
+        $invoiceData = [];
+        if ($row && !empty($row['invoice_data'])) {
+            $decoded = is_array($row['invoice_data']) ? $row['invoice_data'] : json_decode((string)$row['invoice_data'], true);
+            if (is_array($decoded)) {
+                $invoiceData = $decoded;
+            }
+        }
+
+        $existingBilling = is_array($invoiceData['billing'] ?? null) ? $invoiceData['billing'] : [];
+        $invoiceData['billing'] = array_merge($existingBilling, $billingMetadata);
+
+        $stmtUpdate = $this->db->prepare('UPDATE "Order" SET invoice_data = :invoice_data WHERE id = :id AND tenant_id = :tenant_id');
+        $stmtUpdate->execute([
+            'id' => $orderId,
+            'tenant_id' => $this->getTenantId(),
+            'invoice_data' => json_encode($invoiceData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        ]);
+    }
+
     private function getUserDefaultBilling($userId) {
         if (!$userId) return null;
         $stmt = $this->db->prepare('SELECT addresses FROM "User" WHERE id = :id AND tenant_id = :tenant_id');
