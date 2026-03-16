@@ -14,7 +14,73 @@ class ProductRepository {
         $this->db = Database::getInstance();
     }
 
-    private function getBaseQuery() {
+    private function getBaseQuery(bool $includeProcurement = false) {
+        $procurementSelect = '';
+        $procurementJoin = '';
+
+        if ($includeProcurement) {
+            $procurementSelect = '
+          , purchase.last_purchase_invoice_id AS "lastPurchaseInvoiceId"
+          , purchase.last_purchase_invoice_number AS "lastPurchaseInvoiceNumber"
+          , purchase.last_purchase_supplier_name AS "lastPurchaseSupplierName"
+          , purchase.last_purchase_supplier_document AS "lastPurchaseSupplierDocument"
+          , purchase.last_purchase_issued_at AS "lastPurchaseIssuedAt"
+          , purchase.last_purchase_received_at AS "lastPurchaseReceivedAt"
+          , purchase.last_purchase_quantity AS "lastPurchaseQuantity"
+          , purchase.last_purchase_unit_cost AS "lastPurchaseUnitCost"
+          , purchase.last_purchase_line_total AS "lastPurchaseLineTotal"
+          , purchase_stats.purchase_entries_count AS "purchaseEntriesCount"
+          , purchase_stats.purchased_units_total AS "purchasedUnitsTotal"
+          , purchase_stats.remaining_units_from_purchases AS "remainingUnitsFromPurchases"
+          , purchase_stats.last_purchase_at AS "lastPurchaseAt"
+        ';
+            $procurementJoin = '
+        LEFT JOIN LATERAL (
+          SELECT
+            il.purchase_invoice_id AS last_purchase_invoice_id,
+            pi.invoice_number AS last_purchase_invoice_number,
+            pi.supplier_name AS last_purchase_supplier_name,
+            pi.supplier_document AS last_purchase_supplier_document,
+            pi.issued_at AS last_purchase_issued_at,
+            il.received_at AS last_purchase_received_at,
+            COALESCE(pii.quantity, il.initial_quantity) AS last_purchase_quantity,
+            COALESCE(pii.unit_cost, il.unit_cost, 0) AS last_purchase_unit_cost,
+            COALESCE(
+              pii.line_total,
+              COALESCE(pii.quantity, il.initial_quantity) * COALESCE(pii.unit_cost, il.unit_cost, 0)
+            ) AS last_purchase_line_total
+          FROM "InventoryLot" il
+          LEFT JOIN "PurchaseInvoice" pi
+            ON pi.id = il.purchase_invoice_id
+           AND pi.tenant_id = il.tenant_id
+          LEFT JOIN "PurchaseInvoiceItem" pii
+            ON pii.id = il.purchase_invoice_item_id
+           AND pii.tenant_id = il.tenant_id
+          WHERE il.product_id = p.id
+            AND il.tenant_id = p.tenant_id
+            AND il.purchase_invoice_id IS NOT NULL
+          ORDER BY COALESCE(pi.issued_at::timestamp, il.received_at, il.created_at) DESC,
+                   il.created_at DESC,
+                   il.id DESC
+          LIMIT 1
+        ) purchase ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS purchase_entries_count,
+            COALESCE(SUM(il.initial_quantity), 0)::int AS purchased_units_total,
+            COALESCE(SUM(il.remaining_quantity), 0)::int AS remaining_units_from_purchases,
+            MAX(COALESCE(pi.issued_at::timestamp, il.received_at, il.created_at)) AS last_purchase_at
+          FROM "InventoryLot" il
+          LEFT JOIN "PurchaseInvoice" pi
+            ON pi.id = il.purchase_invoice_id
+           AND pi.tenant_id = il.tenant_id
+          WHERE il.product_id = p.id
+            AND il.tenant_id = p.tenant_id
+            AND il.purchase_invoice_id IS NOT NULL
+        ) purchase_stats ON true
+        ';
+        }
+
         return '
         SELECT
           p.id,
@@ -25,6 +91,7 @@ class ProductRepository {
           p.gender AS "gender",
           p.is_new AS "new",
           p.is_sale AS "sale",
+          p.is_published AS "published",
           p.price AS "price",
           p.original_price AS "originPrice",
           p.cost AS "cost", 
@@ -38,7 +105,7 @@ class ProductRepository {
           COALESCE(img.images, \'[]\') AS images,
           COALESCE(img.thumbs, \'[]\') AS thumbs,
           COALESCE(img.image_meta, \'[]\') AS "imageMeta",
-          COALESCE(var.variations, \'[]\') AS variations
+          COALESCE(var.variations, \'[]\') AS variations' . $procurementSelect . '
         FROM "Product" p
         LEFT JOIN LATERAL (
           SELECT
@@ -63,19 +130,25 @@ class ProductRepository {
           FROM "Variation" v
           WHERE v.product_id = p.id
         ) var ON true
-        ';
+        ' . $procurementJoin;
     }
 
-    public function getAll() {
-        $sql = $this->getBaseQuery() . ' WHERE p.tenant_id = :tenant_id ORDER BY p.created_at DESC';
+    public function getAll(array $options = []) {
+        $includeUnpublished = (bool)($options['includeUnpublished'] ?? false);
+        $includeProcurement = (bool)($options['includeProcurement'] ?? false);
+        $visibilityFilter = $includeUnpublished ? '' : ' AND COALESCE(p.is_published, true) = true';
+        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id' . $visibilityFilter . ' ORDER BY p.created_at DESC';
         $stmt = $this->db->prepare($sql);
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $rows = $stmt->fetchAll();
         return array_map([$this, 'formatRow'], $rows);
     }
 
-    public function getById($idOrLegacyOrSlug) {
-        $sql = $this->getBaseQuery() . ' WHERE p.tenant_id = :tenant_id AND (p.id = :id OR p.legacy_id = :id OR p.slug = :id) LIMIT 1';
+    public function getById($idOrLegacyOrSlug, array $options = []) {
+        $includeUnpublished = (bool)($options['includeUnpublished'] ?? false);
+        $includeProcurement = (bool)($options['includeProcurement'] ?? false);
+        $visibilityFilter = $includeUnpublished ? '' : ' AND COALESCE(p.is_published, true) = true';
+        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id AND (p.id = :id OR p.legacy_id = :id OR p.slug = :id)' . $visibilityFilter . ' LIMIT 1';
         $stmt = $this->db->prepare($sql);
         $stmt->execute([
             'id' => $idOrLegacyOrSlug,
@@ -91,6 +164,12 @@ class ProductRepository {
         $row['imageMeta'] = json_decode($row['imageMeta'] ?? '[]', true);
         $row['variations'] = json_decode($row['variations'] ?? '[]', true);
         $row['attributes'] = json_decode($row['attributes'] ?? '{}', true) ?: [];
+        $publishedRaw = $row['published'] ?? true;
+        if (is_bool($publishedRaw)) {
+            $row['published'] = $publishedRaw;
+        } else {
+            $row['published'] = in_array(strtolower(trim((string)$publishedRaw)), ['1', 'true', 't', 'yes', 'on'], true);
+        }
         $expirationDate = $this->normalizeExpirationDate(
             $row['attributes']['expirationDate']
                 ?? $row['attributes']['expiryDate']
@@ -298,6 +377,47 @@ class ProductRepository {
                 'status' => $row['expirationStatus']
             ]
         ];
+
+        if (array_key_exists('lastPurchaseInvoiceId', $row) || array_key_exists('purchaseEntriesCount', $row)) {
+            $lastPurchaseInvoiceId = trim((string)($row['lastPurchaseInvoiceId'] ?? ''));
+            $lastPurchaseInvoiceNumber = trim((string)($row['lastPurchaseInvoiceNumber'] ?? ''));
+            $lastPurchaseSupplierName = trim((string)($row['lastPurchaseSupplierName'] ?? ''));
+            $lastPurchaseSupplierDocument = trim((string)($row['lastPurchaseSupplierDocument'] ?? ''));
+            $lastPurchaseIssuedAt = $row['lastPurchaseIssuedAt'] ?? null;
+            $lastPurchaseReceivedAt = $row['lastPurchaseReceivedAt'] ?? null;
+            $lastPurchaseQuantity = max(0, (int)($row['lastPurchaseQuantity'] ?? 0));
+            $lastPurchaseUnitCost = round((float)($row['lastPurchaseUnitCost'] ?? 0), 4);
+            $lastPurchaseLineTotal = round((float)($row['lastPurchaseLineTotal'] ?? 0), 4);
+
+            $lastPurchaseInvoice = null;
+            if ($lastPurchaseInvoiceId !== '' || $lastPurchaseInvoiceNumber !== '') {
+                $lastPurchaseInvoice = [
+                    'id' => $lastPurchaseInvoiceId !== '' ? $lastPurchaseInvoiceId : null,
+                    'invoiceNumber' => $lastPurchaseInvoiceNumber !== '' ? $lastPurchaseInvoiceNumber : null,
+                    'supplierName' => $lastPurchaseSupplierName !== '' ? $lastPurchaseSupplierName : null,
+                    'supplierDocument' => $lastPurchaseSupplierDocument !== '' ? $lastPurchaseSupplierDocument : null,
+                    'issuedAt' => $lastPurchaseIssuedAt ?: null,
+                    'receivedAt' => $lastPurchaseReceivedAt ?: null,
+                    'quantity' => $lastPurchaseQuantity,
+                    'unitCost' => $lastPurchaseUnitCost,
+                    'lineTotal' => $lastPurchaseLineTotal
+                ];
+            }
+
+            $purchaseEntriesCount = max(0, (int)($row['purchaseEntriesCount'] ?? 0));
+            $purchasedUnitsTotal = max(0, (int)($row['purchasedUnitsTotal'] ?? 0));
+            $remainingUnitsFromPurchases = max(0, (int)($row['remainingUnitsFromPurchases'] ?? 0));
+            $lastPurchaseAt = $row['lastPurchaseAt'] ?? null;
+
+            $row['lastPurchaseInvoice'] = $lastPurchaseInvoice;
+            $row['inventory']['purchaseHistory'] = [
+                'entriesCount' => $purchaseEntriesCount,
+                'purchasedUnits' => $purchasedUnitsTotal,
+                'remainingUnits' => $remainingUnitsFromPurchases,
+                'lastPurchaseAt' => $lastPurchaseAt ?: ($lastPurchaseInvoice['receivedAt'] ?? $lastPurchaseInvoice['issuedAt'] ?? null),
+            ];
+            $row['inventory']['lastPurchaseInvoice'] = $lastPurchaseInvoice;
+        }
 
         return $row;
     }
@@ -511,119 +631,349 @@ class ProductRepository {
         return max(0, $adjusted);
     }
 
-    public function create($data) {
-        $sql = '
-            INSERT INTO "Product" (
-                id, legacy_id, tenant_id, category, product_type, name, gender, is_new, is_sale, price, original_price, cost, brand, sold, quantity, description, action, slug, attributes, created_at, updated_at
-            ) VALUES (
-                :id, :legacy_id, :tenant_id, :category, :product_type, :name, :gender, :is_new, :is_sale, :price, :original_price, :cost, :brand, :sold, :quantity, :description, :action, :slug, :attributes, NOW(), NOW()
-            ) RETURNING id
-        ';
-        
-        $params = [
-            'id' => uniqid('prod_'),
-            'legacy_id' => $data['legacyId'] ?? uniqid(),
-            'tenant_id' => $this->getTenantId(),
-            'category' => $data['category'] ?? 'General',
-            'product_type' => $data['productType'] ?? $data['product_type'] ?? null,
-            'name' => $data['name'],
-            'gender' => $data['gender'] ?? 'Unisex',
-            'is_new' => isset($data['new']) ? ($data['new'] ? 'true' : 'false') : 'true',
-            'is_sale' => isset($data['sale']) ? ($data['sale'] ? 'true' : 'false') : 'false',
-            'price' => $data['price'],
-            'original_price' => $data['originPrice'] ?? $data['price'],
-            'cost' => $data['cost'] ?? 0,
-            'brand' => $data['brand'] ?? 'Generico',
-            'sold' => $data['sold'] ?? 0,
-            'quantity' => $data['quantity'] ?? 0,
-            'description' => $data['description'] ?? '',
-            'action' => $data['action'] ?? 'view',
-            'slug' => $data['slug'] ?? strtolower(str_replace(' ', '-', $data['name'])) . '-' . uniqid(),
-            'attributes' => isset($data['attributes']) ? json_encode($data['attributes']) : null
-        ];
-        
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
-        $result = $stmt->fetch();
-        $productId = $result['id'];
+    private function getSuggestedNetPriceForCost($cost) {
+        $cost = max(0, round((float)$cost, 2));
+        if ($cost <= 0) {
+            return 0.0;
+        }
 
-        $galleryInput = $data['images'] ?? $data['galleryImages'] ?? ($data['image'] ?? []);
-        if (is_string($galleryInput)) {
-            $galleryInput = [$galleryInput];
+        $pricing = $this->getPricingSettings();
+        $taxRate = $this->getTaxRate();
+        $taxMultiplier = 1 + ($taxRate / 100);
+
+        $minMargin = $pricing['minMargin'];
+        $baseMargin = $pricing['baseMargin'];
+        $targetMargin = $pricing['targetMargin'];
+        $promoBuffer = $pricing['promoBuffer'];
+        $strategy = $pricing['strategy'];
+        $rounding = $pricing['rounding'];
+        $includeVatInPvp = $pricing['includeVatInPvp'];
+        $shippingBuffer = $pricing['shippingBuffer'];
+
+        $minPriceNet = $this->priceFromMargin($cost, $minMargin);
+        if ($strategy === 'target_margin') {
+            $recommendedNet = $this->priceFromMargin($cost, $targetMargin + $promoBuffer);
+        } elseif ($strategy === 'competitive') {
+            $recommendedNet = $this->priceFromMargin($cost, $minMargin);
+        } else {
+            $recommendedNet = $cost * (1 + (($baseMargin + $promoBuffer) / 100));
         }
-        $thumbInput = $data['thumbImages'] ?? $data['thumbImage'] ?? [];
-        $galleryEntries = $this->normalizeImageEntries($galleryInput, 'gallery');
-        $thumbEntries = $this->normalizeImageEntries($thumbInput, 'thumb');
-        if (count($galleryEntries) > 0) {
-            $this->syncImages($productId, $galleryEntries, 'gallery');
+
+        if ($recommendedNet < $minPriceNet) {
+            $recommendedNet = $minPriceNet;
         }
-        if (count($thumbEntries) > 0) {
-            $this->syncImages($productId, $thumbEntries, 'thumb');
-        }
-        return $this->getById($productId);
+
+        $recommendedNet = $this->applyPricingAdjustments(
+            $recommendedNet,
+            $taxMultiplier,
+            $rounding,
+            $includeVatInPvp,
+            $shippingBuffer
+        );
+        $minPriceNet = $this->applyPricingAdjustments(
+            $minPriceNet,
+            $taxMultiplier,
+            $rounding,
+            $includeVatInPvp,
+            $shippingBuffer
+        );
+
+        return round(max($recommendedNet, $minPriceNet), 2);
     }
 
-    public function update($id, $data) {
-        // Build dynamic update query
-        $fields = [];
-        $params = ['id' => $id];
-        
-        $mapping = [
-            'category' => 'category',
-            'productType' => 'product_type',
-            'name' => 'name',
-            'gender' => 'gender',
-            'new' => 'is_new',
-            'sale' => 'is_sale',
-            'price' => 'price',
-            'originPrice' => 'original_price',
-            'cost' => 'cost',
-            'brand' => 'brand',
-            'sold' => 'sold',
-            'quantity' => 'quantity',
-            'description' => 'description',
-            'action' => 'action',
-            'slug' => 'slug',
-            'attributes' => 'attributes'
-        ];
+    private function requirePurchaseInvoicePayload(array $data): array {
+        $purchaseInvoice = $data['purchaseInvoice'] ?? null;
+        if (!is_array($purchaseInvoice) || count(array_filter($purchaseInvoice, static function ($value) {
+            return trim((string)$value) !== '';
+        })) === 0) {
+            throw new \InvalidArgumentException('Debes registrar la factura de compra para ingresar stock.');
+        }
+        return $purchaseInvoice;
+    }
 
-        foreach ($data as $key => $value) {
-            if (isset($mapping[$key])) {
-                $dbField = $mapping[$key];
-                $fields[] = "\"$dbField\" = :$key";
-                if ($key === 'attributes') {
-                    $params[$key] = is_string($value) ? $value : json_encode($value);
-                } else {
-                    $params[$key] = $value;
-                }
-            }
+    private function recordPurchaseInvoiceStockEntry(string $productId, string $productName, int $quantity, float $unitCost, array $data, string $reason): array {
+        $purchaseInvoices = new PurchaseInvoiceRepository($this->db);
+        return $purchaseInvoices->recordStockEntry(
+            $this->requirePurchaseInvoicePayload($data),
+            $productId,
+            $productName,
+            $quantity,
+            $unitCost,
+            ['reason' => $reason]
+        );
+    }
+
+    public function create($data) {
+        $startedTransaction = !$this->db->inTransaction();
+        if ($startedTransaction) {
+            $this->db->beginTransaction();
         }
 
-        if (empty($fields)) {
-            return $this->getById($id);
-        }
+        try {
+            $sql = '
+                INSERT INTO "Product" (
+                    id, legacy_id, tenant_id, category, product_type, name, gender, is_new, is_sale, is_published, price, original_price, cost, brand, sold, quantity, description, action, slug, attributes, created_at, updated_at
+                ) VALUES (
+                    :id, :legacy_id, :tenant_id, :category, :product_type, :name, :gender, :is_new, :is_sale, :is_published, :price, :original_price, :cost, :brand, :sold, :quantity, :description, :action, :slug, :attributes, NOW(), NOW()
+                ) RETURNING id
+            ';
 
-        $fields[] = '"updated_at" = NOW()';
-        $sql = 'UPDATE "Product" SET ' . implode(', ', $fields) . ' WHERE id = :id AND tenant_id = :tenant_id';
-        $stmt = $this->db->prepare($sql);
-        $params['tenant_id'] = $this->getTenantId();
-        $stmt->execute($params);
+            $params = [
+                'id' => uniqid('prod_'),
+                'legacy_id' => $data['legacyId'] ?? uniqid(),
+                'tenant_id' => $this->getTenantId(),
+                'category' => $data['category'] ?? 'General',
+                'product_type' => $data['productType'] ?? $data['product_type'] ?? null,
+                'name' => $data['name'],
+                'gender' => $data['gender'] ?? 'Unisex',
+                'is_new' => isset($data['new']) ? ($data['new'] ? 'true' : 'false') : 'true',
+                'is_sale' => isset($data['sale']) ? ($data['sale'] ? 'true' : 'false') : 'false',
+                'is_published' => array_key_exists('published', $data)
+                    ? ($data['published'] ? 'true' : 'false')
+                    : (array_key_exists('isPublished', $data) ? ($data['isPublished'] ? 'true' : 'false') : 'true'),
+                'price' => $data['price'],
+                'original_price' => $data['originPrice'] ?? $data['price'],
+                'cost' => $data['cost'] ?? 0,
+                'brand' => $data['brand'] ?? 'Generico',
+                'sold' => $data['sold'] ?? 0,
+                'quantity' => $data['quantity'] ?? 0,
+                'description' => $data['description'] ?? '',
+                'action' => $data['action'] ?? 'view',
+                'slug' => $data['slug'] ?? strtolower(str_replace(' ', '-', $data['name'])) . '-' . uniqid(),
+                'attributes' => isset($data['attributes']) ? json_encode($data['attributes']) : null
+            ];
 
-        if (array_key_exists('images', $data) || array_key_exists('galleryImages', $data) || array_key_exists('image', $data)) {
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+            $result = $stmt->fetch();
+            $productId = $result['id'];
+
             $galleryInput = $data['images'] ?? $data['galleryImages'] ?? ($data['image'] ?? []);
             if (is_string($galleryInput)) {
                 $galleryInput = [$galleryInput];
             }
-            $galleryEntries = $this->normalizeImageEntries($galleryInput, 'gallery');
-            $this->syncImages($id, $galleryEntries, 'gallery');
-        }
-        if (array_key_exists('thumbImages', $data) || array_key_exists('thumbImage', $data)) {
             $thumbInput = $data['thumbImages'] ?? $data['thumbImage'] ?? [];
+            $galleryEntries = $this->normalizeImageEntries($galleryInput, 'gallery');
             $thumbEntries = $this->normalizeImageEntries($thumbInput, 'thumb');
-            $this->syncImages($id, $thumbEntries, 'thumb');
+            if (count($galleryEntries) > 0) {
+                $this->syncImages($productId, $galleryEntries, 'gallery');
+            }
+            if (count($thumbEntries) > 0) {
+                $this->syncImages($productId, $thumbEntries, 'thumb');
+            }
+
+            $initialQuantity = max(0, (int)($params['quantity'] ?? 0));
+            if ($initialQuantity > 0) {
+                $purchaseEntry = $this->recordPurchaseInvoiceStockEntry(
+                    $productId,
+                    (string)$params['name'],
+                    $initialQuantity,
+                    round((float)($params['cost'] ?? 0), 4),
+                    $data,
+                    'initial_stock'
+                );
+                $inventoryLots = new InventoryLotRepository($this->db);
+                $inventoryLots->recordStockIncrease(
+                    $productId,
+                    $initialQuantity,
+                    round((float)($params['cost'] ?? 0), 4),
+                    'purchase_invoice',
+                    (string)($purchaseEntry['item']['id'] ?? $productId),
+                    [
+                        'reason' => 'initial_stock',
+                        'purchase_invoice_number' => (string)($purchaseEntry['invoice']['invoice_number'] ?? '')
+                    ],
+                    (string)($purchaseEntry['invoice']['id'] ?? ''),
+                    (string)($purchaseEntry['item']['id'] ?? '')
+                );
+            }
+
+            if ($startedTransaction) {
+                $this->db->commit();
+            }
+
+            return $this->getById($productId, ['includeUnpublished' => true, 'includeProcurement' => true]);
+        } catch (\Exception $e) {
+            if ($startedTransaction && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
         }
-        
-        return $this->getById($id);
+    }
+
+    public function update($id, $data) {
+        $startedTransaction = !$this->db->inTransaction();
+        if ($startedTransaction) {
+            $this->db->beginTransaction();
+        }
+
+        try {
+            $stmtCurrent = $this->db->prepare('
+                SELECT cost, price, original_price, is_sale, quantity, name
+                FROM "Product"
+                WHERE id = :id AND tenant_id = :tenant_id
+                LIMIT 1
+                FOR UPDATE
+            ');
+            $stmtCurrent->execute([
+                'id' => $id,
+                'tenant_id' => $this->getTenantId()
+            ]);
+            $current = $stmtCurrent->fetch();
+            if (!$current) {
+                if ($startedTransaction && $this->db->inTransaction()) {
+                    $this->db->rollBack();
+                }
+                return null;
+            }
+
+            if (array_key_exists('cost', $data) && is_numeric($data['cost'])) {
+                $incomingCost = round((float)$data['cost'], 2);
+                $currentCost = round((float)($current['cost'] ?? 0), 2);
+
+                if (abs($incomingCost - $currentCost) > 0.00001) {
+                    $suggestedPrice = $this->getSuggestedNetPriceForCost($incomingCost);
+                    $currentPrice = round((float)($current['price'] ?? 0), 2);
+                    $requestedPrice = (array_key_exists('price', $data) && is_numeric($data['price']))
+                        ? round((float)$data['price'], 2)
+                        : null;
+                    $nextPrice = max(
+                        $suggestedPrice,
+                        $currentPrice,
+                        $requestedPrice ?? 0
+                    );
+                    $data['price'] = $nextPrice;
+
+                    if (array_key_exists('originPrice', $data) && is_numeric($data['originPrice'])) {
+                        $data['originPrice'] = max((float)$data['originPrice'], $nextPrice);
+                    } else {
+                        $currentOriginPrice = round((float)($current['original_price'] ?? 0), 2);
+                        $data['originPrice'] = max($nextPrice, $currentOriginPrice);
+                    }
+
+                    if (!array_key_exists('sale', $data) && (float)$data['originPrice'] <= $nextPrice) {
+                        $data['sale'] = false;
+                    }
+                }
+            }
+
+            $fields = [];
+            $params = ['id' => $id];
+
+            $mapping = [
+                'category' => 'category',
+                'productType' => 'product_type',
+                'name' => 'name',
+                'gender' => 'gender',
+                'new' => 'is_new',
+                'sale' => 'is_sale',
+                'published' => 'is_published',
+                'isPublished' => 'is_published',
+                'price' => 'price',
+                'originPrice' => 'original_price',
+                'cost' => 'cost',
+                'brand' => 'brand',
+                'sold' => 'sold',
+                'quantity' => 'quantity',
+                'description' => 'description',
+                'action' => 'action',
+                'slug' => 'slug',
+                'attributes' => 'attributes'
+            ];
+
+            foreach ($data as $key => $value) {
+                if (isset($mapping[$key])) {
+                    $dbField = $mapping[$key];
+                    $fields[] = "\"$dbField\" = :$key";
+                    if ($key === 'attributes') {
+                        $params[$key] = is_string($value) ? $value : json_encode($value);
+                    } elseif (in_array($key, ['new', 'sale', 'published', 'isPublished'], true)) {
+                        $params[$key] = $value ? 'true' : 'false';
+                    } else {
+                        $params[$key] = $value;
+                    }
+                }
+            }
+
+            if (empty($fields)) {
+                if ($startedTransaction) {
+                    $this->db->commit();
+                }
+                return $this->getById($id, ['includeUnpublished' => true, 'includeProcurement' => true]);
+            }
+
+            $fields[] = '"updated_at" = NOW()';
+            $sql = 'UPDATE "Product" SET ' . implode(', ', $fields) . ' WHERE id = :id AND tenant_id = :tenant_id';
+            $stmt = $this->db->prepare($sql);
+            $params['tenant_id'] = $this->getTenantId();
+            $stmt->execute($params);
+
+            if (array_key_exists('images', $data) || array_key_exists('galleryImages', $data) || array_key_exists('image', $data)) {
+                $galleryInput = $data['images'] ?? $data['galleryImages'] ?? ($data['image'] ?? []);
+                if (is_string($galleryInput)) {
+                    $galleryInput = [$galleryInput];
+                }
+                $galleryEntries = $this->normalizeImageEntries($galleryInput, 'gallery');
+                $this->syncImages($id, $galleryEntries, 'gallery');
+            }
+            if (array_key_exists('thumbImages', $data) || array_key_exists('thumbImage', $data)) {
+                $thumbInput = $data['thumbImages'] ?? $data['thumbImage'] ?? [];
+                $thumbEntries = $this->normalizeImageEntries($thumbInput, 'thumb');
+                $this->syncImages($id, $thumbEntries, 'thumb');
+            }
+
+            $inventoryLots = new InventoryLotRepository($this->db);
+            $currentQuantity = max(0, (int)($current['quantity'] ?? 0));
+            $nextQuantity = array_key_exists('quantity', $data) && is_numeric($data['quantity'])
+                ? max(0, (int)$data['quantity'])
+                : $currentQuantity;
+
+            if ($nextQuantity > $currentQuantity) {
+                $increaseQty = $nextQuantity - $currentQuantity;
+                $nextCost = round((float)($data['cost'] ?? $current['cost'] ?? 0), 4);
+                $nextName = (string)($data['name'] ?? $current['name'] ?? '');
+                $purchaseEntry = $this->recordPurchaseInvoiceStockEntry(
+                    $id,
+                    $nextName !== '' ? $nextName : ($data['name'] ?? 'Producto'),
+                    $increaseQty,
+                    $nextCost,
+                    $data,
+                    'manual_stock_increase'
+                );
+                $inventoryLots->recordStockIncrease(
+                    $id,
+                    $increaseQty,
+                    $nextCost,
+                    'purchase_invoice',
+                    (string)($purchaseEntry['item']['id'] ?? $id),
+                    [
+                        'reason' => 'manual_stock_increase',
+                        'purchase_invoice_number' => (string)($purchaseEntry['invoice']['invoice_number'] ?? '')
+                    ],
+                    (string)($purchaseEntry['invoice']['id'] ?? ''),
+                    (string)($purchaseEntry['item']['id'] ?? '')
+                );
+            } elseif ($nextQuantity < $currentQuantity) {
+                $inventoryLots->consumeAdjustment(
+                    $id,
+                    $currentQuantity - $nextQuantity,
+                    $currentQuantity,
+                    round((float)($current['cost'] ?? 0), 4),
+                    ['reason' => 'manual_stock_decrease']
+                );
+            }
+
+            if ($startedTransaction) {
+                $this->db->commit();
+            }
+
+            return $this->getById($id, ['includeUnpublished' => true, 'includeProcurement' => true]);
+        } catch (\Exception $e) {
+            if ($startedTransaction && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
     }
 
     public function delete($id) {

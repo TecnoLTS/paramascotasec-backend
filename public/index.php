@@ -158,6 +158,8 @@ $router->add('GET', '/api/admin/discounts/audit', 'DiscountController@audit');
 $router->add('GET', '/api/admin/discounts/{id}', 'DiscountController@show');
 $router->add('PUT', '/api/admin/discounts/{id}', 'DiscountController@update');
 $router->add('PATCH', '/api/admin/discounts/{id}/status', 'DiscountController@updateStatus');
+$router->add('GET', '/api/admin/purchase-invoices', 'PurchaseInvoiceController@index');
+$router->add('GET', '/api/admin/purchase-invoices/{id}', 'PurchaseInvoiceController@show');
 $router->add('GET', '/api/admin/pos/shift/active', 'PosController@activeShift');
 $router->add('GET', '/api/admin/pos/shifts', 'PosController@shifts');
 $router->add('GET', '/api/admin/pos/movements', 'PosController@movements');

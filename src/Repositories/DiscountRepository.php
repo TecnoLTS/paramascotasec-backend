@@ -226,7 +226,7 @@ class DiscountRepository {
         return array_map([$this, 'normalizeAuditRow'], $rows);
     }
 
-    public function evaluateForQuote(?string $rawCode, float $itemsSubtotal, ?string $userId = null): array {
+    public function evaluateForQuote(?string $rawCode, float $itemsSubtotal, ?string $userId = null, array $pricingContext = []): array {
         $code = $this->normalizeCode($rawCode);
         if ($code === null) {
             return $this->emptyDiscountResult();
@@ -238,19 +238,19 @@ class DiscountRepository {
             $this->writeAudit('quote_rejected', [
                 'code' => $code,
                 'reason' => 'invalid_code',
-                'payload' => ['items_subtotal' => $this->roundMoney($itemsSubtotal)],
+                'payload' => $this->buildAuditPayload($itemsSubtotal, $pricingContext),
                 'user_id' => $userId
             ]);
             return $result;
         }
 
-        $evaluation = $this->evaluateRowForSubtotal($row, $itemsSubtotal);
+        $evaluation = $this->evaluateRowForSubtotal($row, $itemsSubtotal, $pricingContext);
         if ($evaluation['status'] !== 'applied') {
             $this->writeAudit('quote_rejected', [
                 'discount_code_id' => $row['id'],
                 'code' => $code,
                 'reason' => $evaluation['reason'],
-                'payload' => ['items_subtotal' => $this->roundMoney($itemsSubtotal)],
+                'payload' => $this->buildAuditPayload($itemsSubtotal, $pricingContext, $evaluation),
                 'user_id' => $userId
             ]);
             return $this->rejectedDiscountResult($code, $evaluation['reason'], $evaluation['message']);
@@ -264,14 +264,17 @@ class DiscountRepository {
             'name' => $normalized['name'],
             'type' => $normalized['type'],
             'value' => $normalized['value'],
-            'amount' => $discountAmount
+            'amount' => $discountAmount,
+            'requested_amount' => $evaluation['requested_discount_amount'] ?? $discountAmount,
+            'limited_by_guardrail' => !empty($evaluation['limited_by_guardrail']),
+            'guardrail' => $evaluation['guardrail'] ?? null
         ];
 
         $this->writeAudit('quote_applied', [
             'discount_code_id' => $row['id'],
             'code' => $code,
             'amount' => $discountAmount,
-            'payload' => ['items_subtotal' => $this->roundMoney($itemsSubtotal)],
+            'payload' => $this->buildAuditPayload($itemsSubtotal, $pricingContext, $evaluation),
             'user_id' => $userId
         ]);
 
@@ -283,7 +286,7 @@ class DiscountRepository {
         ];
     }
 
-    public function reserveForOrder(?string $rawCode, float $itemsSubtotal, string $orderId, ?string $userId = null): array {
+    public function reserveForOrder(?string $rawCode, float $itemsSubtotal, string $orderId, ?string $userId = null, array $pricingContext = []): array {
         $code = $this->normalizeCode($rawCode);
         if ($code === null) {
             return $this->emptyDiscountResult();
@@ -295,20 +298,20 @@ class DiscountRepository {
                 'code' => $code,
                 'reason' => 'invalid_code',
                 'order_id' => $orderId,
-                'payload' => ['items_subtotal' => $this->roundMoney($itemsSubtotal)],
+                'payload' => $this->buildAuditPayload($itemsSubtotal, $pricingContext),
                 'user_id' => $userId
             ]);
             throw new \Exception('Código de descuento no registrado.');
         }
 
-        $evaluation = $this->evaluateRowForSubtotal($row, $itemsSubtotal);
+        $evaluation = $this->evaluateRowForSubtotal($row, $itemsSubtotal, $pricingContext);
         if ($evaluation['status'] !== 'applied') {
             $this->writeAudit('order_rejected', [
                 'discount_code_id' => $row['id'],
                 'code' => $code,
                 'reason' => $evaluation['reason'],
                 'order_id' => $orderId,
-                'payload' => ['items_subtotal' => $this->roundMoney($itemsSubtotal)],
+                'payload' => $this->buildAuditPayload($itemsSubtotal, $pricingContext, $evaluation),
                 'user_id' => $userId
             ]);
             throw new \Exception($evaluation['message']);
@@ -322,7 +325,7 @@ class DiscountRepository {
                 'code' => $code,
                 'reason' => 'usage_limit_reached',
                 'order_id' => $orderId,
-                'payload' => ['items_subtotal' => $this->roundMoney($itemsSubtotal)],
+                'payload' => $this->buildAuditPayload($itemsSubtotal, $pricingContext),
                 'user_id' => $userId
             ]);
             throw new \Exception('Código de descuento agotado.');
@@ -353,7 +356,10 @@ class DiscountRepository {
             'max_uses' => $normalized['max_uses'],
             'used_count_before' => $normalized['used_count'],
             'starts_at' => $normalized['starts_at'],
-            'ends_at' => $normalized['ends_at']
+            'ends_at' => $normalized['ends_at'],
+            'requested_amount' => $evaluation['requested_discount_amount'] ?? $discountAmount,
+            'limited_by_guardrail' => !empty($evaluation['limited_by_guardrail']),
+            'guardrail' => $evaluation['guardrail'] ?? null
         ];
 
         $this->writeAudit('order_applied', [
@@ -362,10 +368,10 @@ class DiscountRepository {
             'reason' => 'applied',
             'order_id' => $orderId,
             'amount' => $discountAmount,
-            'payload' => [
-                'items_subtotal' => $this->roundMoney($itemsSubtotal),
-                'snapshot' => $snapshot
-            ],
+            'payload' => array_merge(
+                $this->buildAuditPayload($itemsSubtotal, $pricingContext, $evaluation),
+                ['snapshot' => $snapshot]
+            ),
             'user_id' => $userId
         ]);
 
@@ -396,7 +402,7 @@ class DiscountRepository {
         return $stmt->fetch();
     }
 
-    private function evaluateRowForSubtotal(array $row, float $itemsSubtotal): array {
+    private function evaluateRowForSubtotal(array $row, float $itemsSubtotal, array $pricingContext = []): array {
         $isActive = $this->toBool($row['is_active'] ?? false);
         if (!$isActive) {
             return $this->rejectEvaluation('inactive', 'Código de descuento inactivo.');
@@ -449,8 +455,33 @@ class DiscountRepository {
             $rawDiscount = min($rawDiscount, $maxDiscount);
         }
 
-        $discountAmount = $this->roundMoney(min(max(0, $rawDiscount), max(0, $itemsSubtotal)));
+        $requestedDiscount = $this->roundMoney(min(max(0, $rawDiscount), max(0, $itemsSubtotal)));
+        if ($requestedDiscount <= 0) {
+            return $this->rejectEvaluation('zero_discount', 'El descuento no aplica sobre el subtotal actual.');
+        }
+
+        $guardrail = $this->buildProfitGuardrail($itemsSubtotal, $pricingContext);
+        $discountAmount = $requestedDiscount;
+        $limitedByGuardrail = false;
+
+        if ($guardrail !== null && $discountAmount > (($guardrail['max_safe_discount'] ?? 0) + 0.00001)) {
+            $discountAmount = $guardrail['max_safe_discount'];
+            $limitedByGuardrail = true;
+        }
+
+        $discountAmount = $this->roundMoney(min(max(0, $discountAmount), max(0, $itemsSubtotal)));
         if ($discountAmount <= 0) {
+            if ($guardrail !== null) {
+                return $this->rejectEvaluation(
+                    'loss_prevention',
+                    'El código de descuento dejaría el pedido por debajo del costo y no puede aplicarse.',
+                    [
+                        'requested_discount_amount' => $requestedDiscount,
+                        'guardrail' => $guardrail,
+                        'limited_by_guardrail' => true
+                    ]
+                );
+            }
             return $this->rejectEvaluation('zero_discount', 'El descuento no aplica sobre el subtotal actual.');
         }
 
@@ -458,17 +489,20 @@ class DiscountRepository {
             'status' => 'applied',
             'reason' => null,
             'message' => null,
-            'discount_amount' => $discountAmount
+            'discount_amount' => $discountAmount,
+            'requested_discount_amount' => $requestedDiscount,
+            'limited_by_guardrail' => $limitedByGuardrail,
+            'guardrail' => $guardrail
         ];
     }
 
-    private function rejectEvaluation(string $reason, string $message): array {
-        return [
+    private function rejectEvaluation(string $reason, string $message, array $extra = []): array {
+        return array_merge([
             'status' => 'rejected',
             'reason' => $reason,
             'message' => $message,
             'discount_amount' => 0.0
-        ];
+        ], $extra);
     }
 
     private function emptyDiscountResult(): array {
@@ -490,6 +524,52 @@ class DiscountRepository {
                 'reason' => $reason,
                 'message' => $message
             ]]
+        ];
+    }
+
+    private function buildAuditPayload(float $itemsSubtotal, array $pricingContext = [], array $evaluation = []): array {
+        $payload = [
+            'items_subtotal' => $this->roundMoney($itemsSubtotal),
+        ];
+
+        if (array_key_exists('items_cost_total', $pricingContext)) {
+            $payload['items_cost_total'] = $this->roundMoney(max(0, $this->toFloat($pricingContext['items_cost_total'])));
+        }
+        if (array_key_exists('tax_rate', $pricingContext)) {
+            $payload['tax_rate'] = $this->roundMoney(max(0, $this->toFloat($pricingContext['tax_rate'])));
+        }
+        if (isset($evaluation['requested_discount_amount'])) {
+            $payload['requested_discount_amount'] = $this->roundMoney(max(0, $this->toFloat($evaluation['requested_discount_amount'])));
+        }
+        if (isset($evaluation['discount_amount'])) {
+            $payload['discount_amount'] = $this->roundMoney(max(0, $this->toFloat($evaluation['discount_amount'])));
+        }
+        if (!empty($evaluation['limited_by_guardrail'])) {
+            $payload['limited_by_guardrail'] = true;
+        }
+        if (isset($evaluation['guardrail']) && is_array($evaluation['guardrail'])) {
+            $payload['guardrail'] = $evaluation['guardrail'];
+        }
+
+        return $payload;
+    }
+
+    private function buildProfitGuardrail(float $itemsSubtotal, array $pricingContext = []): ?array {
+        $itemsCostTotal = max(0, $this->toFloat($pricingContext['items_cost_total'] ?? 0));
+        if ($itemsSubtotal <= 0 || $itemsCostTotal <= 0) {
+            return null;
+        }
+
+        $taxRate = max(0, $this->toFloat($pricingContext['tax_rate'] ?? 0));
+        $taxMultiplier = 1 + ($taxRate / 100);
+        $costFloorGross = $itemsCostTotal * $taxMultiplier;
+        $maxSafeDiscount = $this->floorMoney(max(0, $itemsSubtotal - $costFloorGross));
+
+        return [
+            'items_cost_total' => $this->roundMoney($itemsCostTotal),
+            'tax_rate' => $this->roundMoney($taxRate),
+            'cost_floor_gross' => $this->roundMoney(max(0, $costFloorGross)),
+            'max_safe_discount' => $maxSafeDiscount
         ];
     }
 
@@ -570,6 +650,13 @@ class DiscountRepository {
 
     private function roundMoney(float $value): float {
         return round($value, 2);
+    }
+
+    private function floorMoney(float $value): float {
+        if ($value <= 0) {
+            return 0.0;
+        }
+        return floor(($value + 0.0000001) * 100) / 100;
     }
 
     private function toBool($value): bool {

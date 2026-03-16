@@ -7,7 +7,7 @@ class Router {
 
     public function add($method, $path, $handler) {
         // Convert path like /api/products/{id} to regex
-        $path = preg_replace('/\{([a-zA-Z0-9_]+)\}/', '(?P<$1>[a-zA-Z0-9_-]+)', $path);
+        $path = preg_replace('/\{([a-zA-Z0-9_]+)\}/', '(?P<$1>[a-zA-Z0-9_.-]+)', $path);
         $path = '#^' . $path . '$#';
 
         $this->routes[] = [

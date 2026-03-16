@@ -120,6 +120,7 @@ class OrderRepository {
         $tenantId = $this->getTenantId();
         $this->db->beginTransaction();
         try {
+            $inventoryLots = new InventoryLotRepository($this->db);
             $stmtCurrent = $this->db->prepare('SELECT status FROM "Order" WHERE id = :id AND tenant_id = :tenant_id FOR UPDATE');
             $stmtCurrent->execute([
                 'id' => $id,
@@ -137,9 +138,22 @@ class OrderRepository {
             $nextActive = $this->orderAffectsInventory($nextStatus);
 
             if ($currentActive !== $nextActive) {
-                $stmtItems = $this->db->prepare('SELECT product_id, quantity FROM "OrderItem" WHERE order_id = :order_id');
+                $stmtItems = $this->db->prepare('SELECT id, product_id, quantity, unit_cost, cost_total FROM "OrderItem" WHERE order_id = :order_id');
                 $stmtItems->execute(['order_id' => $id]);
                 $items = $stmtItems->fetchAll();
+                $stmtLockProduct = $this->db->prepare('
+                    SELECT quantity, cost
+                    FROM "Product"
+                    WHERE id = :id AND tenant_id = :tenant_id
+                    LIMIT 1
+                    FOR UPDATE
+                ');
+                $stmtUpdateOrderItemCost = $this->db->prepare('
+                    UPDATE "OrderItem"
+                    SET unit_cost = :unit_cost,
+                        cost_total = :cost_total
+                    WHERE id = :id
+                ');
 
                 if ($currentActive && !$nextActive) {
                     $stmtRestore = $this->db->prepare('UPDATE "Product" SET quantity = quantity + :qty, sold = GREATEST(0, sold - :qty) WHERE id = :id AND tenant_id = :tenant_id');
@@ -147,6 +161,18 @@ class OrderRepository {
                         $qty = max(0, (int)($item['quantity'] ?? 0));
                         if ($qty <= 0) {
                             continue;
+                        }
+                        $restore = $inventoryLots->restoreForOrderItem((string)$item['id']);
+                        $restoredQty = max(0, (int)($restore['restored_quantity'] ?? 0));
+                        if ($restoredQty < $qty) {
+                            $inventoryLots->recordStockIncrease(
+                                (string)$item['product_id'],
+                                $qty - $restoredQty,
+                                round((float)($item['unit_cost'] ?? 0), 4),
+                                'order_cancel_restore',
+                                (string)$id,
+                                ['order_item_id' => (string)$item['id'], 'fallback' => true]
+                            );
                         }
                         $stmtRestore->execute([
                             'qty' => $qty,
@@ -161,6 +187,29 @@ class OrderRepository {
                         if ($qty <= 0) {
                             continue;
                         }
+                        $stmtLockProduct->execute([
+                            'id' => $item['product_id'],
+                            'tenant_id' => $tenantId
+                        ]);
+                        $productRow = $stmtLockProduct->fetch();
+                        if (!$productRow) {
+                            throw new \Exception('Producto no encontrado para reactivar el pedido');
+                        }
+
+                        $allocation = $inventoryLots->consumeForOrderItem(
+                            (string)$item['product_id'],
+                            (string)$item['id'],
+                            $qty,
+                            max(0, (int)($productRow['quantity'] ?? 0)),
+                            round((float)($productRow['cost'] ?? 0), 4),
+                            ['order_id' => (string)$id, 'reason' => 'order_status_reactivate']
+                        );
+                        $stmtUpdateOrderItemCost->execute([
+                            'id' => (string)$item['id'],
+                            'unit_cost' => round((float)($allocation['unit_cost'] ?? 0), 4),
+                            'cost_total' => round((float)($allocation['cost_total'] ?? 0), 4)
+                        ]);
+
                         $stmtConsume->execute([
                             'qty' => $qty,
                             'id' => $item['product_id'],
@@ -300,9 +349,11 @@ class OrderRepository {
             throw new \Exception('Items required');
         }
         $itemsGrossSubtotal = 0;
+        $itemsCostSubtotal = 0;
         $itemsWithDetails = [];
         $taxRate = $this->getTaxRate();
         $taxMultiplier = 1 + ($taxRate / 100);
+        $inventoryLots = new InventoryLotRepository($this->db);
 
         foreach ($items as $item) {
             $productId = trim((string)($item['product_id'] ?? ''));
@@ -312,7 +363,7 @@ class OrderRepository {
             }
 
             $stmt = $this->db->prepare('
-                SELECT p.id, p.legacy_id, p.price, p.name, p.quantity, p.attributes,
+                SELECT p.id, p.legacy_id, p.price, p.cost, p.name, p.quantity, p.attributes,
                        (SELECT url FROM "Image" WHERE product_id = p.id ORDER BY id LIMIT 1) as image
                 FROM "Product" p 
                 WHERE (p.id = :id OR p.legacy_id = :id) AND p.tenant_id = :tenant_id
@@ -352,21 +403,34 @@ class OrderRepository {
 
             $priceWithTax = round(floatval($product['price']) * $taxMultiplier, 2);
             $lineTotal = $priceWithTax * $quantity;
+            $costAllocation = $inventoryLots->previewSaleAllocation(
+                (string)$product['id'],
+                $quantity,
+                $availableQty,
+                round((float)($product['cost'] ?? 0), 4)
+            );
             $itemsGrossSubtotal += $lineTotal;
+            $itemsCostSubtotal += round((float)($costAllocation['cost_total'] ?? 0), 4);
 
             $itemsWithDetails[] = [
                 'product_id' => $product['id'],
                 'product_name' => $product['name'],
                 'product_image' => $item['product_image'] ?? $product['image'],
                 'quantity' => $quantity,
+                'unit_cost' => round((float)($costAllocation['unit_cost'] ?? 0), 4),
+                'cost_total' => round((float)($costAllocation['cost_total'] ?? 0), 4),
                 'price' => $priceWithTax,
                 'total' => $lineTotal
             ];
         }
 
+        $discountPricingContext = [
+            'items_cost_total' => round($itemsCostSubtotal, 2),
+            'tax_rate' => round($taxRate, 2)
+        ];
         $discountResult = ($context === 'order')
-            ? $this->discountRepository->reserveForOrder($discountCode, $itemsGrossSubtotal, (string)$orderId, $userId)
-            : $this->discountRepository->evaluateForQuote($discountCode, $itemsGrossSubtotal, $userId);
+            ? $this->discountRepository->reserveForOrder($discountCode, $itemsGrossSubtotal, (string)$orderId, $userId, $discountPricingContext)
+            : $this->discountRepository->evaluateForQuote($discountCode, $itemsGrossSubtotal, $userId, $discountPricingContext);
         $discountTotal = max(0, (float)($discountResult['discount_total'] ?? 0));
         $itemsNetSubtotal = max(0, $itemsGrossSubtotal - $discountTotal);
 
@@ -447,6 +511,7 @@ class OrderRepository {
     public function create($data, $baseUrl = null) {
         $this->db->beginTransaction();
         try {
+            $inventoryLots = new InventoryLotRepository($this->db);
             $paymentDetails = $data['payment_details'] ?? null;
             if (is_string($paymentDetails)) {
                 $decoded = json_decode($paymentDetails, true);
@@ -504,22 +569,62 @@ class OrderRepository {
                 'order_notes' => $data['order_notes'] ?? null
             ]);
 
+            $stmtItem = $this->db->prepare('INSERT INTO "OrderItem" ("id", "order_id", "product_id", "product_name", "product_image", "quantity", "price", "unit_cost", "cost_total") VALUES (:id, :order_id, :product_id, :product_name, :product_image, :quantity, :price, :unit_cost, :cost_total)');
+            $stmtUpdateStock = $this->db->prepare('UPDATE "Product" SET quantity = quantity - :qty, sold = sold + :qty WHERE id = :id AND tenant_id = :tenant_id AND quantity >= :qty');
+            $stmtLockProduct = $this->db->prepare('
+                SELECT quantity, cost
+                FROM "Product"
+                WHERE id = :id AND tenant_id = :tenant_id
+                LIMIT 1
+                FOR UPDATE
+            ');
+            $stmtUpdateOrderItemCost = $this->db->prepare('
+                UPDATE "OrderItem"
+                SET unit_cost = :unit_cost,
+                    cost_total = :cost_total
+                WHERE id = :id
+            ');
+
             foreach ($quote['items'] as $item) {
-                $stmtItem = $this->db->prepare('INSERT INTO "OrderItem" ("id", "order_id", "product_id", "product_name", "product_image", "quantity", "price") VALUES (:id, :order_id, :product_id, :product_name, :product_image, :quantity, :price)');
-                
+                $orderItemId = uniqid('item_');
+                $previewUnitCost = round((float)($item['unit_cost'] ?? 0), 4);
+                $previewCostTotal = round((float)($item['cost_total'] ?? ($previewUnitCost * (int)($item['quantity'] ?? 0))), 4);
                 $stmtItem->execute([
-                    'id' => uniqid('item_'),
+                    'id' => $orderItemId,
                     'order_id' => $data['id'],
                     'product_id' => $item['product_id'],
                     'product_name' => $item['product_name'],
                     'product_image' => $item['product_image'] ?? null,
                     'quantity' => $item['quantity'],
-                    'price' => $item['price']
+                    'price' => $item['price'],
+                    'unit_cost' => $previewUnitCost,
+                    'cost_total' => $previewCostTotal
                 ]);
 
                 if ($this->orderAffectsInventory($orderStatus)) {
-                    // Pedido activo consume inventario y suma unidades vendidas.
-                    $stmtUpdateStock = $this->db->prepare('UPDATE "Product" SET quantity = quantity - :qty, sold = sold + :qty WHERE id = :id AND tenant_id = :tenant_id AND quantity >= :qty');
+                    $stmtLockProduct->execute([
+                        'id' => $item['product_id'],
+                        'tenant_id' => $this->getTenantId()
+                    ]);
+                    $productRow = $stmtLockProduct->fetch();
+                    if (!$productRow) {
+                        throw new \Exception('Producto no encontrado durante la reserva de inventario.');
+                    }
+
+                    $allocation = $inventoryLots->consumeForOrderItem(
+                        (string)$item['product_id'],
+                        $orderItemId,
+                        max(0, (int)($item['quantity'] ?? 0)),
+                        max(0, (int)($productRow['quantity'] ?? 0)),
+                        round((float)($productRow['cost'] ?? 0), 4),
+                        ['order_id' => $data['id'], 'reason' => 'order_create']
+                    );
+                    $stmtUpdateOrderItemCost->execute([
+                        'id' => $orderItemId,
+                        'unit_cost' => round((float)($allocation['unit_cost'] ?? 0), 4),
+                        'cost_total' => round((float)($allocation['cost_total'] ?? 0), 4)
+                    ]);
+
                     $stmtUpdateStock->execute([
                         'qty' => $item['quantity'],
                         'id' => $item['product_id'],
@@ -564,6 +669,14 @@ class OrderRepository {
     private function orderAffectsInventory($status) {
         $normalized = strtolower(trim((string)$status));
         return !in_array($normalized, ['canceled', 'cancelled'], true);
+    }
+
+    private function orderItemCostExpression(string $orderItemAlias = 'oi', string $productAlias = 'p'): string {
+        return "COALESCE({$orderItemAlias}.cost_total, (COALESCE({$orderItemAlias}.quantity, 0) * COALESCE({$orderItemAlias}.unit_cost, {$productAlias}.cost, 0)), 0)";
+    }
+
+    private function orderItemUnitCostExpression(string $orderItemAlias = 'oi', string $productAlias = 'p'): string {
+        return "COALESCE({$orderItemAlias}.unit_cost, {$productAlias}.cost, 0)";
     }
 
     private function netSalesSql($alias = 'o') {
@@ -842,6 +955,9 @@ class OrderRepository {
         $realizedSales = $this->realizedSalesCondition('o');
         $netExpr = $this->netSalesSql('o');
         $vatExpr = $this->vatAmountSql('o');
+        $costExpr = $this->orderItemCostExpression('oi', 'p');
+        $lineCostExpr = $this->orderItemCostExpression('oi', 'pr');
+        $unitCostExpr = $this->orderItemUnitCostExpression('oi', 'pr');
         $periodStmt = $this->db->prepare("
             SELECT
                 MIN(o.created_at)::date AS historical_start,
@@ -900,7 +1016,7 @@ class OrderRepository {
         $historicalSales = $historicalSalesStmt->fetch() ?: [];
 
         $monthlyCostStmt = $this->db->prepare("
-            SELECT COALESCE(SUM(oi.quantity * COALESCE(p.cost, 0)), 0) AS cost
+            SELECT COALESCE(SUM($costExpr), 0) AS cost
             FROM \"OrderItem\" oi
             JOIN \"Order\" o ON oi.order_id = o.id
             LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
@@ -917,7 +1033,7 @@ class OrderRepository {
         $monthlyCost = (float)($monthlyCostStmt->fetchColumn() ?: 0);
 
         $historicalCostStmt = $this->db->prepare("
-            SELECT COALESCE(SUM(oi.quantity * COALESCE(p.cost, 0)), 0) AS cost
+            SELECT COALESCE(SUM($costExpr), 0) AS cost
             FROM \"OrderItem\" oi
             JOIN \"Order\" o ON oi.order_id = o.id
             LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
@@ -942,7 +1058,8 @@ class OrderRepository {
                     COALESCE($netExpr, 0) AS order_net,
                     COALESCE($vatExpr, 0) AS order_vat,
                     SUM(COALESCE(oi.quantity, 0) * COALESCE(oi.price, 0)) OVER (PARTITION BY o.id) AS order_items_gross,
-                    COALESCE(pr.cost, 0) AS unit_cost
+                    $unitCostExpr AS unit_cost,
+                    $lineCostExpr AS line_cost
                 FROM \"OrderItem\" oi
                 JOIN \"Order\" o ON oi.order_id = o.id
                 LEFT JOIN \"Product\" pr ON oi.product_id = pr.id AND pr.tenant_id = :tenant_id
@@ -967,7 +1084,8 @@ class OrderRepository {
                         WHEN order_items_gross > 0 THEN GREATEST(line_gross_items - line_net_estimate, 0)
                         ELSE 0
                     END AS line_vat,
-                    unit_cost
+                    unit_cost,
+                    line_cost
                 FROM active_lines
             ),
             product_metrics AS (
@@ -991,7 +1109,7 @@ class OrderRepository {
                     COALESCE(SUM(dl.line_shipping) FILTER (
                         WHERE dl.created_at >= :start_date AND dl.created_at < :end_date
                     ), 0) AS month_shipping_amount,
-                    COALESCE(SUM(dl.quantity * dl.unit_cost) FILTER (
+                    COALESCE(SUM(dl.line_cost) FILTER (
                         WHERE dl.created_at >= :start_date AND dl.created_at < :end_date
                     ), 0) AS month_cost,
                     COUNT(DISTINCT dl.order_id)::int AS historical_orders_count,
@@ -1000,7 +1118,7 @@ class OrderRepository {
                     COALESCE(SUM(dl.line_net_estimate), 0) AS historical_net_revenue,
                     COALESCE(SUM(dl.line_vat), 0) AS historical_vat_amount,
                     COALESCE(SUM(dl.line_shipping), 0) AS historical_shipping_amount,
-                    COALESCE(SUM(dl.quantity * dl.unit_cost), 0) AS historical_cost
+                    COALESCE(SUM(dl.line_cost), 0) AS historical_cost
                 FROM distributed_lines dl
                 GROUP BY dl.product_id
             )
@@ -1284,9 +1402,10 @@ class OrderRepository {
         $salesRow = $salesStmt->fetch();
         $revenue = (float)($salesRow['revenue'] ?? 0);
         $shippingCost = (float)($salesRow['shipping_cost'] ?? 0);
+        $costExpr = $this->orderItemCostExpression('oi', 'p');
 
         $costStmt = $this->db->prepare("
-            SELECT SUM(oi.quantity * COALESCE(p.cost, 0)) as cost
+            SELECT SUM($costExpr) as cost
             FROM \"OrderItem\" oi
             JOIN \"Order\" o ON oi.order_id = o.id
             LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id

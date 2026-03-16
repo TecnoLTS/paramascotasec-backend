@@ -2,6 +2,36 @@
 
 Backend PHP-FPM + Nginx para `paramascotasec`.
 
+## Comandos exactos
+
+Desarrollo:
+
+```bash
+cd /home/admincenter/contenedores/paramascotasec-backend
+./scripts/deploy-development.sh
+```
+
+Produccion:
+
+```bash
+cd /home/admincenter/contenedores/paramascotasec-backend
+./scripts/deploy-production.sh
+```
+
+Desarrollo con bootstrap:
+
+```bash
+cd /home/admincenter/contenedores/paramascotasec-backend
+RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 ./scripts/deploy-development.sh
+```
+
+Produccion con bootstrap:
+
+```bash
+cd /home/admincenter/contenedores/paramascotasec-backend
+RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 ./scripts/deploy-production.sh
+```
+
 ## Requisitos
 - Docker
 - Docker Compose
@@ -21,30 +51,39 @@ Variables relevantes:
 - `RUN_COMPOSER_INSTALL=0|1`
 - `RUN_DB_BOOTSTRAP=0|1`
 
+## Regla simple
+- Cambio persistente por archivo:
+  - `.env` o `.env.production` para produccion.
+  - `.env.development` para desarrollo si quieres dejarlo fijo.
+- Cambio por comando:
+  - `./scripts/deploy-development.sh`
+  - `./scripts/deploy-production.sh`
+- Los scripts fuerzan `APP_ENV` correcto y usan `--remove-orphans`.
+
 ## Despliegue en desarrollo
 Desde `/home/admincenter/contenedores/paramascotasec-backend`:
 
 ```bash
-APP_ENV=development RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 docker compose up -d --build
+./scripts/deploy-development.sh
 ```
 
-Siguientes arranques (sin bootstrap):
+Si necesitas bootstrap en desarrollo:
 
 ```bash
-APP_ENV=development docker compose up -d
+RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 ./scripts/deploy-development.sh
 ```
 
 ## Despliegue en produccion
 Desde `/home/admincenter/contenedores/paramascotasec-backend`:
 
 ```bash
-APP_ENV=production RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 docker compose up -d --build
+./scripts/deploy-production.sh
 ```
 
-Siguientes arranques (sin bootstrap):
+Si necesitas bootstrap en produccion:
 
 ```bash
-APP_ENV=production docker compose up -d
+RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 ./scripts/deploy-production.sh
 ```
 
 ## Verificacion
@@ -68,3 +107,37 @@ Para normalizar inventario y fechas de vencimiento de productos perecederos:
 ```bash
 docker exec -it paramascotasec-backend-app php /var/www/html/scripts/seed_inventory_details.php
 ```
+
+
+
+
+Workspace completo en /home/admincenter/contenedores:
+
+cd /home/admincenter/contenedores
+./scripts/deploy-workspace.sh development
+./scripts/deploy-workspace.sh production
+paramascotasec:
+
+cd /home/admincenter/contenedores/paramascotasec
+./scripts/deploy-development.sh
+./scripts/deploy-production.sh
+paramascotasec-backend:
+
+cd /home/admincenter/contenedores/paramascotasec-backend
+./scripts/deploy-development.sh
+./scripts/deploy-production.sh
+RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 ./scripts/deploy-development.sh
+RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 ./scripts/deploy-production.sh
+tecnolts:
+
+cd /home/admincenter/contenedores/tecnolts
+./scripts/deploy-development.sh
+./scripts/deploy-production.sh
+gateway:
+
+cd /home/admincenter/contenedores/gateway
+./scripts/setup-ssl-local.sh
+./scripts/deploy-gateway-production.sh
+./scripts/renew-letsencrypt.sh
+
+

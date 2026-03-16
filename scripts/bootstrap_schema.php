@@ -69,6 +69,7 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
             gender text,
             is_new boolean DEFAULT false NOT NULL,
             is_sale boolean DEFAULT false NOT NULL,
+            is_published boolean DEFAULT true NOT NULL,
             price numeric(10,2) NOT NULL,
             original_price numeric(10,2) NOT NULL,
             cost numeric(10,2) DEFAULT 0 NOT NULL,
@@ -115,8 +116,66 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
             product_id text NOT NULL,
             quantity integer NOT NULL,
             price numeric(10,2) NOT NULL,
+            unit_cost numeric(12,4) DEFAULT 0 NOT NULL,
+            cost_total numeric(12,4) DEFAULT 0 NOT NULL,
             product_name text,
             product_image text
+        )',
+        'CREATE TABLE IF NOT EXISTS "InventoryLot" (
+            id text PRIMARY KEY,
+            tenant_id text NOT NULL,
+            product_id text NOT NULL,
+            source_type text NOT NULL,
+            source_ref text,
+            purchase_invoice_id text,
+            purchase_invoice_item_id text,
+            unit_cost numeric(12,4) DEFAULT 0 NOT NULL,
+            initial_quantity integer NOT NULL,
+            remaining_quantity integer NOT NULL,
+            metadata jsonb,
+            received_at timestamp without time zone DEFAULT NOW() NOT NULL,
+            created_at timestamp without time zone DEFAULT NOW() NOT NULL,
+            updated_at timestamp without time zone DEFAULT NOW() NOT NULL
+        )',
+        'CREATE TABLE IF NOT EXISTS "InventoryLotAllocation" (
+            id text PRIMARY KEY,
+            tenant_id text NOT NULL,
+            lot_id text NOT NULL,
+            order_item_id text NOT NULL,
+            product_id text NOT NULL,
+            quantity integer NOT NULL,
+            unit_cost numeric(12,4) DEFAULT 0 NOT NULL,
+            metadata jsonb,
+            created_at timestamp without time zone DEFAULT NOW() NOT NULL
+        )',
+        'CREATE TABLE IF NOT EXISTS "PurchaseInvoice" (
+            id text PRIMARY KEY,
+            tenant_id text NOT NULL,
+            supplier_name text NOT NULL,
+            supplier_document text,
+            invoice_number text NOT NULL,
+            external_key text NOT NULL,
+            issued_at date NOT NULL,
+            subtotal numeric(12,4) DEFAULT 0 NOT NULL,
+            tax_total numeric(12,4) DEFAULT 0 NOT NULL,
+            total numeric(12,4) DEFAULT 0 NOT NULL,
+            notes text,
+            metadata jsonb,
+            created_at timestamp without time zone DEFAULT NOW() NOT NULL,
+            updated_at timestamp without time zone DEFAULT NOW() NOT NULL
+        )',
+        'CREATE TABLE IF NOT EXISTS "PurchaseInvoiceItem" (
+            id text PRIMARY KEY,
+            purchase_invoice_id text NOT NULL,
+            tenant_id text NOT NULL,
+            product_id text NOT NULL,
+            product_name_snapshot text,
+            quantity integer NOT NULL,
+            unit_cost numeric(12,4) DEFAULT 0 NOT NULL,
+            line_total numeric(12,4) DEFAULT 0 NOT NULL,
+            metadata jsonb,
+            created_at timestamp without time zone DEFAULT NOW() NOT NULL,
+            updated_at timestamp without time zone DEFAULT NOW() NOT NULL
         )',
         'CREATE TABLE IF NOT EXISTS "Setting" (
             key text PRIMARY KEY,
@@ -169,6 +228,7 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS tenant_id text',
         'ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS product_type text',
         'ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS attributes jsonb',
+        'ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS is_published boolean',
         'ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS kind text',
         'ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS width integer',
         'ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS height integer',
@@ -190,7 +250,29 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS discount_code text',
         'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS discount_total numeric(12,2) DEFAULT 0',
         'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS discount_snapshot jsonb',
+        'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS unit_cost numeric(12,4)',
+        'ALTER TABLE "OrderItem" ALTER COLUMN unit_cost TYPE numeric(12,4) USING COALESCE(unit_cost, 0)::numeric(12,4)',
+        'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS cost_total numeric(12,4)',
+        'ALTER TABLE "InventoryLot" ADD COLUMN IF NOT EXISTS purchase_invoice_id text',
+        'ALTER TABLE "InventoryLot" ADD COLUMN IF NOT EXISTS purchase_invoice_item_id text',
         'ALTER TABLE "Setting" ADD COLUMN IF NOT EXISTS tenant_id text',
+        'UPDATE "OrderItem" oi SET unit_cost = COALESCE((
+            SELECT p.cost
+            FROM "Order" o
+            LEFT JOIN "Product" p ON p.id = oi.product_id AND p.tenant_id = o.tenant_id
+            WHERE o.id = oi.order_id
+            LIMIT 1
+        ), 0) WHERE oi.unit_cost IS NULL',
+        'UPDATE "OrderItem" SET cost_total = ROUND((COALESCE(quantity, 0) * COALESCE(unit_cost, 0))::numeric, 4) WHERE cost_total IS NULL',
+        'UPDATE "Product" SET is_published = true WHERE is_published IS NULL',
+        'ALTER TABLE "Product" ALTER COLUMN is_published SET DEFAULT true',
+        'ALTER TABLE "Product" ALTER COLUMN is_published SET NOT NULL',
+        'UPDATE "OrderItem" SET unit_cost = 0 WHERE unit_cost IS NULL',
+        'ALTER TABLE "OrderItem" ALTER COLUMN unit_cost SET DEFAULT 0',
+        'ALTER TABLE "OrderItem" ALTER COLUMN unit_cost SET NOT NULL',
+        'UPDATE "OrderItem" SET cost_total = 0 WHERE cost_total IS NULL',
+        'ALTER TABLE "OrderItem" ALTER COLUMN cost_total SET DEFAULT 0',
+        'ALTER TABLE "OrderItem" ALTER COLUMN cost_total SET NOT NULL',
         'ALTER TABLE "User" DROP CONSTRAINT IF EXISTS "User_email_key"',
         'ALTER TABLE "Product" DROP CONSTRAINT IF EXISTS "Product_slug_key"',
         'DROP INDEX IF EXISTS "Product_legacy_id_key"',
@@ -198,6 +280,7 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'CREATE INDEX IF NOT EXISTS "User_tenant_email_idx" ON "User" (tenant_id, email)',
         'CREATE UNIQUE INDEX IF NOT EXISTS "User_tenant_email_uidx" ON "User" (tenant_id, email)',
         'CREATE INDEX IF NOT EXISTS "Product_tenant_id_idx" ON "Product" (tenant_id)',
+        'CREATE INDEX IF NOT EXISTS "Product_tenant_published_idx" ON "Product" (tenant_id, is_published)',
         'CREATE INDEX IF NOT EXISTS "Product_tenant_slug_idx" ON "Product" (tenant_id, slug)',
         'CREATE UNIQUE INDEX IF NOT EXISTS "Product_tenant_slug_uidx" ON "Product" (tenant_id, slug)',
         'CREATE INDEX IF NOT EXISTS "Product_tenant_legacy_id_idx" ON "Product" (tenant_id, legacy_id)',
@@ -206,6 +289,17 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'CREATE INDEX IF NOT EXISTS "Order_tenant_user_idx" ON "Order" (tenant_id, user_id)',
         'CREATE INDEX IF NOT EXISTS "OrderItem_order_id_idx" ON "OrderItem" (order_id)',
         'CREATE INDEX IF NOT EXISTS "OrderItem_product_id_idx" ON "OrderItem" (product_id)',
+        'CREATE INDEX IF NOT EXISTS "InventoryLot_tenant_product_received_idx" ON "InventoryLot" (tenant_id, product_id, received_at, created_at)',
+        'CREATE INDEX IF NOT EXISTS "InventoryLot_tenant_product_remaining_idx" ON "InventoryLot" (tenant_id, product_id, remaining_quantity)',
+        'CREATE INDEX IF NOT EXISTS "InventoryLot_tenant_purchase_invoice_idx" ON "InventoryLot" (tenant_id, purchase_invoice_id)',
+        'CREATE INDEX IF NOT EXISTS "InventoryLot_tenant_purchase_invoice_item_idx" ON "InventoryLot" (tenant_id, purchase_invoice_item_id)',
+        'CREATE INDEX IF NOT EXISTS "InventoryLotAllocation_tenant_order_item_idx" ON "InventoryLotAllocation" (tenant_id, order_item_id)',
+        'CREATE INDEX IF NOT EXISTS "InventoryLotAllocation_tenant_product_idx" ON "InventoryLotAllocation" (tenant_id, product_id)',
+        'CREATE INDEX IF NOT EXISTS "InventoryLotAllocation_tenant_lot_idx" ON "InventoryLotAllocation" (tenant_id, lot_id)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS "PurchaseInvoice_tenant_external_key_uidx" ON "PurchaseInvoice" (tenant_id, external_key)',
+        'CREATE INDEX IF NOT EXISTS "PurchaseInvoice_tenant_issued_idx" ON "PurchaseInvoice" (tenant_id, issued_at DESC, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "PurchaseInvoiceItem_tenant_invoice_idx" ON "PurchaseInvoiceItem" (tenant_id, purchase_invoice_id, created_at ASC)',
+        'CREATE INDEX IF NOT EXISTS "PurchaseInvoiceItem_tenant_product_idx" ON "PurchaseInvoiceItem" (tenant_id, product_id, created_at DESC)',
         'CREATE INDEX IF NOT EXISTS "Image_product_id_idx" ON "Image" (product_id)',
         'CREATE INDEX IF NOT EXISTS "Variation_product_id_idx" ON "Variation" (product_id)',
         'CREATE INDEX IF NOT EXISTS "Setting_tenant_id_idx" ON "Setting" (tenant_id)',
@@ -226,6 +320,45 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
 
     $stmtProduct = $pdo->prepare('UPDATE "Product" SET tenant_id = COALESCE(tenant_id, :tenant)');
     $stmtProduct->execute(['tenant' => $defaultTenant]);
+
+    $pdo->exec('
+        INSERT INTO "InventoryLot" (
+            id,
+            tenant_id,
+            product_id,
+            source_type,
+            source_ref,
+            unit_cost,
+            initial_quantity,
+            remaining_quantity,
+            metadata,
+            received_at,
+            created_at,
+            updated_at
+        )
+        SELECT
+            \'lot_seed_\' || md5(COALESCE(p.tenant_id, \'\') || \':\' || COALESCE(p.id, \'\') || \':opening\'),
+            p.tenant_id,
+            p.id,
+            \'bootstrap_opening\',
+            p.id,
+            COALESCE(p.cost, 0)::numeric(12,4),
+            COALESCE(p.quantity, 0),
+            COALESCE(p.quantity, 0),
+            jsonb_build_object(\'seed\', \'bootstrap_schema\'),
+            COALESCE(p.created_at, NOW()),
+            NOW(),
+            NOW()
+        FROM "Product" p
+        WHERE COALESCE(p.quantity, 0) > 0
+          AND COALESCE(p.tenant_id, \'\') <> \'\'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM "InventoryLot" l
+              WHERE l.tenant_id = p.tenant_id
+                AND l.product_id = p.id
+          )
+    ');
 
     $stmtOrder = $pdo->prepare('UPDATE "Order" SET tenant_id = COALESCE(tenant_id, :tenant)');
     $stmtOrder->execute(['tenant' => $defaultTenant]);
