@@ -6,6 +6,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 use App\Core\Database;
 use App\Core\TenantContext;
+use App\Support\CatalogProductTextNormalizer;
 use Dotenv\Dotenv;
 
 if (file_exists(__DIR__ . '/../.env')) {
@@ -242,6 +243,8 @@ try {
         if (!is_array($item)) {
             continue;
         }
+
+        $item = CatalogProductTextNormalizer::normalizeItem($item);
 
         $legacyId = $normalizeString($item['legacyId'] ?? '', '');
         $name = $normalizeString($item['name'] ?? '', '');

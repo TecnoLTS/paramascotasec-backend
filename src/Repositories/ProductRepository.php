@@ -101,6 +101,8 @@ class ProductRepository {
           p.description AS "description",
           p.action AS "action",
           p.slug AS "slug",
+          p.created_at AS "createdAt",
+          p.updated_at AS "updatedAt",
           COALESCE(p.attributes, \'{}\') AS attributes,
           COALESCE(img.images, \'[]\') AS images,
           COALESCE(img.thumbs, \'[]\') AS thumbs,
