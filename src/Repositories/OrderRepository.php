@@ -508,6 +508,14 @@ class OrderRepository {
         return $rate;
     }
 
+    private function normalizeCountryName($value) {
+        $normalized = mb_strtolower(trim((string)$value), 'UTF-8');
+        if ($normalized === '' || $normalized === 'ecuador' || $normalized === 'ec' || $normalized === 'república del ecuador' || $normalized === 'republica del ecuador') {
+            return 'Ecuador';
+        }
+        return trim((string)$value);
+    }
+
     public function create($data, $baseUrl = null) {
         $this->db->beginTransaction();
         try {
@@ -532,10 +540,32 @@ class OrderRepository {
                 $data['payment_details'] = $paymentDetails;
             }
 
+            $deliveryMethod = strtolower(trim((string)($data['delivery_method'] ?? 'delivery')));
+            if ($deliveryMethod === 'delivery') {
+                $shippingAddress = isset($data['shipping_address']) && is_array($data['shipping_address'])
+                    ? $data['shipping_address']
+                    : [];
+                $shippingCountry = $this->normalizeCountryName($shippingAddress['country'] ?? null);
+                if ($shippingCountry !== 'Ecuador') {
+                    throw new \Exception('Solo realizamos envíos dentro de Ecuador.');
+                }
+                $shippingAddress['country'] = 'Ecuador';
+                $data['shipping_address'] = $shippingAddress;
+            }
+
+            if (isset($data['billing_address']) && is_array($data['billing_address'])) {
+                $billingAddress = $data['billing_address'];
+                $billingCountry = $this->normalizeCountryName($billingAddress['country'] ?? null);
+                if ($billingCountry === 'Ecuador' || $billingCountry === '') {
+                    $billingAddress['country'] = 'Ecuador';
+                    $data['billing_address'] = $billingAddress;
+                }
+            }
+
             // Inteligencia de Negocio: El Backend recalcula y valida TODO.
             $quote = $this->calculateQuote(
                 $data['items'],
-                $data['delivery_method'] ?? 'delivery',
+                $deliveryMethod,
                 $data['coupon_code'] ?? ($data['discount_code'] ?? null),
                 'order',
                 $data['id'],

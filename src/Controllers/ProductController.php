@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Repositories\ProductRepository;
 use App\Core\Auth;
 use App\Core\Response;
+use App\Support\ProductVariantMetadata;
 
 class ProductController {
     private $productRepository;
@@ -114,6 +115,41 @@ class ProductController {
             Response::error('La fecha de la factura de compra es obligatoria y debe usar formato YYYY-MM-DD.', 400, 'PURCHASE_INVOICE_DATE_INVALID');
             exit;
         }
+    }
+
+    private function enforcePublicationEligibility(array &$data, ?array $currentProduct = null): void {
+        $effectivePrice = array_key_exists('price', $data)
+            ? (float)($data['price'] ?? 0)
+            : (float)($currentProduct['price'] ?? 0);
+        $effectiveQuantity = array_key_exists('quantity', $data)
+            ? (int)($data['quantity'] ?? 0)
+            : (int)($currentProduct['quantity'] ?? 0);
+
+        $canPublish = $effectivePrice > 0 && $effectiveQuantity > 0;
+        if (!$canPublish) {
+            $data['published'] = false;
+        } elseif (!array_key_exists('published', $data) && $currentProduct === null) {
+            $data['published'] = false;
+        }
+    }
+
+    private function applyVariantMetadata(array &$data, ?array $currentProduct = null): void {
+        $effectiveAttributes = $data['attributes'] ?? ($currentProduct['attributes'] ?? []);
+        if (!is_array($effectiveAttributes)) {
+            $effectiveAttributes = [];
+        }
+
+        $effectiveProduct = [
+            'name' => $data['name'] ?? ($currentProduct['name'] ?? ''),
+            'brand' => $data['brand'] ?? ($currentProduct['brand'] ?? ''),
+            'category' => $data['category'] ?? ($currentProduct['category'] ?? ''),
+            'gender' => $data['gender'] ?? ($currentProduct['gender'] ?? ''),
+            'variantLabel' => $data['variantLabel'] ?? ($currentProduct['variantLabel'] ?? ''),
+            'variantBaseName' => $data['variantBaseName'] ?? ($currentProduct['variantBaseName'] ?? ''),
+            'variantGroupKey' => $data['variantGroupKey'] ?? ($currentProduct['variantGroupKey'] ?? ''),
+        ];
+
+        $data['attributes'] = ProductVariantMetadata::apply($effectiveProduct, $effectiveAttributes);
     }
 
     public function index() {
@@ -227,6 +263,8 @@ class ProductController {
                 $attributes['supplier'] = trim((string)$data['purchaseInvoice']['supplierName']);
             }
             $data['attributes'] = $attributes;
+            $this->applyVariantMetadata($data, null);
+            $this->enforcePublicationEligibility($data, null);
             $product = $this->productRepository->create($data);
             Response::json($product, 201);
         } catch (\Exception $e) {
@@ -329,6 +367,8 @@ class ProductController {
                     $attributes['supplier'] = trim((string)$data['purchaseInvoice']['supplierName']);
                 }
                 $data['attributes'] = $attributes;
+                $this->applyVariantMetadata($data, $currentProduct);
+                $this->enforcePublicationEligibility($data, $currentProduct);
             } else {
                 $currentProduct = $this->productRepository->getById($id, ['includeUnpublished' => true]);
                 if (!$currentProduct) {
@@ -340,6 +380,8 @@ class ProductController {
                     ? intval($data['quantity'])
                     : $currentQuantity;
                 $this->validatePurchaseInvoice($data['purchaseInvoice'] ?? null, $effectiveQuantity > $currentQuantity);
+                $this->applyVariantMetadata($data, $currentProduct);
+                $this->enforcePublicationEligibility($data, $currentProduct);
             }
             $product = $this->productRepository->update($id, $data);
             if (!$product) {

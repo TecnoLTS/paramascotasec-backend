@@ -26,8 +26,10 @@ export DB_HOST=localhost
 export DB_PORT=5432
 export DB_DATABASE=paramascotasec
 export DB_USERNAME=postgres
-export DB_PASSWORD=postgres
+export DB_PASSWORD=change-this-to-a-strong-password
 ```
+
+Usa la misma clave definida en `paramascostas-DB/.env`. Si mantienes `POSTGRES_BIND_IP=127.0.0.1`, para acceso remoto usa tunel SSH.
 
 ## 3) Dump manual (si quieres)
 

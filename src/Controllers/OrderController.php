@@ -8,6 +8,8 @@ use App\Core\Response;
 use App\Core\Auth;
 use App\Core\TenantContext;
 use App\Services\FacturadorApiService;
+use Dompdf\Dompdf;
+use Dompdf\Options;
 
 class OrderController {
     private $orderRepository;
@@ -139,62 +141,97 @@ class OrderController {
                 Response::error('Factura no disponible para pedidos cancelados', 403, 'ORDER_INVOICE_UNAVAILABLE');
                 return;
             }
-            if (empty($order['invoice_html'])) {
-                $baseUrl = TenantContext::appUrl() ?? ($_ENV['APP_URL'] ?? null);
-                if (!$baseUrl) {
-                    $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
-                    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-                    $baseUrl = $proto . '://' . $host;
-                }
-                $invoiceHtml = $this->orderRepository->ensureInvoiceForOrder($order, $baseUrl);
-                if (!$invoiceHtml) {
-                    Response::error('Factura no disponible', 404, 'ORDER_INVOICE_UNAVAILABLE');
-                    return;
-                }
-                $order['invoice_html'] = $invoiceHtml;
-            } else {
-                $invoiceData = null;
-                if (!empty($order['invoice_data'])) {
-                    $invoiceData = json_decode($order['invoice_data'], true);
-                }
-                $customerName = $invoiceData['customer']['name'] ?? null;
-                $subtotalGross = 0.0;
-                if (!empty($order['items']) && is_array($order['items'])) {
-                    foreach ($order['items'] as $item) {
-                        $subtotalGross += (float)($item['price'] ?? 0) * (int)($item['quantity'] ?? 1);
-                    }
-                }
-                $discountTotal = max(0, (float)($order['discount_total'] ?? 0));
-                $expectedShipping = (float)($order['total'] ?? $subtotalGross) - max(0, ($subtotalGross - $discountTotal));
-                if ($expectedShipping < 0) {
-                    $expectedShipping = 0;
-                }
-                $showsZeroShipping = strpos($order['invoice_html'], 'Envío</span><span>$0') !== false
-                    || strpos($order['invoice_html'], 'Envío</span><span>$0,00') !== false
-                    || strpos($order['invoice_html'], 'Envío</span><span>$0.00') !== false;
-                $needsRegenerate = empty($customerName)
-                    || (strpos($order['invoice_html'], 'LogoVerde150.png') !== false && strpos($order['invoice_html'], 'api.') !== false)
-                    || (strpos($order['invoice_html'], 'brand-name') !== false)
-                    || (strpos($order['invoice_html'], 'invoice_v2_tax_net') === false)
-                    || ($expectedShipping > 0 && $showsZeroShipping);
-                if ($needsRegenerate) {
-                    $baseUrl = TenantContext::appUrl() ?? ($_ENV['APP_URL'] ?? null);
-                    if (!$baseUrl) {
-                        $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
-                        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-                        $baseUrl = $proto . '://' . $host;
-                    }
-                    $invoiceHtml = $this->orderRepository->ensureInvoiceForOrder($order, $baseUrl, true);
-                    if ($invoiceHtml) {
-                        $order['invoice_html'] = $invoiceHtml;
-                    }
-                }
+            $invoiceHtml = $this->resolveInvoiceHtml($order);
+            if (!$invoiceHtml) {
+                Response::error('Factura no disponible', 404, 'ORDER_INVOICE_UNAVAILABLE');
+                return;
             }
+
+            $format = strtolower(trim((string)($_GET['format'] ?? 'html')));
+            if ($format === 'pdf') {
+                $pdfBinary = $this->renderInvoicePdf($invoiceHtml);
+                $safeOrderId = preg_replace('/[^A-Za-z0-9_-]/', '-', (string)$order['id']);
+                header('Content-Type: application/pdf');
+                header('Content-Disposition: inline; filename="comprobante-' . $safeOrderId . '.pdf"');
+                header('Content-Length: ' . strlen($pdfBinary));
+                echo $pdfBinary;
+                return;
+            }
+
             header('Content-Type: text/html; charset=utf-8');
-            echo $order['invoice_html'];
+            echo $invoiceHtml;
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 500, 'ORDER_INVOICE_FAILED');
         }
+    }
+
+    private function resolveInvoiceHtml(array &$order): ?string {
+        if (empty($order['invoice_html'])) {
+            $baseUrl = TenantContext::appUrl() ?? ($_ENV['APP_URL'] ?? null);
+            if (!$baseUrl) {
+                $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
+                $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                $baseUrl = $proto . '://' . $host;
+            }
+            $invoiceHtml = $this->orderRepository->ensureInvoiceForOrder($order, $baseUrl);
+            if (!$invoiceHtml) {
+                return null;
+            }
+            $order['invoice_html'] = $invoiceHtml;
+            return $invoiceHtml;
+        }
+
+        $invoiceData = null;
+        if (!empty($order['invoice_data'])) {
+            $invoiceData = json_decode($order['invoice_data'], true);
+        }
+        $customerName = $invoiceData['customer']['name'] ?? null;
+        $subtotalGross = 0.0;
+        if (!empty($order['items']) && is_array($order['items'])) {
+            foreach ($order['items'] as $item) {
+                $subtotalGross += (float)($item['price'] ?? 0) * (int)($item['quantity'] ?? 1);
+            }
+        }
+        $discountTotal = max(0, (float)($order['discount_total'] ?? 0));
+        $expectedShipping = (float)($order['total'] ?? $subtotalGross) - max(0, ($subtotalGross - $discountTotal));
+        if ($expectedShipping < 0) {
+            $expectedShipping = 0;
+        }
+        $showsZeroShipping = strpos($order['invoice_html'], 'Envío</span><span>$0') !== false
+            || strpos($order['invoice_html'], 'Envío</span><span>$0,00') !== false
+            || strpos($order['invoice_html'], 'Envío</span><span>$0.00') !== false;
+        $needsRegenerate = empty($customerName)
+            || (strpos($order['invoice_html'], 'LogoVerde150.png') !== false && strpos($order['invoice_html'], 'api.') !== false)
+            || (strpos($order['invoice_html'], 'brand-name') !== false)
+            || (strpos($order['invoice_html'], 'invoice_v2_tax_net') === false)
+            || ($expectedShipping > 0 && $showsZeroShipping);
+        if ($needsRegenerate) {
+            $baseUrl = TenantContext::appUrl() ?? ($_ENV['APP_URL'] ?? null);
+            if (!$baseUrl) {
+                $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
+                $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                $baseUrl = $proto . '://' . $host;
+            }
+            $invoiceHtml = $this->orderRepository->ensureInvoiceForOrder($order, $baseUrl, true);
+            if ($invoiceHtml) {
+                $order['invoice_html'] = $invoiceHtml;
+            }
+        }
+
+        return !empty($order['invoice_html']) ? (string)$order['invoice_html'] : null;
+    }
+
+    private function renderInvoicePdf(string $invoiceHtml): string {
+        $options = new Options();
+        $options->set('isRemoteEnabled', true);
+        $options->set('isHtml5ParserEnabled', true);
+
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($invoiceHtml, 'UTF-8');
+        $dompdf->setPaper('A4');
+        $dompdf->render();
+
+        return $dompdf->output();
     }
 
     private function decodeAddress($value) {

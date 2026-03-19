@@ -813,7 +813,7 @@ class ProductRepository {
             $stmtCurrent = $this->db->prepare('
                 SELECT cost, price, original_price, is_sale, quantity, name
                 FROM "Product"
-                WHERE id = :id AND tenant_id = :tenant_id
+                WHERE (id = :id OR legacy_id = :id) AND tenant_id = :tenant_id
                 LIMIT 1
                 FOR UPDATE
             ');
@@ -905,7 +905,7 @@ class ProductRepository {
             }
 
             $fields[] = '"updated_at" = NOW()';
-            $sql = 'UPDATE "Product" SET ' . implode(', ', $fields) . ' WHERE id = :id AND tenant_id = :tenant_id';
+            $sql = 'UPDATE "Product" SET ' . implode(', ', $fields) . ' WHERE (id = :id OR legacy_id = :id) AND tenant_id = :tenant_id';
             $stmt = $this->db->prepare($sql);
             $params['tenant_id'] = $this->getTenantId();
             $stmt->execute($params);
@@ -980,6 +980,6 @@ class ProductRepository {
 
     public function delete($id) {
         // Delete related images and variations first (if cascading isn't set up, but let's assume simple delete for now)
-         $stmt = $this->db->prepare('DELETE FROM "Product" WHERE id = :id AND tenant_id = :tenant_id');
+         $stmt = $this->db->prepare('DELETE FROM "Product" WHERE (id = :id OR legacy_id = :id) AND tenant_id = :tenant_id');
          $stmt->execute(['id' => $id, 'tenant_id' => $this->getTenantId()]);
     }}
