@@ -40,25 +40,5 @@ return [
         ],
         'app_url' => 'https://tecnolts.com',
         'public_base_url' => 'https://tecnolts.com'
-    ],
-    'autorepuestoscore' => [
-        'id' => 'autorepuestoscore',
-        'slug' => 'autorepuestoscore',
-        'name' => 'Autorepuestos Core',
-        'db' => [
-            'database' => 'autorepuestoscore'
-        ],
-        'domains' => [
-            'autorepuestoscore.com',
-            'www.autorepuestoscore.com',
-            'api.autorepuestoscore.com',
-            'autorepuestoscore.local'
-        ],
-        'allowed_origins' => [
-            'https://autorepuestoscore.com',
-            'https://www.autorepuestoscore.com'
-        ],
-        'app_url' => 'https://autorepuestoscore.com',
-        'public_base_url' => 'https://autorepuestoscore.com'
     ]
 ];

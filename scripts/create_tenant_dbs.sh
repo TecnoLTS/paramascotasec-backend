@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Utilidad legacy del backend compartido.
+# No forma parte del flujo normal de Paramascotasec y puede ignorarse
+# si solo trabajas con el stack principal actual.
+
 DB_CONTAINER="${DB_DOCKER_CONTAINER:-next-test-db}"
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
 DB_USER="${DB_USERNAME:-postgres}"
 DB_PASS="${DB_PASSWORD:-postgres}"
 BASE_DB="${BASE_DB:-paramascotasec}"
-TENANT_DBS="${TENANT_DBS:-paramascotasec autorepuestoscore tecnolts}"
+TENANT_DBS="${TENANT_DBS:-paramascotasec tecnolts}"
 
 tmp_schema="$(mktemp)"
 cleanup() { rm -f "$tmp_schema"; }

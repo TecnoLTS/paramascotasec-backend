@@ -30,6 +30,29 @@ class SettingsRepository {
         return $this->get($key);
     }
 
+    public function getJson($key, $default = null) {
+        $value = $this->get($key);
+        if ($value === null || trim((string)$value) === '') {
+            return $default;
+        }
+
+        $decoded = json_decode($value, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return $default;
+        }
+
+        return $decoded;
+    }
+
+    public function setJson($key, $value) {
+        $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($encoded === false) {
+            return null;
+        }
+
+        return $this->set($key, $encoded);
+    }
+
     private function scopedKey($key) {
         $tenantId = $this->getTenantId();
         return $tenantId ? ($tenantId . ':' . $key) : $key;

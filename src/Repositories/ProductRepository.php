@@ -4,6 +4,7 @@ namespace App\Repositories;
 
 use App\Core\Database;
 use App\Core\TenantContext;
+use App\Support\ProductAudience;
 
 class ProductRepository {
     private $db;
@@ -720,14 +721,29 @@ class ProductRepository {
                 ) RETURNING id
             ';
 
+            $attributes = isset($data['attributes']) && is_array($data['attributes']) ? $data['attributes'] : [];
+            $normalizedSpecies = ProductAudience::normalizeSpeciesLabel(
+                (string)($attributes['species'] ?? ''),
+                (string)($data['gender'] ?? '')
+            );
+            if ($normalizedSpecies !== '') {
+                $attributes['species'] = $normalizedSpecies;
+            }
+
             $params = [
                 'id' => uniqid('prod_'),
                 'legacy_id' => $data['legacyId'] ?? uniqid(),
                 'tenant_id' => $this->getTenantId(),
-                'category' => $data['category'] ?? 'General',
-                'product_type' => $data['productType'] ?? $data['product_type'] ?? null,
+                'category' => ProductAudience::normalizeCategory(
+                    (string)($data['category'] ?? ''),
+                    (string)($data['productType'] ?? $data['product_type'] ?? '')
+                ) ?: null,
+                'product_type' => ProductAudience::normalizeProductType(
+                    (string)($data['productType'] ?? $data['product_type'] ?? ''),
+                    (string)($data['category'] ?? '')
+                ) ?: null,
                 'name' => $data['name'],
-                'gender' => $data['gender'] ?? 'Unisex',
+                'gender' => ProductAudience::resolveGender($attributes['species'] ?? null, (string)($data['gender'] ?? '')),
                 'is_new' => isset($data['new']) ? ($data['new'] ? 'true' : 'false') : 'true',
                 'is_sale' => isset($data['sale']) ? ($data['sale'] ? 'true' : 'false') : 'false',
                 'is_published' => array_key_exists('published', $data)
@@ -742,7 +758,7 @@ class ProductRepository {
                 'description' => $data['description'] ?? '',
                 'action' => $data['action'] ?? 'view',
                 'slug' => $data['slug'] ?? strtolower(str_replace(' ', '-', $data['name'])) . '-' . uniqid(),
-                'attributes' => isset($data['attributes']) ? json_encode($data['attributes']) : null
+                'attributes' => !empty($attributes) ? json_encode($attributes) : null
             ];
 
             $stmt = $this->db->prepare($sql);
@@ -811,7 +827,7 @@ class ProductRepository {
 
         try {
             $stmtCurrent = $this->db->prepare('
-                SELECT cost, price, original_price, is_sale, quantity, name
+                SELECT cost, price, original_price, is_sale, quantity, name, gender
                 FROM "Product"
                 WHERE (id = :id OR legacy_id = :id) AND tenant_id = :tenant_id
                 LIMIT 1
@@ -883,18 +899,53 @@ class ProductRepository {
                 'attributes' => 'attributes'
             ];
 
+            $normalizedAttributesForUpdate = null;
+
             foreach ($data as $key => $value) {
                 if (isset($mapping[$key])) {
                     $dbField = $mapping[$key];
                     $fields[] = "\"$dbField\" = :$key";
                     if ($key === 'attributes') {
+                        if (is_array($value)) {
+                            $normalizedSpecies = ProductAudience::normalizeSpeciesLabel(
+                                (string)($value['species'] ?? ''),
+                                (string)($data['gender'] ?? '')
+                            );
+                            if ($normalizedSpecies !== '') {
+                                $value['species'] = $normalizedSpecies;
+                            }
+                            $normalizedAttributesForUpdate = $value;
+                        }
                         $params[$key] = is_string($value) ? $value : json_encode($value);
                     } elseif (in_array($key, ['new', 'sale', 'published', 'isPublished'], true)) {
                         $params[$key] = $value ? 'true' : 'false';
+                    } elseif ($key === 'category') {
+                        $params[$key] = ProductAudience::normalizeCategory(
+                            (string)$value,
+                            (string)($data['productType'] ?? $data['product_type'] ?? ($current['product_type'] ?? ''))
+                        );
+                    } elseif ($key === 'gender') {
+                        $params[$key] = ProductAudience::resolveGender(
+                            is_array($data['attributes'] ?? null) ? ($data['attributes']['species'] ?? null) : null,
+                            (string)$value
+                        );
+                    } elseif ($key === 'productType') {
+                        $params[$key] = ProductAudience::normalizeProductType(
+                            (string)$value,
+                            (string)($data['category'] ?? ($current['category'] ?? ''))
+                        );
                     } else {
                         $params[$key] = $value;
                     }
                 }
+            }
+
+            if (!array_key_exists('gender', $params) && is_array($normalizedAttributesForUpdate)) {
+                $fields[] = '"gender" = :gender';
+                $params['gender'] = ProductAudience::resolveGender(
+                    $normalizedAttributesForUpdate['species'] ?? null,
+                    (string)($current['gender'] ?? '')
+                );
             }
 
             if (empty($fields)) {

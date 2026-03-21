@@ -8,6 +8,23 @@ use App\Core\Response;
 use App\Core\Auth;
 
 class SettingsController {
+    private function getDefaultProductReferenceData() {
+        return [
+            'brands' => [],
+            'suppliers' => [],
+            'sizes' => [],
+            'materials' => [],
+            'colors' => [],
+            'usages' => [],
+            'presentations' => [],
+            'activeIngredients' => [],
+            'storageLocations' => [],
+            'tags' => [],
+            'flavors' => [],
+            'ageRanges' => [],
+        ];
+    }
+
     private function parseBool($value, $default = false) {
         if ($value === null) return $default;
         if (is_bool($value)) return $value;
@@ -20,6 +37,46 @@ class SettingsController {
     private function getNumericSetting(SettingsRepository $settings, $key, $default) {
         $value = $settings->get($key);
         return is_numeric($value) ? floatval($value) : $default;
+    }
+
+    private function sanitizeReferenceOptionList($value) {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $seen = [];
+        $normalized = [];
+
+        foreach ($value as $item) {
+            $text = trim(preg_replace('/\s+/', ' ', (string)$item));
+            if ($text === '') {
+                continue;
+            }
+
+            $dedupeKey = function_exists('mb_strtolower')
+                ? mb_strtolower($text, 'UTF-8')
+                : strtolower($text);
+
+            if (isset($seen[$dedupeKey])) {
+                continue;
+            }
+
+            $seen[$dedupeKey] = true;
+            $normalized[] = $text;
+        }
+
+        return array_values($normalized);
+    }
+
+    private function normalizeProductReferenceDataPayload($data) {
+        $defaults = $this->getDefaultProductReferenceData();
+        $source = is_array($data) ? $data : [];
+
+        foreach (array_keys($defaults) as $key) {
+            $defaults[$key] = $this->sanitizeReferenceOptionList($source[$key] ?? []);
+        }
+
+        return $defaults;
     }
 
     private function authenticate() {
@@ -443,5 +500,32 @@ class SettingsController {
             'clearanceThreshold' => $clearanceThreshold,
             'clearanceDiscount' => $clearanceDiscount
         ]);
+    }
+
+    public function getProductReferenceData() {
+        $user = $this->authenticate();
+        $this->requireAdmin($user);
+        $settings = new SettingsRepository();
+
+        $stored = $settings->getJson('product_reference_data', []);
+        $normalized = $this->normalizeProductReferenceDataPayload($stored);
+
+        if ($stored !== $normalized) {
+            $settings->setJson('product_reference_data', $normalized);
+        }
+
+        Response::json($normalized);
+    }
+
+    public function updateProductReferenceData() {
+        $user = $this->authenticate();
+        $this->requireAdmin($user);
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+
+        $normalized = $this->normalizeProductReferenceDataPayload($data);
+        $settings = new SettingsRepository();
+        $settings->setJson('product_reference_data', $normalized);
+
+        Response::json($normalized);
     }
 }

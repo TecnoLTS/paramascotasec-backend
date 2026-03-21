@@ -152,6 +152,8 @@ $router->add('GET', '/api/admin/settings/pricing-calc', 'SettingsController@getP
 $router->add('PUT', '/api/admin/settings/pricing-calc', 'SettingsController@updatePricingCalc');
 $router->add('GET', '/api/admin/settings/pricing-rules', 'SettingsController@getPricingRules');
 $router->add('PUT', '/api/admin/settings/pricing-rules', 'SettingsController@updatePricingRules');
+$router->add('GET', '/api/admin/settings/product-reference-data', 'SettingsController@getProductReferenceData');
+$router->add('PUT', '/api/admin/settings/product-reference-data', 'SettingsController@updateProductReferenceData');
 $router->add('GET', '/api/admin/discounts', 'DiscountController@index');
 $router->add('POST', '/api/admin/discounts', 'DiscountController@store');
 $router->add('GET', '/api/admin/discounts/audit', 'DiscountController@audit');

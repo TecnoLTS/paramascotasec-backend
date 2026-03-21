@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Utilidad legacy del backend compartido.
+# No forma parte del flujo diario de Paramascotasec y solo sirve para
+# clonar una linea base entre bases aisladas cuando hace falta.
+
 DB_CONTAINER="${DB_CONTAINER:-next-test-db}"
 DB_USER="${DB_USER:-postgres}"
 SOURCE_DB="${1:-paramascotasec}"
-TARGET_DB="${2:-autorepuestoscore}"
+TARGET_DB="${2:-tecnolts}"
 SOURCE_TENANT="${3:-paramascotasec}"
-TARGET_TENANT="${4:-autorepuestoscore}"
+TARGET_TENANT="${4:-tecnolts}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then

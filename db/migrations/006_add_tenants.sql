@@ -8,8 +8,7 @@ CREATE TABLE IF NOT EXISTS "Tenant" (
 
 INSERT INTO "Tenant" (id, name) VALUES
     ('paramascotasec', 'Para Mascotas EC'),
-    ('tecnolts', 'TecnoLTS'),
-    ('autorepuestoscore', 'Autorepuestos Core')
+    ('tecnolts', 'TecnoLTS')
 ON CONFLICT (id) DO NOTHING;
 
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS tenant_id text;

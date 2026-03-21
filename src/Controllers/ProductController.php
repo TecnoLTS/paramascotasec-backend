@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Repositories\ProductRepository;
 use App\Core\Auth;
 use App\Core\Response;
+use App\Support\ProductAudience;
 use App\Support\ProductVariantMetadata;
 
 class ProductController {
@@ -133,6 +134,49 @@ class ProductController {
         }
     }
 
+    private function normalizeAudienceFields(array &$data, ?array $currentProduct = null): void {
+        $currentAttributes = $currentProduct['attributes'] ?? [];
+        if (!is_array($currentAttributes)) {
+            $currentAttributes = [];
+        }
+
+        $attributes = $data['attributes'] ?? $currentAttributes;
+        if (!is_array($attributes)) {
+            $attributes = [];
+        }
+
+        $normalizedType = ProductAudience::normalizeProductType(
+            (string)($data['productType'] ?? $data['product_type'] ?? ($currentProduct['productType'] ?? $currentProduct['product_type'] ?? '')),
+            (string)($data['category'] ?? ($currentProduct['category'] ?? ''))
+        );
+        if ($normalizedType !== '') {
+            $data['productType'] = $normalizedType;
+            unset($data['product_type']);
+        }
+
+        $category = ProductAudience::normalizeCategory(
+            (string)($data['category'] ?? ($currentProduct['category'] ?? '')),
+            $normalizedType
+        );
+        if ($category !== '' || array_key_exists('category', $data)) {
+            $data['category'] = $category;
+        }
+
+        $normalizedSpecies = ProductAudience::normalizeSpeciesLabel(
+            (string)($attributes['species'] ?? ''),
+            (string)($data['gender'] ?? ($currentProduct['gender'] ?? ''))
+        );
+        if ($normalizedSpecies !== '') {
+            $attributes['species'] = $normalizedSpecies;
+        }
+
+        $data['attributes'] = $attributes;
+        $data['gender'] = ProductAudience::resolveGender(
+            $attributes['species'] ?? null,
+            (string)($data['gender'] ?? ($currentProduct['gender'] ?? ''))
+        );
+    }
+
     private function applyVariantMetadata(array &$data, ?array $currentProduct = null): void {
         $effectiveAttributes = $data['attributes'] ?? ($currentProduct['attributes'] ?? []);
         if (!is_array($effectiveAttributes)) {
@@ -187,9 +231,10 @@ class ProductController {
             $data = json_decode(file_get_contents('php://input'), true) ?: [];
             $this->normalizePublishedField($data);
             $this->normalizePurchaseInvoiceField($data);
-            $productType = strtolower($data['productType'] ?? $data['product_type'] ?? '');
+            $this->normalizeAudienceFields($data, null);
+            $productType = ProductAudience::normalizeProductType((string)($data['productType'] ?? $data['product_type'] ?? ''), (string)($data['category'] ?? ''));
             $attributes = $data['attributes'] ?? [];
-            $allowedTypes = ['comida', 'ropa', 'accesorios'];
+            $allowedTypes = ['comida', 'ropa', 'cuidado', 'accesorios'];
             if (!$productType) {
                 Response::error('Tipo de producto requerido', 400, 'PRODUCT_TYPE_REQUIRED');
                 return;
@@ -263,6 +308,7 @@ class ProductController {
                 $attributes['supplier'] = trim((string)$data['purchaseInvoice']['supplierName']);
             }
             $data['attributes'] = $attributes;
+            $this->normalizeAudienceFields($data, null);
             $this->applyVariantMetadata($data, null);
             $this->enforcePublicationEligibility($data, null);
             $product = $this->productRepository->create($data);
@@ -277,9 +323,14 @@ class ProductController {
             $data = json_decode(file_get_contents('php://input'), true) ?: [];
             $this->normalizePublishedField($data);
             $this->normalizePurchaseInvoiceField($data);
-            $productType = isset($data['productType']) ? strtolower((string)$data['productType']) : (isset($data['product_type']) ? strtolower((string)$data['product_type']) : null);
+            $productType = isset($data['productType']) || isset($data['product_type'])
+                ? ProductAudience::normalizeProductType(
+                    (string)($data['productType'] ?? $data['product_type'] ?? ''),
+                    (string)($data['category'] ?? '')
+                )
+                : null;
             if ($productType !== null) {
-                $allowedTypes = ['comida', 'ropa', 'accesorios'];
+                $allowedTypes = ['comida', 'ropa', 'cuidado', 'accesorios'];
                 if ($productType === '') {
                     Response::error('Tipo de producto requerido', 400, 'PRODUCT_TYPE_REQUIRED');
                     return;
@@ -327,7 +378,10 @@ class ProductController {
                         return;
                     }
                 }
-                $effectiveType = $productType ?? strtolower((string)($currentProduct['productType'] ?? ''));
+                $effectiveType = $productType ?? ProductAudience::normalizeProductType(
+                    (string)($currentProduct['productType'] ?? ''),
+                    (string)($currentProduct['category'] ?? '')
+                );
                 $effectiveQuantity = isset($data['quantity']) && is_numeric($data['quantity'])
                     ? intval($data['quantity'])
                     : intval($currentProduct['quantity'] ?? 0);
@@ -367,6 +421,7 @@ class ProductController {
                     $attributes['supplier'] = trim((string)$data['purchaseInvoice']['supplierName']);
                 }
                 $data['attributes'] = $attributes;
+                $this->normalizeAudienceFields($data, $currentProduct);
                 $this->applyVariantMetadata($data, $currentProduct);
                 $this->enforcePublicationEligibility($data, $currentProduct);
             } else {
@@ -380,6 +435,7 @@ class ProductController {
                     ? intval($data['quantity'])
                     : $currentQuantity;
                 $this->validatePurchaseInvoice($data['purchaseInvoice'] ?? null, $effectiveQuantity > $currentQuantity);
+                $this->normalizeAudienceFields($data, $currentProduct);
                 $this->applyVariantMetadata($data, $currentProduct);
                 $this->enforcePublicationEligibility($data, $currentProduct);
             }
