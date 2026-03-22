@@ -8,12 +8,17 @@ final class ProductAudience
 {
     public static function normalizeCategory(?string $value, ?string $fallbackProductType = null): string
     {
+        $normalizedValue = self::normalizeCategoryToken((string)$value);
+        if ($normalizedValue !== '') {
+            return $normalizedValue;
+        }
+
         $productType = self::normalizeProductType($fallbackProductType);
         if ($productType !== '') {
             return self::categoryForProductType($productType);
         }
 
-        return self::normalizeCategoryToken((string)$value);
+        return '';
     }
 
     public static function normalizeProductType(?string $value, ?string $fallbackCategory = null): string
@@ -27,7 +32,7 @@ final class ProductAudience
         return match ($category) {
             'comida' => 'comida',
             'ropa' => 'ropa',
-            'cuidados' => 'cuidado',
+            'salud' => 'cuidado',
             'accesorios' => 'accesorios',
             default => '',
         };
@@ -38,7 +43,7 @@ final class ProductAudience
         return match (self::normalizeProductType($productType)) {
             'comida' => 'comida',
             'ropa' => 'ropa',
-            'cuidado' => 'cuidados',
+            'cuidado' => 'salud',
             'accesorios' => 'accesorios',
             default => '',
         };
@@ -139,7 +144,7 @@ final class ProductAudience
         }
 
         if (self::tokenContainsAny($token, ['cuidado', 'cuidados', 'higiene', 'medicina', 'medicinas', 'salud', 'farmacia', 'antiparasit', 'pipeta', 'shampoo'])) {
-            return 'cuidados';
+            return 'salud';
         }
 
         if (self::tokenContainsAny($token, ['comida', 'alimento', 'snack', 'golosina', 'croqueta', 'pienso', 'lata'])) {
