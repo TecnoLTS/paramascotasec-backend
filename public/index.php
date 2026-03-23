@@ -114,6 +114,8 @@ $router->add('DELETE', '/api/products/{id}', 'ProductController@destroy');
 
 // User Routes
 $router->add('GET', '/api/users', 'UserController@index');
+$router->add('POST', '/api/users', 'UserController@store');
+$router->add('PUT', '/api/users/{id}', 'UserController@update');
 $router->add('GET', '/api/user/addresses', 'UserController@getAddresses');
 $router->add('PUT', '/api/user/addresses', 'UserController@updateAddresses');
 $router->add('GET', '/api/user/profile', 'UserController@getProfile');
@@ -199,6 +201,7 @@ if ($requiresAuth) {
     $adminOnly = str_starts_with($uri, '/api/admin/')
         || str_starts_with($uri, '/api/reports/')
         || $uri === '/api/users'
+        || str_starts_with($uri, '/api/users/')
         || $uri === '/api/shipments';
     if ($adminOnly) {
         Auth::requireAdmin();

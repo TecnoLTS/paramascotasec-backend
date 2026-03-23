@@ -315,8 +315,7 @@ class OrderController {
 
         $grossItems = is_array($order['items'] ?? null) ? array_values($order['items']) : [];
         $discountAllocations = $this->allocateOrderDiscountAcrossItems($grossItems, (float)($order['discount_total'] ?? 0));
-        $orderVatRate = isset($order['vat_rate']) && is_numeric($order['vat_rate']) ? (float)$order['vat_rate'] : 15.0;
-        $taxDivisor = 1 + (($orderVatRate > 0 ? $orderVatRate : 15.0) / 100);
+        $fallbackVatRate = isset($order['vat_rate']) && is_numeric($order['vat_rate']) ? max(0, (float)$order['vat_rate']) : 0.0;
 
         $items = [];
         foreach ($grossItems as $index => $item) {
@@ -325,6 +324,16 @@ class OrderController {
             $grossLineTotal = round($grossUnitPrice * $quantity, 2);
             $allocatedDiscount = (float)($discountAllocations[$index] ?? 0);
             $discountedGrossLine = max(0, $grossLineTotal - $allocatedDiscount);
+            $itemTaxRate = isset($item['tax_rate']) && is_numeric($item['tax_rate'])
+                ? max(0, (float)$item['tax_rate'])
+                : $fallbackVatRate;
+            if (isset($item['tax_exempt'])) {
+                $normalizedTaxExempt = filter_var($item['tax_exempt'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($normalizedTaxExempt === true) {
+                    $itemTaxRate = 0.0;
+                }
+            }
+            $taxDivisor = 1 + ($itemTaxRate / 100);
             $netUnitPrice = $taxDivisor > 0 ? ($discountedGrossLine / $quantity) / $taxDivisor : ($discountedGrossLine / $quantity);
 
             $items[] = [
@@ -340,7 +349,7 @@ class OrderController {
         if ($shipping > 0) {
             $shippingBase = isset($order['shipping_base']) && is_numeric($order['shipping_base'])
                 ? (float)$order['shipping_base']
-                : ($taxDivisor > 0 ? $shipping / $taxDivisor : $shipping);
+                : ($shipping / (1 + ($this->resolveShippingTaxRate($order) / 100)));
 
             $items[] = [
                 'code' => 'ENVIO',
@@ -369,6 +378,12 @@ class OrderController {
                 'notes' => $order['order_notes'] ?? null,
             ], static fn($value) => $value !== null && $value !== ''),
         ];
+    }
+
+    private function resolveShippingTaxRate(array $order): float {
+        return isset($order['shipping_tax_rate']) && is_numeric($order['shipping_tax_rate'])
+            ? max(0, (float)$order['shipping_tax_rate'])
+            : 0.0;
     }
 
     private function allocateOrderDiscountAcrossItems(array $items, float $discountTotal): array {

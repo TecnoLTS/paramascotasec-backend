@@ -248,9 +248,17 @@ class OrderRepository {
         $invoiceNumber = ($order['invoice_number'] ?? null) ?: $this->buildInvoiceNumber($orderId);
 
         $items = is_array($order['items'] ?? null) ? $order['items'] : [];
-        $subtotal = 0;
-        foreach ($items as $item) {
-            $subtotal += (float)$item['price'] * (int)$item['quantity'];
+        $subtotal = isset($order['items_subtotal']) ? (float)$order['items_subtotal'] : 0;
+        if ($subtotal <= 0) {
+            foreach ($items as $item) {
+                $lineNet = isset($item['net_total']) && is_numeric($item['net_total']) ? (float)$item['net_total'] : null;
+                $lineTax = isset($item['tax_amount']) && is_numeric($item['tax_amount']) ? (float)$item['tax_amount'] : null;
+                if ($lineNet !== null && $lineTax !== null) {
+                    $subtotal += $lineNet + $lineTax;
+                    continue;
+                }
+                $subtotal += (float)$item['price'] * (int)$item['quantity'];
+            }
         }
         $orderTotal = (float)($order['total'] ?? $subtotal);
         $shippingFromOrder = isset($order['shipping']) ? (float)$order['shipping'] : ($orderTotal - $subtotal);
@@ -263,6 +271,10 @@ class OrderRepository {
                 return [
                     'product_name' => $item['product_name'] ?? null,
                     'price' => (float)($item['price'] ?? 0),
+                    'price_net' => isset($item['price_net']) ? (float)$item['price_net'] : null,
+                    'net_total' => isset($item['net_total']) ? (float)$item['net_total'] : null,
+                    'tax_rate' => isset($item['tax_rate']) ? (float)$item['tax_rate'] : null,
+                    'tax_amount' => isset($item['tax_amount']) ? (float)$item['tax_amount'] : null,
                     'quantity' => (int)($item['quantity'] ?? 1),
                     'product_image' => $item['product_image'] ?? null
                 ];
@@ -276,6 +288,7 @@ class OrderRepository {
             'vat_rate' => isset($order['vat_rate']) ? (float)$order['vat_rate'] : $this->getTaxRate(),
             'vat_subtotal' => isset($order['vat_subtotal']) ? (float)$order['vat_subtotal'] : null,
             'vat_amount' => isset($order['vat_amount']) ? (float)$order['vat_amount'] : null,
+            'mixed_vat_rates' => (bool)($order['mixed_vat_rates'] ?? false),
             'discount_code' => $order['discount_code'] ?? null,
             'discount_total' => isset($order['discount_total']) ? (float)$order['discount_total'] : 0
         ];
@@ -351,8 +364,8 @@ class OrderRepository {
         $itemsGrossSubtotal = 0;
         $itemsCostSubtotal = 0;
         $itemsWithDetails = [];
-        $taxRate = $this->getTaxRate();
-        $taxMultiplier = 1 + ($taxRate / 100);
+        $itemGrossLineTotals = [];
+        $taxRatesSeen = [];
         $inventoryLots = new InventoryLotRepository($this->db);
 
         foreach ($items as $item) {
@@ -390,6 +403,8 @@ class OrderRepository {
                     $attributes = $decoded;
                 }
             }
+            $itemTaxRate = $this->getProductTaxRateForAttributes($attributes);
+            $itemTaxMultiplier = 1 + ($itemTaxRate / 100);
             $expirationDateRaw = trim((string)($attributes['expirationDate'] ?? $attributes['expiryDate'] ?? ''));
             if ($expirationDateRaw !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $expirationDateRaw) === 1) {
                 $expirationDate = \DateTimeImmutable::createFromFormat('Y-m-d', $expirationDateRaw);
@@ -401,8 +416,9 @@ class OrderRepository {
                 }
             }
 
-            $priceWithTax = round(floatval($product['price']) * $taxMultiplier, 2);
-            $lineTotal = $priceWithTax * $quantity;
+            $baseUnitPrice = round((float)($product['price'] ?? 0), 4);
+            $priceWithTax = round($baseUnitPrice * $itemTaxMultiplier, 2);
+            $lineTotal = round($priceWithTax * $quantity, 2);
             $costAllocation = $inventoryLots->previewSaleAllocation(
                 (string)$product['id'],
                 $quantity,
@@ -411,6 +427,8 @@ class OrderRepository {
             );
             $itemsGrossSubtotal += $lineTotal;
             $itemsCostSubtotal += round((float)($costAllocation['cost_total'] ?? 0), 4);
+            $itemGrossLineTotals[] = $lineTotal;
+            $taxRatesSeen[(string)round($itemTaxRate, 2)] = true;
 
             $itemsWithDetails[] = [
                 'product_id' => $product['id'],
@@ -420,34 +438,70 @@ class OrderRepository {
                 'unit_cost' => round((float)($costAllocation['unit_cost'] ?? 0), 4),
                 'cost_total' => round((float)($costAllocation['cost_total'] ?? 0), 4),
                 'price' => $priceWithTax,
+                'price_net' => $baseUnitPrice,
+                'tax_rate' => round($itemTaxRate, 2),
+                'tax_exempt' => $itemTaxRate <= 0,
                 'total' => $lineTotal
             ];
         }
 
+        $distinctTaxRates = array_map('floatval', array_keys($taxRatesSeen));
+        sort($distinctTaxRates);
+        $mixedVatRates = count($distinctTaxRates) > 1;
+        $displayVatRate = count($distinctTaxRates) === 1
+            ? (float)$distinctTaxRates[0]
+            : (count($distinctTaxRates) > 0 ? max($distinctTaxRates) : 0.0);
+
         $discountPricingContext = [
             'items_cost_total' => round($itemsCostSubtotal, 2),
-            'tax_rate' => round($taxRate, 2)
+            'tax_rate' => round($displayVatRate, 2)
         ];
         $discountResult = ($context === 'order')
             ? $this->discountRepository->reserveForOrder($discountCode, $itemsGrossSubtotal, (string)$orderId, $userId, $discountPricingContext)
             : $this->discountRepository->evaluateForQuote($discountCode, $itemsGrossSubtotal, $userId, $discountPricingContext);
         $discountTotal = max(0, (float)($discountResult['discount_total'] ?? 0));
-        $itemsNetSubtotal = max(0, $itemsGrossSubtotal - $discountTotal);
+        $discountAllocations = $this->allocateDiscountAcrossLineTotals($itemGrossLineTotals, $discountTotal);
+
+        $itemsNetSubtotal = 0.0;
+        $vatSubtotal = 0.0;
+        $vatAmount = 0.0;
+        foreach ($itemsWithDetails as $index => &$item) {
+            $quantity = max(1, (int)($item['quantity'] ?? 1));
+            $itemTaxRate = round((float)($item['tax_rate'] ?? 0), 2);
+            $itemTaxMultiplier = 1 + ($itemTaxRate / 100);
+            $grossLineTotal = round((float)($itemGrossLineTotals[$index] ?? 0), 2);
+            $allocatedDiscount = round((float)($discountAllocations[$index] ?? 0), 2);
+            $discountedGrossLine = round(max(0, $grossLineTotal - $allocatedDiscount), 2);
+            $discountedNetLine = $itemTaxMultiplier > 0
+                ? round($discountedGrossLine / $itemTaxMultiplier, 4)
+                : round($discountedGrossLine, 4);
+            $discountedTaxAmount = round($discountedGrossLine - $discountedNetLine, 4);
+
+            $item['discount_total'] = $allocatedDiscount;
+            $item['price_net'] = round($quantity > 0 ? ($discountedNetLine / $quantity) : 0, 4);
+            $item['net_total'] = $discountedNetLine;
+            $item['tax_amount'] = $discountedTaxAmount;
+            $item['total'] = $discountedGrossLine;
+
+            $itemsNetSubtotal += $discountedGrossLine;
+            $vatSubtotal += $discountedNetLine;
+            $vatAmount += $discountedTaxAmount;
+        }
+        unset($item);
 
         $shippingBase = $this->getShippingRate($deliveryMethod);
         $shippingTaxRate = $this->getShippingTaxRate();
         $shippingTaxAmount = $shippingTaxRate > 0 ? ($shippingBase * ($shippingTaxRate / 100)) : 0;
         $shippingTotal = $shippingBase + $shippingTaxAmount;
         $total = $itemsNetSubtotal + $shippingTotal;
-        $vatSubtotal = $taxMultiplier > 0 ? ($itemsNetSubtotal / $taxMultiplier) : $itemsNetSubtotal;
-        $vatAmount = $itemsNetSubtotal - $vatSubtotal;
 
         return [
             'subtotal' => round($itemsNetSubtotal, 2),
             'items_subtotal_before_discount' => round($itemsGrossSubtotal, 2),
-            'vat_rate' => round($taxRate, 2),
+            'vat_rate' => round($displayVatRate, 2),
             'vat_subtotal' => round($vatSubtotal, 2),
             'vat_amount' => round($vatAmount, 2),
+            'mixed_vat_rates' => $mixedVatRates,
             'shipping' => round($shippingTotal, 2),
             'shipping_base' => round($shippingBase, 2),
             'shipping_tax_rate' => round($shippingTaxRate, 2),
@@ -506,6 +560,117 @@ class OrderRepository {
         $rate = is_numeric($value) ? floatval($value) : 0;
         $this->taxRateCache = $rate;
         return $rate;
+    }
+
+    private function normalizeProductAttributes($value): array {
+        if (is_array($value)) {
+            return $value;
+        }
+        if (is_string($value) && trim($value) !== '') {
+            $decoded = json_decode($value, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+        return [];
+    }
+
+    private function normalizeBooleanAttribute($value, bool $default = false): bool {
+        if ($value === null) {
+            return $default;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return ((int)$value) === 1;
+        }
+        $normalized = strtolower(trim((string)$value));
+        if ($normalized === '') {
+            return $default;
+        }
+        if (in_array($normalized, ['1', 'true', 't', 'yes', 'y', 'on', 'si', 'sí'], true)) {
+            return true;
+        }
+        if (in_array($normalized, ['0', 'false', 'f', 'no', 'n', 'off'], true)) {
+            return false;
+        }
+        return $default;
+    }
+
+    private function isProductTaxExempt(array $attributes): bool {
+        return $this->normalizeBooleanAttribute(
+            $attributes['taxExempt'] ?? ($attributes['tax_exempt'] ?? false),
+            false
+        );
+    }
+
+    private function getProductTaxRateForAttributes(array $attributes): float {
+        return $this->isProductTaxExempt($attributes)
+            ? 0.0
+            : max(0.0, (float)$this->getTaxRate());
+    }
+
+    private function getProductTaxMultiplierForAttributes(array $attributes): float {
+        return 1 + ($this->getProductTaxRateForAttributes($attributes) / 100);
+    }
+
+    private function allocateDiscountAcrossLineTotals(array $lineTotals, float $discountTotal): array {
+        $lineCount = count($lineTotals);
+        if ($lineCount === 0) {
+            return [];
+        }
+
+        $normalizedDiscount = round(max(0, $discountTotal), 2);
+        if ($normalizedDiscount <= 0) {
+            return array_fill(0, $lineCount, 0.0);
+        }
+
+        $normalizedLineTotals = array_map(
+            static fn($total) => round(max(0, (float)$total), 2),
+            $lineTotals
+        );
+        $grossTotal = array_sum($normalizedLineTotals);
+        if ($grossTotal <= 0) {
+            return array_fill(0, $lineCount, 0.0);
+        }
+
+        $allocations = array_fill(0, $lineCount, 0.0);
+        $remainingDiscount = $normalizedDiscount;
+        $remainingGross = $grossTotal;
+        foreach ($normalizedLineTotals as $index => $lineTotal) {
+            if ($lineTotal <= 0 || $remainingDiscount <= 0 || $remainingGross <= 0) {
+                continue;
+            }
+            if ($index === $lineCount - 1) {
+                $allocation = min($lineTotal, $remainingDiscount);
+            } else {
+                $share = $lineTotal / $remainingGross;
+                $allocation = round($normalizedDiscount * $share, 2);
+                $allocation = min($lineTotal, min($remainingDiscount, $allocation));
+            }
+
+            $allocations[$index] = $allocation;
+            $remainingDiscount = round($remainingDiscount - $allocation, 2);
+            $remainingGross = round($remainingGross - $lineTotal, 2);
+        }
+
+        if ($remainingDiscount > 0) {
+            for ($index = $lineCount - 1; $index >= 0; $index--) {
+                $capacity = round($normalizedLineTotals[$index] - $allocations[$index], 2);
+                if ($capacity <= 0) {
+                    continue;
+                }
+                $extra = min($capacity, $remainingDiscount);
+                $allocations[$index] = round($allocations[$index] + $extra, 2);
+                $remainingDiscount = round($remainingDiscount - $extra, 2);
+                if ($remainingDiscount <= 0) {
+                    break;
+                }
+            }
+        }
+
+        return $allocations;
     }
 
     private function normalizeCountryName($value) {
@@ -599,7 +764,7 @@ class OrderRepository {
                 'order_notes' => $data['order_notes'] ?? null
             ]);
 
-            $stmtItem = $this->db->prepare('INSERT INTO "OrderItem" ("id", "order_id", "product_id", "product_name", "product_image", "quantity", "price", "unit_cost", "cost_total") VALUES (:id, :order_id, :product_id, :product_name, :product_image, :quantity, :price, :unit_cost, :cost_total)');
+            $stmtItem = $this->db->prepare('INSERT INTO "OrderItem" ("id", "order_id", "product_id", "product_name", "product_image", "quantity", "price", "price_net", "net_total", "tax_rate", "tax_amount", "unit_cost", "cost_total") VALUES (:id, :order_id, :product_id, :product_name, :product_image, :quantity, :price, :price_net, :net_total, :tax_rate, :tax_amount, :unit_cost, :cost_total)');
             $stmtUpdateStock = $this->db->prepare('UPDATE "Product" SET quantity = quantity - :qty, sold = sold + :qty WHERE id = :id AND tenant_id = :tenant_id AND quantity >= :qty');
             $stmtLockProduct = $this->db->prepare('
                 SELECT quantity, cost
@@ -627,6 +792,10 @@ class OrderRepository {
                     'product_image' => $item['product_image'] ?? null,
                     'quantity' => $item['quantity'],
                     'price' => $item['price'],
+                    'price_net' => round((float)($item['price_net'] ?? 0), 4),
+                    'net_total' => round((float)($item['net_total'] ?? 0), 4),
+                    'tax_rate' => round((float)($item['tax_rate'] ?? 0), 2),
+                    'tax_amount' => round((float)($item['tax_amount'] ?? 0), 4),
                     'unit_cost' => $previewUnitCost,
                     'cost_total' => $previewCostTotal
                 ]);
@@ -707,6 +876,39 @@ class OrderRepository {
 
     private function orderItemUnitCostExpression(string $orderItemAlias = 'oi', string $productAlias = 'p'): string {
         return "COALESCE({$orderItemAlias}.unit_cost, {$productAlias}.cost, 0)";
+    }
+
+    private function rawOrderItemGrossTotalExpression(string $orderItemAlias = 'oi'): string {
+        return "(COALESCE({$orderItemAlias}.quantity, 0) * COALESCE({$orderItemAlias}.price, 0))";
+    }
+
+    private function orderItemTaxRateExpression(string $orderItemAlias = 'oi', string $orderAlias = 'o'): string {
+        return "COALESCE({$orderItemAlias}.tax_rate, COALESCE({$orderAlias}.vat_rate, 0))";
+    }
+
+    private function orderItemNetTotalExpression(string $orderItemAlias = 'oi', string $orderAlias = 'o'): string {
+        $rawGrossExpr = $this->rawOrderItemGrossTotalExpression($orderItemAlias);
+        $taxRateExpr = $this->orderItemTaxRateExpression($orderItemAlias, $orderAlias);
+
+        return "COALESCE({$orderItemAlias}.net_total, CASE
+            WHEN {$taxRateExpr} > 0 THEN ({$rawGrossExpr} / NULLIF((1 + ({$taxRateExpr} / 100.0)), 0))
+            ELSE {$rawGrossExpr}
+        END)";
+    }
+
+    private function orderItemTaxAmountExpression(string $orderItemAlias = 'oi', string $orderAlias = 'o'): string {
+        $rawGrossExpr = $this->rawOrderItemGrossTotalExpression($orderItemAlias);
+        $netExpr = $this->orderItemNetTotalExpression($orderItemAlias, $orderAlias);
+
+        return "COALESCE({$orderItemAlias}.tax_amount, ({$rawGrossExpr} - ({$netExpr})))";
+    }
+
+    private function orderItemGrossTotalExpression(string $orderItemAlias = 'oi', string $orderAlias = 'o'): string {
+        $rawGrossExpr = $this->rawOrderItemGrossTotalExpression($orderItemAlias);
+        $netExpr = $this->orderItemNetTotalExpression($orderItemAlias, $orderAlias);
+        $taxExpr = $this->orderItemTaxAmountExpression($orderItemAlias, $orderAlias);
+
+        return "COALESCE(({$orderItemAlias}.net_total + {$orderItemAlias}.tax_amount), (($netExpr) + ($taxExpr)), {$rawGrossExpr})";
     }
 
     private function netSalesSql($alias = 'o') {
@@ -863,6 +1065,8 @@ class OrderRepository {
         $activeStatus = $this->activeOrdersCondition('o');
         $netExpr = $this->netSalesSql('o');
         $vatExpr = $this->vatAmountSql('o');
+        $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
+        $itemGrossExpr = $this->orderItemGrossTotalExpression('oi', 'o');
 
         $ordersStmt = $this->db->prepare("
             SELECT
@@ -891,28 +1095,61 @@ class OrderRepository {
         }
         unset($order);
 
-        $vatRate = $this->getTaxRate();
         $productsStmt = $this->db->prepare("
+            WITH active_lines AS (
+                SELECT
+                    oi.product_id,
+                    COALESCE(NULLIF(TRIM(oi.product_name), ''), 'Producto sin nombre') AS product_name,
+                    COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') AS category,
+                    o.id AS order_id,
+                    COALESCE(oi.quantity, 0)::numeric AS quantity,
+                    $itemGrossExpr AS line_gross_items,
+                    $itemNetExpr AS line_net_estimate,
+                    COALESCE(o.shipping, 0) AS order_shipping,
+                    COALESCE($netExpr, 0) AS order_net,
+                    COALESCE($vatExpr, 0) AS order_vat,
+                    SUM($itemGrossExpr) OVER (PARTITION BY o.id) AS order_items_gross
+                FROM \"OrderItem\" oi
+                JOIN \"Order\" o ON oi.order_id = o.id
+                LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
+                WHERE o.tenant_id = :tenant_id AND $activeStatus
+            ),
+            distributed_lines AS (
+                SELECT
+                    product_id,
+                    product_name,
+                    category,
+                    order_id,
+                    quantity,
+                    line_net_estimate,
+                    CASE
+                        WHEN order_net > 0 THEN order_shipping * (line_net_estimate / order_net)
+                        WHEN order_items_gross > 0 THEN order_shipping * (line_gross_items / order_items_gross)
+                        ELSE 0
+                    END AS line_shipping,
+                    CASE
+                        WHEN order_net > 0 THEN order_vat * (line_net_estimate / order_net)
+                        WHEN order_items_gross > 0 THEN GREATEST(line_gross_items - line_net_estimate, 0)
+                        ELSE 0
+                    END AS line_vat
+                FROM active_lines
+            )
             SELECT
-                oi.product_id,
-                COALESCE(NULLIF(TRIM(oi.product_name), ''), 'Producto sin nombre') as product_name,
-                COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') as category,
-                SUM(oi.quantity) as units_sold,
-                SUM(oi.quantity * (oi.price / NULLIF((1 + (COALESCE(o.vat_rate, :vat_rate) / 100.0)), 0))) as net_revenue,
-                STRING_AGG(DISTINCT o.id, ', ') as order_refs
-            FROM \"OrderItem\" oi
-            JOIN \"Order\" o ON oi.order_id = o.id
-            LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
-            GROUP BY
-                oi.product_id,
-                COALESCE(NULLIF(TRIM(oi.product_name), ''), 'Producto sin nombre'),
-                COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría')
+                product_id,
+                product_name,
+                category,
+                COALESCE(SUM(quantity), 0)::int AS units_sold,
+                COALESCE(SUM(line_net_estimate), 0) AS net_revenue,
+                COALESCE(SUM(line_vat), 0) AS vat_amount,
+                COALESCE(SUM(line_shipping), 0) AS shipping_amount,
+                COALESCE(SUM(line_net_estimate + line_vat + line_shipping), 0) AS gross_revenue,
+                STRING_AGG(DISTINCT order_id, ', ') AS order_refs
+            FROM distributed_lines
+            GROUP BY product_id, product_name, category
             ORDER BY net_revenue DESC, units_sold DESC
             LIMIT $safeProductLimit
         ");
         $productsStmt->execute([
-            'vat_rate' => $vatRate,
             'tenant_id' => $this->getTenantId()
         ]);
         $products = $productsStmt->fetchAll();
@@ -920,32 +1157,69 @@ class OrderRepository {
         foreach ($products as &$product) {
             $product['units_sold'] = (int)($product['units_sold'] ?? 0);
             $product['net_revenue'] = round((float)($product['net_revenue'] ?? 0), 2);
+            $product['vat_amount'] = round((float)($product['vat_amount'] ?? 0), 2);
+            $product['shipping_amount'] = round((float)($product['shipping_amount'] ?? 0), 2);
+            $product['gross_revenue'] = round((float)($product['gross_revenue'] ?? 0), 2);
             $refs = trim((string)($product['order_refs'] ?? ''));
             $product['order_refs'] = $refs === '' ? [] : array_values(array_filter(array_map('trim', explode(',', $refs))));
         }
         unset($product);
 
         $categoriesStmt = $this->db->prepare("
+            WITH active_lines AS (
+                SELECT
+                    COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') AS category,
+                    o.id AS order_id,
+                    $itemGrossExpr AS line_gross_items,
+                    $itemNetExpr AS line_net_estimate,
+                    COALESCE(o.shipping, 0) AS order_shipping,
+                    COALESCE($netExpr, 0) AS order_net,
+                    COALESCE($vatExpr, 0) AS order_vat,
+                    SUM($itemGrossExpr) OVER (PARTITION BY o.id) AS order_items_gross
+                FROM \"OrderItem\" oi
+                JOIN \"Order\" o ON oi.order_id = o.id
+                LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
+                WHERE o.tenant_id = :tenant_id AND $activeStatus
+            ),
+            distributed_lines AS (
+                SELECT
+                    category,
+                    order_id,
+                    line_net_estimate,
+                    CASE
+                        WHEN order_net > 0 THEN order_shipping * (line_net_estimate / order_net)
+                        WHEN order_items_gross > 0 THEN order_shipping * (line_gross_items / order_items_gross)
+                        ELSE 0
+                    END AS line_shipping,
+                    CASE
+                        WHEN order_net > 0 THEN order_vat * (line_net_estimate / order_net)
+                        WHEN order_items_gross > 0 THEN GREATEST(line_gross_items - line_net_estimate, 0)
+                        ELSE 0
+                    END AS line_vat
+                FROM active_lines
+            )
             SELECT
-                COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') as category,
-                SUM(oi.quantity * (oi.price / NULLIF((1 + (COALESCE(o.vat_rate, :vat_rate) / 100.0)), 0))) as net_revenue,
-                STRING_AGG(DISTINCT o.id, ', ') as order_refs
-            FROM \"OrderItem\" oi
-            JOIN \"Order\" o ON oi.order_id = o.id
-            LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
-            GROUP BY COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría')
+                category,
+                COALESCE(SUM(line_net_estimate), 0) AS net_revenue,
+                COALESCE(SUM(line_vat), 0) AS vat_amount,
+                COALESCE(SUM(line_shipping), 0) AS shipping_amount,
+                COALESCE(SUM(line_net_estimate + line_vat + line_shipping), 0) AS gross_revenue,
+                STRING_AGG(DISTINCT order_id, ', ') AS order_refs
+            FROM distributed_lines
+            GROUP BY category
             ORDER BY net_revenue DESC
             LIMIT 6
         ");
         $categoriesStmt->execute([
-            'vat_rate' => $vatRate,
             'tenant_id' => $this->getTenantId()
         ]);
         $categories = $categoriesStmt->fetchAll();
 
         foreach ($categories as &$category) {
             $category['net_revenue'] = round((float)($category['net_revenue'] ?? 0), 2);
+            $category['vat_amount'] = round((float)($category['vat_amount'] ?? 0), 2);
+            $category['shipping_amount'] = round((float)($category['shipping_amount'] ?? 0), 2);
+            $category['gross_revenue'] = round((float)($category['gross_revenue'] ?? 0), 2);
             $refs = trim((string)($category['order_refs'] ?? ''));
             $category['order_refs'] = $refs === '' ? [] : array_values(array_filter(array_map('trim', explode(',', $refs))));
         }
@@ -959,12 +1233,12 @@ class OrderRepository {
     }
 
     public function getTopProducts() {
-        $vatRate = $this->getTaxRate();
         $activeStatus = $this->activeOrdersCondition('o');
+        $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
         $stmt = $this->db->prepare("
             SELECT oi.product_name as name,
                    SUM(oi.quantity) as sold,
-                   SUM(oi.quantity * (oi.price / NULLIF((1 + (COALESCE(o.vat_rate, :vat_rate) / 100.0)), 0))) as revenue
+                   SUM($itemNetExpr) as revenue
             FROM \"OrderItem\" oi
             JOIN \"Order\" o ON oi.order_id = o.id
             WHERE o.tenant_id = :tenant_id AND $activeStatus
@@ -972,22 +1246,20 @@ class OrderRepository {
             ORDER BY sold DESC
             LIMIT 5
         ");
-        $stmt->execute([
-            'vat_rate' => $vatRate,
-            'tenant_id' => $this->getTenantId()
-        ]);
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return $stmt->fetchAll();
     }
 
     public function getProductSalesRanking(?string $selectedMonth = null) {
         $tenantId = $this->getTenantId();
-        $vatRate = $this->getTaxRate();
         $realizedSales = $this->realizedSalesCondition('o');
         $netExpr = $this->netSalesSql('o');
         $vatExpr = $this->vatAmountSql('o');
         $costExpr = $this->orderItemCostExpression('oi', 'p');
         $lineCostExpr = $this->orderItemCostExpression('oi', 'pr');
         $unitCostExpr = $this->orderItemUnitCostExpression('oi', 'pr');
+        $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
+        $itemGrossExpr = $this->orderItemGrossTotalExpression('oi', 'o');
         $periodStmt = $this->db->prepare("
             SELECT
                 MIN(o.created_at)::date AS historical_start,
@@ -1082,12 +1354,12 @@ class OrderRepository {
                     o.id AS order_id,
                     o.created_at,
                     COALESCE(oi.quantity, 0)::numeric AS quantity,
-                    (COALESCE(oi.quantity, 0) * COALESCE(oi.price, 0)) AS line_gross_items,
-                    (COALESCE(oi.quantity, 0) * (COALESCE(oi.price, 0) / NULLIF((1 + (COALESCE(o.vat_rate, :vat_rate) / 100.0)), 0))) AS line_net_estimate,
+                    $itemGrossExpr AS line_gross_items,
+                    $itemNetExpr AS line_net_estimate,
                     COALESCE(o.shipping, 0) AS order_shipping,
                     COALESCE($netExpr, 0) AS order_net,
                     COALESCE($vatExpr, 0) AS order_vat,
-                    SUM(COALESCE(oi.quantity, 0) * COALESCE(oi.price, 0)) OVER (PARTITION BY o.id) AS order_items_gross,
+                    SUM($itemGrossExpr) OVER (PARTITION BY o.id) AS order_items_gross,
                     $unitCostExpr AS unit_cost,
                     $lineCostExpr AS line_cost
                 FROM \"OrderItem\" oi
@@ -1176,7 +1448,6 @@ class OrderRepository {
         ");
         $stmt->execute([
             'tenant_id' => $tenantId,
-            'vat_rate' => $vatRate,
             'start_date' => $monthStart,
             'end_date' => $nextMonthStart
         ]);
@@ -1301,11 +1572,11 @@ class OrderRepository {
     }
 
     public function getSalesByCategory() {
-        $vatRate = $this->getTaxRate();
         $activeStatus = $this->activeOrdersCondition('o');
+        $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
         $stmt = $this->db->prepare("
             SELECT COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') as category,
-                   SUM(oi.quantity * (oi.price / NULLIF((1 + (COALESCE(o.vat_rate, :vat_rate) / 100.0)), 0))) as total
+                   SUM($itemNetExpr) as total
             FROM \"OrderItem\" oi
             LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
             JOIN \"Order\" o ON oi.order_id = o.id
@@ -1313,10 +1584,7 @@ class OrderRepository {
             GROUP BY COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría')
             ORDER BY total DESC
         ");
-        $stmt->execute([
-            'vat_rate' => $vatRate,
-            'tenant_id' => $this->getTenantId()
-        ]);
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return $stmt->fetchAll();
     }
 
@@ -1361,12 +1629,12 @@ class OrderRepository {
         $stmtPrevious->execute(['tenant_id' => $this->getTenantId()]);
         $previousDays = $stmtPrevious->fetchAll();
 
-        $vatRate = $this->getTaxRate();
+        $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
         $catGrowthStmt = $this->db->prepare("
             WITH this_month AS (
                 SELECT
                     COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') as category,
-                    SUM(oi.quantity * (oi.price / NULLIF((1 + (COALESCE(o.vat_rate, :vat_rate) / 100.0)), 0))) as current_sales
+                    SUM($itemNetExpr) as current_sales
                 FROM \"OrderItem\" oi
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
                 JOIN \"Order\" o ON oi.order_id = o.id
@@ -1378,7 +1646,7 @@ class OrderRepository {
             last_month AS (
                 SELECT
                     COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') as category,
-                    SUM(oi.quantity * (oi.price / NULLIF((1 + (COALESCE(o.vat_rate, :vat_rate) / 100.0)), 0))) as previous_sales
+                    SUM($itemNetExpr) as previous_sales
                 FROM \"OrderItem\" oi
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
                 JOIN \"Order\" o ON oi.order_id = o.id
@@ -1403,10 +1671,7 @@ class OrderRepository {
             FULL OUTER JOIN last_month lm ON tm.category = lm.category
             ORDER BY growth DESC
         ");
-        $catGrowthStmt->execute([
-            'vat_rate' => $vatRate,
-            'tenant_id' => $this->getTenantId()
-        ]);
+        $catGrowthStmt->execute(['tenant_id' => $this->getTenantId()]);
         $catGrowth = $catGrowthStmt->fetchAll();
 
         return [
@@ -1557,6 +1822,71 @@ class OrderRepository {
         return is_array($decoded) ? $decoded : null;
     }
 
+    private function summarizeOrderItemsTax(array $items, float $fallbackTaxRate): array {
+        $grossSubtotal = 0.0;
+        $netSubtotal = 0.0;
+        $taxAmount = 0.0;
+        $ratesSeen = [];
+
+        foreach ($items as $item) {
+            $quantity = max(0, (int)($item['quantity'] ?? 0));
+            if ($quantity <= 0) {
+                continue;
+            }
+
+            $lineTaxRate = isset($item['tax_rate']) && is_numeric($item['tax_rate'])
+                ? max(0, (float)$item['tax_rate'])
+                : max(0, $fallbackTaxRate);
+            $lineTaxExempt = isset($item['tax_exempt'])
+                ? $this->normalizeBooleanAttribute($item['tax_exempt'], false)
+                : ($lineTaxRate <= 0);
+            if ($lineTaxExempt) {
+                $lineTaxRate = 0.0;
+            }
+            $lineTaxMultiplier = 1 + ($lineTaxRate / 100);
+
+            $rawGrossLine = round((float)($item['price'] ?? 0) * $quantity, 4);
+            $storedNetTotal = isset($item['net_total']) && is_numeric($item['net_total'])
+                ? round((float)$item['net_total'], 4)
+                : null;
+            $storedTaxAmount = isset($item['tax_amount']) && is_numeric($item['tax_amount'])
+                ? round((float)$item['tax_amount'], 4)
+                : null;
+
+            if ($storedNetTotal !== null && $storedTaxAmount !== null) {
+                $lineNetTotal = $storedNetTotal;
+                $lineTaxAmount = $storedTaxAmount;
+                $lineGrossTotal = round($lineNetTotal + $lineTaxAmount, 4);
+            } else {
+                $lineGrossTotal = $rawGrossLine;
+                $lineNetTotal = $lineTaxMultiplier > 0
+                    ? round($lineGrossTotal / $lineTaxMultiplier, 4)
+                    : round($lineGrossTotal, 4);
+                $lineTaxAmount = round($lineGrossTotal - $lineNetTotal, 4);
+            }
+
+            $grossSubtotal += $lineGrossTotal;
+            $netSubtotal += $lineNetTotal;
+            $taxAmount += $lineTaxAmount;
+            $ratesSeen[(string)round($lineTaxRate, 2)] = true;
+        }
+
+        $distinctRates = array_map('floatval', array_keys($ratesSeen));
+        sort($distinctRates);
+        $mixedRates = count($distinctRates) > 1;
+        $displayRate = count($distinctRates) === 1
+            ? (float)$distinctRates[0]
+            : (count($distinctRates) > 0 ? max($distinctRates) : max(0, $fallbackTaxRate));
+
+        return [
+            'gross_subtotal' => round($grossSubtotal, 2),
+            'net_subtotal' => round($netSubtotal, 2),
+            'tax_amount' => round($taxAmount, 2),
+            'vat_rate' => round($displayRate, 2),
+            'mixed_vat_rates' => $mixedRates,
+        ];
+    }
+
     private function renderInvoiceHtml($invoiceNumber, $data, $quote, $invoiceData, $baseUrl = null) {
         $frontendBase = TenantContext::appUrl() ?? ($_ENV['FRONTEND_URL'] ?? ($_ENV['APP_URL'] ?? ''));
         $baseUrl = $baseUrl ?: $frontendBase;
@@ -1583,10 +1913,10 @@ class OrderRepository {
         $discountTotal = isset($quote['discount_total']) ? (float)$quote['discount_total'] : 0;
         $discountCode = trim((string)($quote['discount_code'] ?? ''));
         $taxRate = isset($quote['vat_rate']) ? (float)$quote['vat_rate'] : $this->getTaxRate();
-        $taxMultiplier = 1 + ($taxRate / 100);
+        $mixedVatRates = !empty($quote['mixed_vat_rates']);
         $taxNetSubtotal = isset($quote['vat_subtotal']) && $quote['vat_subtotal'] !== null
             ? (float)$quote['vat_subtotal']
-            : ($taxMultiplier > 0 ? ($subtotal / $taxMultiplier) : $subtotal);
+            : $subtotal;
         $taxAmount = isset($quote['vat_amount']) && $quote['vat_amount'] !== null
             ? (float)$quote['vat_amount']
             : ($subtotal - $taxNetSubtotal);
@@ -1597,7 +1927,11 @@ class OrderRepository {
         foreach ($items as $item) {
             $itemPrice = (float)($item['price'] ?? 0);
             $itemQty = (int)($item['quantity'] ?? 1);
-            $priceNet = $taxMultiplier > 0 ? ($itemPrice / $taxMultiplier) : $itemPrice;
+            $itemTaxRate = isset($item['tax_rate']) && is_numeric($item['tax_rate'])
+                ? (float)$item['tax_rate']
+                : $taxRate;
+            $itemTaxMultiplier = 1 + ($itemTaxRate / 100);
+            $priceNet = $itemTaxMultiplier > 0 ? ($itemPrice / $itemTaxMultiplier) : $itemPrice;
             $rowTotal = number_format($priceNet * $itemQty, 2, ',', '.');
             $rows .= '<tr>'
                 . '<td>' . htmlspecialchars($item['product_name'] ?? '-') . '</td>'
@@ -1615,6 +1949,9 @@ class OrderRepository {
         $discountRow = $discountTotal > 0
             ? ('<tr><td colspan="3">' . $discountLabel . '</td><td>-$' . number_format($discountTotal, 2, ',', '.') . '</td></tr>')
             : '';
+        $taxLabel = $mixedVatRates
+            ? 'IVA aplicado'
+            : ('IVA (' . number_format($taxRate, 2, ',', '.') . '%)');
 
         return '<!doctype html>
 <html lang="es">
@@ -1693,7 +2030,7 @@ class OrderRepository {
       </tbody>
       <tfoot>
         <tr><td colspan="3">Subtotal sin IVA</td><td>$' . number_format($taxNetSubtotal, 2, ',', '.') . '</td></tr>
-        <tr><td colspan="3">IVA (' . number_format($taxRate, 2, ',', '.') . '%)</td><td>$' . number_format($taxAmount, 2, ',', '.') . '</td></tr>
+        <tr><td colspan="3">' . $taxLabel . '</td><td>$' . number_format($taxAmount, 2, ',', '.') . '</td></tr>
         ' . $discountRow . '
         <tr><td colspan="3">Envío</td><td>$' . number_format($shipping, 2, ',', '.') . '</td></tr>
         <tr class="total"><td colspan="3">Total</td><td>$' . number_format($total, 2, ',', '.') . '</td></tr>
@@ -1707,20 +2044,29 @@ class OrderRepository {
     private function addTaxBreakdown($order) {
         if (!$order || !is_array($order)) return $order;
         $taxRate = $this->getTaxRate();
-        $taxMultiplier = 1 + ($taxRate / 100);
         $items = $order['items'] ?? [];
         $itemsSubtotal = isset($order['items_subtotal']) ? (float)$order['items_subtotal'] : 0;
-        if ($itemsSubtotal <= 0 && is_array($items)) {
-            foreach ($items as $item) {
-                $itemsSubtotal += (float)($item['price'] ?? 0) * (int)($item['quantity'] ?? 1);
-            }
-        }
         $storedVatSubtotal = isset($order['vat_subtotal']) ? (float)$order['vat_subtotal'] : 0;
         $storedVatAmount = isset($order['vat_amount']) ? (float)$order['vat_amount'] : 0;
         $storedVatRate = isset($order['vat_rate']) ? (float)$order['vat_rate'] : 0;
-        $netSubtotal = $storedVatSubtotal > 0 ? $storedVatSubtotal : ($taxMultiplier > 0 ? ($itemsSubtotal / $taxMultiplier) : $itemsSubtotal);
-        $taxAmount = $storedVatAmount > 0 ? $storedVatAmount : ($itemsSubtotal - $netSubtotal);
-        $order['vat_rate'] = $storedVatRate > 0 ? $storedVatRate : $taxRate;
+        $itemSummary = is_array($items) && count($items) > 0
+            ? $this->summarizeOrderItemsTax($items, $storedVatRate > 0 ? $storedVatRate : $taxRate)
+            : null;
+
+        if ($itemsSubtotal <= 0 && is_array($itemSummary)) {
+            $itemsSubtotal = (float)($itemSummary['gross_subtotal'] ?? 0);
+        }
+
+        $netSubtotal = $storedVatSubtotal > 0
+            ? $storedVatSubtotal
+            : (is_array($itemSummary) ? (float)($itemSummary['net_subtotal'] ?? 0) : $itemsSubtotal);
+        $taxAmount = $storedVatAmount > 0
+            ? $storedVatAmount
+            : (is_array($itemSummary) ? (float)($itemSummary['tax_amount'] ?? 0) : 0);
+        $order['vat_rate'] = $storedVatRate > 0
+            ? $storedVatRate
+            : (is_array($itemSummary) ? (float)($itemSummary['vat_rate'] ?? $taxRate) : $taxRate);
+        $order['mixed_vat_rates'] = is_array($itemSummary) ? !empty($itemSummary['mixed_vat_rates']) : false;
         $order['vat_subtotal'] = round($netSubtotal, 2);
         $order['vat_amount'] = round($taxAmount, 2);
         $order['items_subtotal'] = round($itemsSubtotal, 2);
@@ -1752,7 +2098,16 @@ class OrderRepository {
         $order['shipping_tax_rate'] = round($shippingTaxRate, 2);
         $order['shipping_tax_amount'] = round($shippingTaxAmount, 2);
 
-        $shouldPersist = (empty($order['items_subtotal']) || empty($order['vat_subtotal']) || empty($order['vat_amount']) || empty($order['vat_rate']) || !isset($order['shipping']) || !isset($order['shipping_base']) || !isset($order['shipping_tax_amount']) || !isset($order['shipping_tax_rate']) || !isset($order['discount_total']) || !array_key_exists('discount_code', $order));
+        $shouldPersist = (!array_key_exists('items_subtotal', $order)
+            || !array_key_exists('vat_subtotal', $order)
+            || !array_key_exists('vat_amount', $order)
+            || !array_key_exists('vat_rate', $order)
+            || !isset($order['shipping'])
+            || !isset($order['shipping_base'])
+            || !isset($order['shipping_tax_amount'])
+            || !isset($order['shipping_tax_rate'])
+            || !array_key_exists('discount_total', $order)
+            || !array_key_exists('discount_code', $order));
         if (!empty($order['id']) && $shouldPersist) {
             try {
                 $stmt = $this->db->prepare('UPDATE "Order" SET items_subtotal = :items_subtotal, vat_subtotal = :vat_subtotal, vat_rate = :vat_rate, vat_amount = :vat_amount, shipping = :shipping, shipping_base = :shipping_base, shipping_tax_rate = :shipping_tax_rate, shipping_tax_amount = :shipping_tax_amount, discount_total = :discount_total, discount_code = COALESCE(discount_code, :discount_code) WHERE id = :id AND tenant_id = :tenant_id');

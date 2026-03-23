@@ -253,6 +253,14 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS unit_cost numeric(12,4)',
         'ALTER TABLE "OrderItem" ALTER COLUMN unit_cost TYPE numeric(12,4) USING COALESCE(unit_cost, 0)::numeric(12,4)',
         'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS cost_total numeric(12,4)',
+        'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS price_net numeric(12,4)',
+        'ALTER TABLE "OrderItem" ALTER COLUMN price_net TYPE numeric(12,4) USING COALESCE(price_net, 0)::numeric(12,4)',
+        'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS net_total numeric(12,4)',
+        'ALTER TABLE "OrderItem" ALTER COLUMN net_total TYPE numeric(12,4) USING COALESCE(net_total, 0)::numeric(12,4)',
+        'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS tax_rate numeric(6,2)',
+        'ALTER TABLE "OrderItem" ALTER COLUMN tax_rate TYPE numeric(6,2) USING COALESCE(tax_rate, 0)::numeric(6,2)',
+        'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS tax_amount numeric(12,4)',
+        'ALTER TABLE "OrderItem" ALTER COLUMN tax_amount TYPE numeric(12,4) USING COALESCE(tax_amount, 0)::numeric(12,4)',
         'ALTER TABLE "InventoryLot" ADD COLUMN IF NOT EXISTS purchase_invoice_id text',
         'ALTER TABLE "InventoryLot" ADD COLUMN IF NOT EXISTS purchase_invoice_item_id text',
         'ALTER TABLE "Setting" ADD COLUMN IF NOT EXISTS tenant_id text',
@@ -264,6 +272,28 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
             LIMIT 1
         ), 0) WHERE oi.unit_cost IS NULL',
         'UPDATE "OrderItem" SET cost_total = ROUND((COALESCE(quantity, 0) * COALESCE(unit_cost, 0))::numeric, 4) WHERE cost_total IS NULL',
+        'UPDATE "OrderItem" oi
+            SET price_net = ROUND((
+                COALESCE(oi.price, 0) / NULLIF((1 + (COALESCE(o.vat_rate, 0) / 100.0)), 0)
+            )::numeric, 4)
+          FROM "Order" o
+          WHERE oi.order_id = o.id
+            AND oi.price_net IS NULL',
+        'UPDATE "OrderItem" oi
+            SET net_total = ROUND((
+                COALESCE(oi.quantity, 0) * COALESCE(oi.price_net, 0)
+            )::numeric, 4)
+          WHERE oi.net_total IS NULL',
+        'UPDATE "OrderItem" oi
+            SET tax_rate = COALESCE(o.vat_rate, 0)
+          FROM "Order" o
+          WHERE oi.order_id = o.id
+            AND oi.tax_rate IS NULL',
+        'UPDATE "OrderItem" oi
+            SET tax_amount = ROUND((
+                (COALESCE(oi.quantity, 0) * COALESCE(oi.price, 0)) - COALESCE(oi.net_total, 0)
+            )::numeric, 4)
+          WHERE oi.tax_amount IS NULL',
         'UPDATE "Product" SET is_published = true WHERE is_published IS NULL',
         'ALTER TABLE "Product" ALTER COLUMN is_published SET DEFAULT true',
         'ALTER TABLE "Product" ALTER COLUMN is_published SET NOT NULL',
@@ -273,6 +303,18 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'UPDATE "OrderItem" SET cost_total = 0 WHERE cost_total IS NULL',
         'ALTER TABLE "OrderItem" ALTER COLUMN cost_total SET DEFAULT 0',
         'ALTER TABLE "OrderItem" ALTER COLUMN cost_total SET NOT NULL',
+        'UPDATE "OrderItem" SET price_net = 0 WHERE price_net IS NULL',
+        'ALTER TABLE "OrderItem" ALTER COLUMN price_net SET DEFAULT 0',
+        'ALTER TABLE "OrderItem" ALTER COLUMN price_net SET NOT NULL',
+        'UPDATE "OrderItem" SET net_total = 0 WHERE net_total IS NULL',
+        'ALTER TABLE "OrderItem" ALTER COLUMN net_total SET DEFAULT 0',
+        'ALTER TABLE "OrderItem" ALTER COLUMN net_total SET NOT NULL',
+        'UPDATE "OrderItem" SET tax_rate = 0 WHERE tax_rate IS NULL',
+        'ALTER TABLE "OrderItem" ALTER COLUMN tax_rate SET DEFAULT 0',
+        'ALTER TABLE "OrderItem" ALTER COLUMN tax_rate SET NOT NULL',
+        'UPDATE "OrderItem" SET tax_amount = 0 WHERE tax_amount IS NULL',
+        'ALTER TABLE "OrderItem" ALTER COLUMN tax_amount SET DEFAULT 0',
+        'ALTER TABLE "OrderItem" ALTER COLUMN tax_amount SET NOT NULL',
         'ALTER TABLE "User" DROP CONSTRAINT IF EXISTS "User_email_key"',
         'ALTER TABLE "Product" DROP CONSTRAINT IF EXISTS "Product_slug_key"',
         'DROP INDEX IF EXISTS "Product_legacy_id_key"',

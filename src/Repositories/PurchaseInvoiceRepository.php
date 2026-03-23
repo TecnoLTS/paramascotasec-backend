@@ -136,6 +136,9 @@ class PurchaseInvoiceRepository {
         if ($supplierName === '') {
             throw new \InvalidArgumentException('La factura de compra requiere el nombre del proveedor.');
         }
+        if ($supplierDocument === '') {
+            throw new \InvalidArgumentException('La factura de compra requiere el RUC o documento del proveedor.');
+        }
         if ($issuedAt === '' || preg_match('/^\d{4}-\d{2}-\d{2}$/', $issuedAt) !== 1) {
             throw new \InvalidArgumentException('La factura de compra requiere una fecha válida en formato YYYY-MM-DD.');
         }
@@ -148,10 +151,10 @@ class PurchaseInvoiceRepository {
         return [
             'invoice_number' => $invoiceNumber,
             'supplier_name' => $supplierName,
-            'supplier_document' => $supplierDocument !== '' ? $supplierDocument : null,
+            'supplier_document' => $supplierDocument,
             'issued_at' => $issuedAt,
             'notes' => $notes !== '' ? $notes : null,
-            'external_key' => $this->buildExternalKey($invoiceNumber, $supplierDocument !== '' ? $supplierDocument : $supplierName),
+            'external_key' => $this->buildExternalKey($invoiceNumber, $supplierDocument),
             'metadata' => $metadata,
         ];
     }
@@ -251,6 +254,7 @@ class PurchaseInvoiceRepository {
         $unitCost = round($unitCost, 4);
         $lineTotal = round($quantity * $unitCost, 4);
         $id = uniqid('pitem_');
+        $normalizedMetadata = $this->normalizeItemMetadata($metadata, $lineTotal);
 
         $stmt = $this->db->prepare("
             INSERT INTO \"PurchaseInvoiceItem\" (
@@ -288,7 +292,7 @@ class PurchaseInvoiceRepository {
             'quantity' => $quantity,
             'unit_cost' => $unitCost,
             'line_total' => $lineTotal,
-            'metadata' => $this->encodeJsonField($metadata),
+            'metadata' => $this->encodeJsonField($normalizedMetadata),
         ]);
 
         return [
@@ -299,14 +303,15 @@ class PurchaseInvoiceRepository {
             'quantity' => $quantity,
             'unit_cost' => $unitCost,
             'line_total' => $lineTotal,
-            'metadata' => $metadata,
+            'metadata' => $normalizedMetadata,
         ];
     }
 
     private function recalculateInvoiceTotals(string $invoiceId): array {
         $stmt = $this->db->prepare("
             SELECT
-                COALESCE(SUM(line_total), 0) AS subtotal
+                line_total,
+                metadata
             FROM \"PurchaseInvoiceItem\"
             WHERE tenant_id = :tenant_id
               AND purchase_invoice_id = :invoice_id
@@ -315,12 +320,24 @@ class PurchaseInvoiceRepository {
             'tenant_id' => $this->getTenantId(),
             'invoice_id' => $invoiceId,
         ]);
-        $subtotal = round((float)($stmt->fetchColumn() ?: 0), 4);
+        $rows = $stmt->fetchAll() ?: [];
+        $subtotal = 0.0;
+        $taxTotal = 0.0;
+
+        foreach ($rows as $row) {
+            $lineTotal = round((float)($row['line_total'] ?? 0), 4);
+            $subtotal += $lineTotal;
+            $taxTotal += $this->resolveItemTaxAmount($row['metadata'] ?? null, $lineTotal);
+        }
+
+        $subtotal = round($subtotal, 4);
+        $taxTotal = round($taxTotal, 4);
+        $grandTotal = round($subtotal + $taxTotal, 4);
 
         $update = $this->db->prepare("
             UPDATE \"PurchaseInvoice\"
             SET subtotal = :subtotal,
-                tax_total = 0,
+                tax_total = :tax_total,
                 total = :total,
                 updated_at = NOW()
             WHERE id = :id
@@ -330,10 +347,46 @@ class PurchaseInvoiceRepository {
             'id' => $invoiceId,
             'tenant_id' => $this->getTenantId(),
             'subtotal' => $subtotal,
-            'total' => $subtotal,
+            'tax_total' => $taxTotal,
+            'total' => $grandTotal,
         ]);
 
         return $this->getHeaderById($invoiceId);
+    }
+
+    private function normalizeItemMetadata(array $metadata, float $lineTotal): array {
+        $taxRate = isset($metadata['tax_rate']) && is_numeric($metadata['tax_rate'])
+            ? max(0, round((float)$metadata['tax_rate'], 2))
+            : 0.0;
+        $taxExempt = $this->normalizeBooleanValue($metadata['tax_exempt'] ?? false);
+
+        if ($taxExempt || $taxRate <= 0) {
+            $taxRate = 0.0;
+            $taxExempt = true;
+        }
+
+        $metadata['tax_rate'] = $taxRate;
+        $metadata['tax_exempt'] = $taxExempt;
+        $metadata['tax_amount'] = $taxExempt ? 0.0 : round($lineTotal * ($taxRate / 100), 4);
+
+        return $metadata;
+    }
+
+    private function resolveItemTaxAmount($metadata, float $lineTotal): float {
+        $decoded = $this->decodeJsonField($metadata);
+        $taxRate = isset($decoded['tax_rate']) && is_numeric($decoded['tax_rate'])
+            ? max(0, (float)$decoded['tax_rate'])
+            : 0.0;
+        $taxExempt = $this->normalizeBooleanValue($decoded['tax_exempt'] ?? false);
+        if ($taxExempt || $taxRate <= 0) {
+            return 0.0;
+        }
+
+        if (isset($decoded['tax_amount']) && is_numeric($decoded['tax_amount'])) {
+            return round((float)$decoded['tax_amount'], 4);
+        }
+
+        return round($lineTotal * ($taxRate / 100), 4);
     }
 
     private function getHeaderById(string $id): array {
@@ -392,6 +445,17 @@ class PurchaseInvoiceRepository {
         }
         $decoded = json_decode((string)$value, true);
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function normalizeBooleanValue($value): bool {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return (int)$value !== 0;
+        }
+        $normalized = strtolower(trim((string)$value));
+        return in_array($normalized, ['1', 'true', 'yes', 'y', 'on', 'si', 'sí'], true);
     }
 
     private function getTenantId(): string {

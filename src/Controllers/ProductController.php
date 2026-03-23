@@ -65,6 +65,16 @@ class ProductController {
         return true;
     }
 
+    private function includeProcurementDetailFromRequest(): bool {
+        $rawValue = $_GET['procurement_detail'] ?? ($_GET['procurementDetail'] ?? null);
+        if ($rawValue === null) {
+            return false;
+        }
+
+        $normalized = filter_var($rawValue, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        return $normalized === true;
+    }
+
     private function normalizePurchaseInvoiceField(array &$data): void {
         if (!array_key_exists('purchaseInvoice', $data)) {
             return;
@@ -76,16 +86,24 @@ class ProductController {
         }
 
         $invoice = $data['purchaseInvoice'];
+        $metadata = $invoice['metadata'] ?? null;
+        if (!is_array($metadata)) {
+            $metadata = [];
+        }
         $normalized = [
             'invoiceNumber' => trim((string)($invoice['invoiceNumber'] ?? $invoice['invoice_number'] ?? '')),
             'supplierName' => trim((string)($invoice['supplierName'] ?? $invoice['supplier_name'] ?? '')),
             'supplierDocument' => trim((string)($invoice['supplierDocument'] ?? $invoice['supplier_document'] ?? '')),
             'issuedAt' => trim((string)($invoice['issuedAt'] ?? $invoice['issued_at'] ?? '')),
             'notes' => trim((string)($invoice['notes'] ?? '')),
+            'metadata' => $metadata,
         ];
 
         $hasValue = false;
-        foreach ($normalized as $value) {
+        foreach ($normalized as $key => $value) {
+            if ($key === 'metadata') {
+                continue;
+            }
             if ($value !== '') {
                 $hasValue = true;
                 break;
@@ -93,6 +111,46 @@ class ProductController {
         }
 
         $data['purchaseInvoice'] = $hasValue ? $normalized : null;
+    }
+
+    private function normalizeBooleanFlag(mixed $value, bool $default = false): bool {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return (float)$value !== 0.0;
+        }
+        if (is_string($value)) {
+            $normalized = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+            if ($normalized !== null) {
+                return $normalized;
+            }
+        }
+        return $default;
+    }
+
+    private function normalizeTaxSettings(array &$data, ?array $currentProduct = null): void {
+        $currentAttributes = $currentProduct['attributes'] ?? [];
+        if (!is_array($currentAttributes)) {
+            $currentAttributes = [];
+        }
+
+        $attributes = $data['attributes'] ?? $currentAttributes;
+        if (!is_array($attributes)) {
+            $attributes = [];
+        }
+
+        $rawTaxExempt = $data['taxExempt']
+            ?? $attributes['taxExempt']
+            ?? $attributes['tax_exempt']
+            ?? $currentAttributes['taxExempt']
+            ?? $currentAttributes['tax_exempt']
+            ?? false;
+
+        $attributes['taxExempt'] = $this->normalizeBooleanFlag($rawTaxExempt, false) ? 'true' : 'false';
+        unset($attributes['tax_exempt'], $data['taxExempt']);
+
+        $data['attributes'] = $attributes;
     }
 
     private function validatePurchaseInvoice(?array $purchaseInvoice, bool $required): void {
@@ -109,6 +167,10 @@ class ProductController {
         }
         if (($purchaseInvoice['supplierName'] ?? '') === '') {
             Response::error('El proveedor de la factura de compra es obligatorio.', 400, 'PURCHASE_INVOICE_SUPPLIER_REQUIRED');
+            exit;
+        }
+        if (($purchaseInvoice['supplierDocument'] ?? '') === '') {
+            Response::error('El proveedor seleccionado debe tener RUC o documento registrado.', 400, 'PURCHASE_INVOICE_SUPPLIER_DOCUMENT_REQUIRED');
             exit;
         }
         $issuedAt = (string)($purchaseInvoice['issuedAt'] ?? '');
@@ -196,6 +258,41 @@ class ProductController {
         $data['attributes'] = ProductVariantMetadata::apply($effectiveProduct, $effectiveAttributes);
     }
 
+    private function validateVariantMetadata(array $data, ?array $currentProduct = null): void {
+        $effectiveAttributes = $data['attributes'] ?? ($currentProduct['attributes'] ?? []);
+        if (!is_array($effectiveAttributes)) {
+            $effectiveAttributes = [];
+        }
+
+        $effectiveProduct = [
+            'name' => $data['name'] ?? ($currentProduct['name'] ?? ''),
+            'brand' => $data['brand'] ?? ($currentProduct['brand'] ?? ''),
+            'category' => $data['category'] ?? ($currentProduct['category'] ?? ''),
+            'gender' => $data['gender'] ?? ($currentProduct['gender'] ?? ''),
+            'variantLabel' => $data['variantLabel'] ?? ($currentProduct['variantLabel'] ?? ''),
+            'variantBaseName' => $data['variantBaseName'] ?? ($currentProduct['variantBaseName'] ?? ''),
+            'variantGroupKey' => $data['variantGroupKey'] ?? ($currentProduct['variantGroupKey'] ?? ''),
+        ];
+
+        $hasVariantContext =
+            trim((string)($effectiveProduct['variantLabel'] ?? '')) !== '' ||
+            trim((string)($effectiveProduct['variantBaseName'] ?? '')) !== '' ||
+            trim((string)($effectiveProduct['variantGroupKey'] ?? '')) !== '' ||
+            trim((string)($effectiveAttributes['variantLabel'] ?? '')) !== '' ||
+            trim((string)($effectiveAttributes['variantBaseName'] ?? '')) !== '' ||
+            trim((string)($effectiveAttributes['variantGroupKey'] ?? '')) !== '';
+
+        if (!$hasVariantContext) {
+            return;
+        }
+
+        $variantLabel = ProductVariantMetadata::resolveVariantLabel($effectiveProduct, $effectiveAttributes);
+        if ($variantLabel === '') {
+            Response::error('La variante necesita una talla, presentación o medida válida.', 400, 'PRODUCT_VARIANT_LABEL_REQUIRED');
+            exit;
+        }
+    }
+
     public function index() {
         try {
             $includeUnpublished = $this->includeUnpublishedFromRequest();
@@ -212,9 +309,11 @@ class ProductController {
     public function show($id) {
         try {
             $includeUnpublished = $this->includeUnpublishedFromRequest();
+            $includeProcurementDetail = $includeUnpublished && $this->includeProcurementDetailFromRequest();
             $product = $this->productRepository->getById($id, [
                 'includeUnpublished' => $includeUnpublished,
                 'includeProcurement' => $includeUnpublished,
+                'includeProcurementDetail' => $includeProcurementDetail,
             ]);
             if (!$product) {
                 Response::error('Producto no encontrado', 404, 'PRODUCT_NOT_FOUND');
@@ -232,6 +331,7 @@ class ProductController {
             $this->normalizePublishedField($data);
             $this->normalizePurchaseInvoiceField($data);
             $this->normalizeAudienceFields($data, null);
+            $this->normalizeTaxSettings($data, null);
             $productType = ProductAudience::normalizeProductType((string)($data['productType'] ?? $data['product_type'] ?? ''), (string)($data['category'] ?? ''));
             $attributes = $data['attributes'] ?? [];
             $allowedTypes = ['Alimento', 'ropa', 'cuidado', 'accesorios'];
@@ -309,6 +409,7 @@ class ProductController {
             }
             $data['attributes'] = $attributes;
             $this->normalizeAudienceFields($data, null);
+            $this->validateVariantMetadata($data, null);
             $this->applyVariantMetadata($data, null);
             $this->enforcePublicationEligibility($data, null);
             $product = $this->productRepository->create($data);
@@ -422,6 +523,8 @@ class ProductController {
                 }
                 $data['attributes'] = $attributes;
                 $this->normalizeAudienceFields($data, $currentProduct);
+                $this->normalizeTaxSettings($data, $currentProduct);
+                $this->validateVariantMetadata($data, $currentProduct);
                 $this->applyVariantMetadata($data, $currentProduct);
                 $this->enforcePublicationEligibility($data, $currentProduct);
             } else {
@@ -436,6 +539,8 @@ class ProductController {
                     : $currentQuantity;
                 $this->validatePurchaseInvoice($data['purchaseInvoice'] ?? null, $effectiveQuantity > $currentQuantity);
                 $this->normalizeAudienceFields($data, $currentProduct);
+                $this->normalizeTaxSettings($data, $currentProduct);
+                $this->validateVariantMetadata($data, $currentProduct);
                 $this->applyVariantMetadata($data, $currentProduct);
                 $this->enforcePublicationEligibility($data, $currentProduct);
             }

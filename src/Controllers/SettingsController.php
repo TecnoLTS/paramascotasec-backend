@@ -68,11 +68,111 @@ class SettingsController {
         return array_values($normalized);
     }
 
+    private function sanitizeTextValue($value, $maxLength = 255) {
+        $text = trim(preg_replace('/\s+/', ' ', (string)$value));
+        if ($text === '') {
+            return '';
+        }
+
+        if (function_exists('mb_substr')) {
+            return mb_substr($text, 0, $maxLength, 'UTF-8');
+        }
+
+        return substr($text, 0, $maxLength);
+    }
+
+    private function normalizeSupplierDocumentKey($value) {
+        return preg_replace('/[^A-Z0-9]+/', '', strtoupper($this->sanitizeTextValue($value, 64)));
+    }
+
+    private function buildSupplierReferenceId($name, $document) {
+        $base = $this->normalizeSupplierDocumentKey($document !== '' ? $document : $name);
+        if ($base === '') {
+            return 'supplier-' . uniqid();
+        }
+        return 'supplier-' . strtolower($base);
+    }
+
+    private function sanitizeSupplierReferenceList($value) {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $seenNames = [];
+        $seenDocuments = [];
+        $normalized = [];
+
+        foreach ($value as $index => $item) {
+            if (is_string($item) || is_numeric($item)) {
+                $item = ['name' => (string)$item];
+            }
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $name = $this->sanitizeTextValue($item['name'] ?? ($item['supplierName'] ?? ($item['label'] ?? '')), 160);
+            if ($name === '') {
+                continue;
+            }
+
+            $document = $this->sanitizeTextValue($item['document'] ?? ($item['supplierDocument'] ?? ''), 64);
+            $email = strtolower($this->sanitizeTextValue($item['email'] ?? '', 190));
+            if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $email = '';
+            }
+
+            $phone = $this->sanitizeTextValue($item['phone'] ?? '', 64);
+            $contactName = $this->sanitizeTextValue($item['contactName'] ?? ($item['contact_name'] ?? ''), 160);
+            $address = $this->sanitizeTextValue($item['address'] ?? '', 255);
+            $notes = $this->sanitizeTextValue($item['notes'] ?? '', 255);
+            $id = $this->sanitizeTextValue($item['id'] ?? '', 160);
+
+            $nameKey = function_exists('mb_strtolower')
+                ? mb_strtolower($name, 'UTF-8')
+                : strtolower($name);
+            $documentKey = $this->normalizeSupplierDocumentKey($document);
+
+            if (isset($seenNames[$nameKey])) {
+                continue;
+            }
+            if ($documentKey !== '' && isset($seenDocuments[$documentKey])) {
+                continue;
+            }
+
+            $seenNames[$nameKey] = true;
+            if ($documentKey !== '') {
+                $seenDocuments[$documentKey] = true;
+            }
+
+            $normalized[] = [
+                'id' => $id !== '' ? $id : $this->buildSupplierReferenceId($name, $document !== '' ? $document : (string)($index + 1)),
+                'name' => $name,
+                'document' => $document,
+                'email' => $email,
+                'phone' => $phone,
+                'contactName' => $contactName,
+                'address' => $address,
+                'notes' => $notes,
+            ];
+        }
+
+        usort($normalized, static function ($left, $right) {
+            return strcasecmp((string)($left['name'] ?? ''), (string)($right['name'] ?? ''));
+        });
+
+        return array_values($normalized);
+    }
+
     private function normalizeProductReferenceDataPayload($data) {
         $defaults = $this->getDefaultProductReferenceData();
         $source = is_array($data) ? $data : [];
 
         foreach (array_keys($defaults) as $key) {
+            if ($key === 'suppliers') {
+                $defaults[$key] = $this->sanitizeSupplierReferenceList($source[$key] ?? []);
+                continue;
+            }
+
             $defaults[$key] = $this->sanitizeReferenceOptionList($source[$key] ?? []);
         }
 

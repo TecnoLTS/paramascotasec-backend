@@ -101,6 +101,50 @@ class UserRepository {
         return $stmt->fetch();
     }
 
+    public function getAdminUserById($id) {
+        $stmt = $this->db->prepare('
+            SELECT
+                id,
+                name,
+                email,
+                role,
+                email_verified,
+                document_type,
+                document_number,
+                business_name,
+                profile,
+                addresses,
+                created_at,
+                updated_at
+            FROM "User"
+            WHERE id = :id AND tenant_id = :tenant_id
+            LIMIT 1
+        ');
+        $stmt->execute([
+            'id' => $id,
+            'tenant_id' => $this->getTenantId()
+        ]);
+        return $stmt->fetch();
+    }
+
+    public function emailExists(string $email, ?string $excludeId = null): bool {
+        $sql = 'SELECT 1 FROM "User" WHERE email = :email AND tenant_id = :tenant_id';
+        $params = [
+            'email' => $email,
+            'tenant_id' => $this->getTenantId()
+        ];
+
+        if ($excludeId) {
+            $sql .= ' AND id <> :exclude_id';
+            $params['exclude_id'] = $excludeId;
+        }
+
+        $sql .= ' LIMIT 1';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return (bool)$stmt->fetchColumn();
+    }
+
     public function getAuthState($id) {
         $stmt = $this->db->prepare('SELECT id, role, active_token_id FROM "User" WHERE id = :id AND tenant_id = :tenant_id');
         $stmt->execute([
@@ -240,6 +284,100 @@ class UserRepository {
             'business_name' => $data['business_name'] ?? null
         ]);
         return ['id' => $id, 'token' => $token];
+    }
+
+    public function createManaged(array $data) {
+        $id = bin2hex(random_bytes(10));
+        $stmt = $this->db->prepare('
+            INSERT INTO "User" (
+                id,
+                tenant_id,
+                name,
+                email,
+                password,
+                role,
+                email_verified,
+                verification_token,
+                document_type,
+                document_number,
+                business_name,
+                profile,
+                updated_at
+            ) VALUES (
+                :id,
+                :tenant_id,
+                :name,
+                :email,
+                :password,
+                :role,
+                :email_verified,
+                NULL,
+                :document_type,
+                :document_number,
+                :business_name,
+                :profile,
+                NOW()
+            )
+        ');
+        $stmt->execute([
+            'id' => $id,
+            'tenant_id' => $this->getTenantId(),
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'password' => password_hash($data['password'], PASSWORD_DEFAULT),
+            'role' => $data['role'],
+            'email_verified' => !empty($data['email_verified']),
+            'document_type' => $data['document_type'] ?? null,
+            'document_number' => $data['document_number'] ?? null,
+            'business_name' => $data['business_name'] ?? null,
+            'profile' => json_encode($data['profile'] ?? (object)[]),
+        ]);
+
+        return $this->getAdminUserById($id);
+    }
+
+    public function updateManaged(string $id, array $data) {
+        $fields = [
+            'name = :name',
+            'email = :email',
+            'role = :role',
+            'email_verified = :email_verified',
+            'verification_token = NULL',
+            'document_type = :document_type',
+            'document_number = :document_number',
+            'business_name = :business_name',
+            'profile = :profile',
+            'updated_at = NOW()',
+        ];
+
+        $params = [
+            'id' => $id,
+            'tenant_id' => $this->getTenantId(),
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'role' => $data['role'],
+            'email_verified' => !empty($data['email_verified']),
+            'document_type' => $data['document_type'] ?? null,
+            'document_number' => $data['document_number'] ?? null,
+            'business_name' => $data['business_name'] ?? null,
+            'profile' => json_encode($data['profile'] ?? (object)[]),
+        ];
+
+        if (!empty($data['password'])) {
+            $fields[] = 'password = :password';
+            $fields[] = 'active_token_id = :active_token_id';
+            $params['password'] = password_hash($data['password'], PASSWORD_DEFAULT);
+            $params['active_token_id'] = bin2hex(random_bytes(16));
+        }
+
+        $sql = sprintf(
+            'UPDATE "User" SET %s WHERE id = :id AND tenant_id = :tenant_id',
+            implode(', ', $fields)
+        );
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        return $this->getAdminUserById($id);
     }
 
     public function verifyToken($token) {

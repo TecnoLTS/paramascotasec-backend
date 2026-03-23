@@ -34,6 +34,12 @@ class ProductRepository {
           , purchase_stats.purchased_units_total AS "purchasedUnitsTotal"
           , purchase_stats.remaining_units_from_purchases AS "remainingUnitsFromPurchases"
           , purchase_stats.last_purchase_at AS "lastPurchaseAt"
+          , open_stock.open_lots_count AS "openLotsCount"
+          , open_stock.remaining_units_total AS "remainingUnitsTotal"
+          , open_stock.remaining_cost_total AS "remainingCostTotal"
+          , open_stock.weighted_remaining_unit_cost AS "weightedRemainingUnitCost"
+          , open_stock.min_remaining_unit_cost AS "minRemainingUnitCost"
+          , open_stock.max_remaining_unit_cost AS "maxRemainingUnitCost"
         ';
             $procurementJoin = '
         LEFT JOIN LATERAL (
@@ -79,6 +85,23 @@ class ProductRepository {
             AND il.tenant_id = p.tenant_id
             AND il.purchase_invoice_id IS NOT NULL
         ) purchase_stats ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS open_lots_count,
+            COALESCE(SUM(il.remaining_quantity), 0)::int AS remaining_units_total,
+            COALESCE(SUM(il.remaining_quantity * il.unit_cost), 0) AS remaining_cost_total,
+            CASE
+              WHEN COALESCE(SUM(il.remaining_quantity), 0) > 0
+                THEN COALESCE(SUM(il.remaining_quantity * il.unit_cost), 0) / SUM(il.remaining_quantity)
+              ELSE 0
+            END AS weighted_remaining_unit_cost,
+            COALESCE(MIN(il.unit_cost), 0) AS min_remaining_unit_cost,
+            COALESCE(MAX(il.unit_cost), 0) AS max_remaining_unit_cost
+          FROM "InventoryLot" il
+          WHERE il.product_id = p.id
+            AND il.tenant_id = p.tenant_id
+            AND il.remaining_quantity > 0
+        ) open_stock ON true
         ';
         }
 
@@ -150,6 +173,7 @@ class ProductRepository {
     public function getById($idOrLegacyOrSlug, array $options = []) {
         $includeUnpublished = (bool)($options['includeUnpublished'] ?? false);
         $includeProcurement = (bool)($options['includeProcurement'] ?? false);
+        $includeProcurementDetail = (bool)($options['includeProcurementDetail'] ?? false);
         $visibilityFilter = $includeUnpublished ? '' : ' AND COALESCE(p.is_published, true) = true';
         $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id AND (p.id = :id OR p.legacy_id = :id OR p.slug = :id)' . $visibilityFilter . ' LIMIT 1';
         $stmt = $this->db->prepare($sql);
@@ -158,7 +182,16 @@ class ProductRepository {
             'tenant_id' => $this->getTenantId()
         ]);
         $row = $stmt->fetch();
-        return $row ? $this->formatRow($row) : null;
+        if (!$row) {
+            return null;
+        }
+
+        $formatted = $this->formatRow($row);
+        if ($includeProcurementDetail) {
+            $formatted['inventory']['procurementDetail'] = $this->buildProcurementDetail($formatted);
+        }
+
+        return $formatted;
     }
 
     private function formatRow($row) {
@@ -166,7 +199,7 @@ class ProductRepository {
         $row['thumbImage'] = json_decode($row['thumbs'] ?? '[]', true);
         $row['imageMeta'] = json_decode($row['imageMeta'] ?? '[]', true);
         $row['variations'] = json_decode($row['variations'] ?? '[]', true);
-        $row['attributes'] = json_decode($row['attributes'] ?? '{}', true) ?: [];
+        $row['attributes'] = $this->normalizeProductAttributes(json_decode($row['attributes'] ?? '{}', true) ?: []);
         $publishedRaw = $row['published'] ?? true;
         if (is_bool($publishedRaw)) {
             $row['published'] = $publishedRaw;
@@ -202,10 +235,15 @@ class ProductRepository {
             return $variation;
         }, $row['variations']);
 
-        $taxRate = $this->getTaxRate();
-        $taxMultiplier = 1 + ($taxRate / 100);
+        $taxRate = $this->getProductTaxRateForAttributes($row['attributes']);
+        $taxMultiplier = $this->getProductTaxMultiplierForAttributes($row['attributes']);
         $row['price'] = round(floatval($row['price'] ?? 0) * $taxMultiplier, 2);
         $row['originPrice'] = round(floatval($row['originPrice'] ?? 0) * $taxMultiplier, 2);
+        $row['tax'] = [
+            'rate' => round($taxRate, 2),
+            'multiplier' => round($taxMultiplier, 4),
+            'exempt' => $taxRate <= 0,
+        ];
         
         // Smart Business Logic
         $cost = floatval($row['cost'] ?? 0);
@@ -411,6 +449,16 @@ class ProductRepository {
             $purchasedUnitsTotal = max(0, (int)($row['purchasedUnitsTotal'] ?? 0));
             $remainingUnitsFromPurchases = max(0, (int)($row['remainingUnitsFromPurchases'] ?? 0));
             $lastPurchaseAt = $row['lastPurchaseAt'] ?? null;
+            $openLotsCount = max(0, (int)($row['openLotsCount'] ?? 0));
+            $remainingUnitsTotal = max(0, (int)($row['remainingUnitsTotal'] ?? 0));
+            $remainingCostTotal = round((float)($row['remainingCostTotal'] ?? 0), 4);
+            $weightedRemainingUnitCost = round((float)($row['weightedRemainingUnitCost'] ?? 0), 4);
+            $minRemainingUnitCost = round((float)($row['minRemainingUnitCost'] ?? 0), 4);
+            $maxRemainingUnitCost = round((float)($row['maxRemainingUnitCost'] ?? 0), 4);
+            $weightedProfit = $priceNet > 0 ? round($priceNet - $weightedRemainingUnitCost, 2) : 0.0;
+            $weightedMargin = $priceNet > 0 ? round((($priceNet - $weightedRemainingUnitCost) / $priceNet) * 100, 1) : 0.0;
+            $lastPurchaseProfit = $priceNet > 0 ? round($priceNet - $lastPurchaseUnitCost, 2) : 0.0;
+            $lastPurchaseMargin = $priceNet > 0 ? round((($priceNet - $lastPurchaseUnitCost) / $priceNet) * 100, 1) : 0.0;
 
             $row['lastPurchaseInvoice'] = $lastPurchaseInvoice;
             $row['inventory']['purchaseHistory'] = [
@@ -420,9 +468,185 @@ class ProductRepository {
                 'lastPurchaseAt' => $lastPurchaseAt ?: ($lastPurchaseInvoice['receivedAt'] ?? $lastPurchaseInvoice['issuedAt'] ?? null),
             ];
             $row['inventory']['lastPurchaseInvoice'] = $lastPurchaseInvoice;
+            $row['inventory']['procurement'] = [
+                'openLotsCount' => $openLotsCount,
+                'remainingUnitsTotal' => $remainingUnitsTotal,
+                'remainingCostTotal' => $remainingCostTotal,
+                'weightedUnitCost' => $weightedRemainingUnitCost,
+                'minUnitCost' => $minRemainingUnitCost,
+                'maxUnitCost' => $maxRemainingUnitCost,
+                'weightedProfit' => $weightedProfit,
+                'weightedMargin' => $weightedMargin,
+                'lastPurchaseProfit' => $lastPurchaseProfit,
+                'lastPurchaseMargin' => $lastPurchaseMargin,
+            ];
         }
 
         return $row;
+    }
+
+    private function buildProcurementDetail(array $product): array {
+        $productId = trim((string)($product['id'] ?? ''));
+        $priceGross = round((float)($product['price'] ?? 0), 2);
+        $productAttributes = $this->normalizeProductAttributes($product['attributes'] ?? []);
+        $taxRate = $this->getProductTaxRateForAttributes($productAttributes);
+        $taxMultiplier = $this->getProductTaxMultiplierForAttributes($productAttributes);
+        $priceNet = $taxMultiplier > 0 ? round($priceGross / $taxMultiplier, 4) : round($priceGross, 4);
+
+        if ($productId === '') {
+            return [
+                'product_id' => '',
+                'legacy_id' => null,
+                'product_name' => trim((string)($product['name'] ?? '')),
+                'category' => trim((string)($product['category'] ?? '')),
+                'price_gross' => $priceGross,
+                'price_net' => $priceNet,
+                'tax_rate' => round($taxRate, 2),
+                'tax_exempt' => $taxRate <= 0,
+                'entries_count' => 0,
+                'open_lots_count' => 0,
+                'purchased_units_total' => 0,
+                'consumed_units_total' => 0,
+                'remaining_units_total' => 0,
+                'remaining_cost_total' => 0.0,
+                'weighted_unit_cost' => 0.0,
+                'weighted_margin' => 0.0,
+                'weighted_profit' => 0.0,
+                'min_unit_cost' => 0.0,
+                'max_unit_cost' => 0.0,
+                'has_unlinked_stock' => false,
+                'lots' => [],
+            ];
+        }
+
+        $stmt = $this->db->prepare('
+            SELECT
+                il.id,
+                il.source_type,
+                il.source_ref,
+                il.purchase_invoice_id,
+                il.purchase_invoice_item_id,
+                il.unit_cost,
+                il.initial_quantity,
+                il.remaining_quantity,
+                il.received_at,
+                il.created_at,
+                pi.invoice_number,
+                pi.supplier_name,
+                pi.supplier_document,
+                pi.issued_at
+            FROM "InventoryLot" il
+            LEFT JOIN "PurchaseInvoice" pi
+              ON pi.id = il.purchase_invoice_id
+             AND pi.tenant_id = il.tenant_id
+            WHERE il.tenant_id = :tenant_id
+              AND il.product_id = :product_id
+            ORDER BY COALESCE(pi.issued_at::timestamp, il.received_at, il.created_at) DESC,
+                     il.created_at DESC,
+                     il.id DESC
+        ');
+        $stmt->execute([
+            'tenant_id' => $this->getTenantId(),
+            'product_id' => $productId,
+        ]);
+
+        $rows = $stmt->fetchAll() ?: [];
+        $lots = [];
+        $purchasedUnitsTotal = 0;
+        $consumedUnitsTotal = 0;
+        $remainingUnitsTotal = 0;
+        $remainingCostTotal = 0.0;
+        $openLotsCount = 0;
+        $openUnitCosts = [];
+        $hasUnlinkedStock = false;
+
+        foreach ($rows as $row) {
+            $purchasedQuantity = max(0, (int)($row['initial_quantity'] ?? 0));
+            $remainingQuantity = max(0, (int)($row['remaining_quantity'] ?? 0));
+            $consumedQuantity = max(0, $purchasedQuantity - $remainingQuantity);
+            $unitCost = round((float)($row['unit_cost'] ?? 0), 4);
+            $purchaseTotal = round($purchasedQuantity * $unitCost, 4);
+            $remainingCost = round($remainingQuantity * $unitCost, 4);
+            $estimatedRemainingNetRevenue = round($remainingQuantity * $priceNet, 4);
+            $estimatedRemainingGrossRevenue = round($remainingQuantity * $priceGross, 4);
+            $estimatedRemainingProfit = round($estimatedRemainingNetRevenue - $remainingCost, 4);
+            $estimatedRemainingMargin = $priceNet > 0
+                ? round((($priceNet - $unitCost) / $priceNet) * 100, 1)
+                : 0.0;
+            $purchaseInvoiceId = trim((string)($row['purchase_invoice_id'] ?? ''));
+            $sourceType = trim((string)($row['source_type'] ?? ''));
+            $isUnlinked = $purchaseInvoiceId === '' || $sourceType !== 'purchase_invoice';
+
+            $purchasedUnitsTotal += $purchasedQuantity;
+            $consumedUnitsTotal += $consumedQuantity;
+            $remainingUnitsTotal += $remainingQuantity;
+            $remainingCostTotal += $remainingCost;
+
+            if ($remainingQuantity > 0) {
+                $openLotsCount += 1;
+                $openUnitCosts[] = $unitCost;
+            }
+            if ($isUnlinked && $remainingQuantity > 0) {
+                $hasUnlinkedStock = true;
+            }
+
+            $lots[] = [
+                'id' => trim((string)($row['id'] ?? '')),
+                'source_type' => $sourceType,
+                'source_ref' => trim((string)($row['source_ref'] ?? '')) ?: null,
+                'purchase_invoice_id' => $purchaseInvoiceId !== '' ? $purchaseInvoiceId : null,
+                'purchase_invoice_item_id' => trim((string)($row['purchase_invoice_item_id'] ?? '')) ?: null,
+                'invoice_number' => trim((string)($row['invoice_number'] ?? '')) ?: null,
+                'supplier_name' => trim((string)($row['supplier_name'] ?? '')) ?: null,
+                'supplier_document' => trim((string)($row['supplier_document'] ?? '')) ?: null,
+                'issued_at' => $row['issued_at'] ?: null,
+                'received_at' => $row['received_at'] ?: null,
+                'created_at' => $row['created_at'] ?: null,
+                'purchased_quantity' => $purchasedQuantity,
+                'consumed_quantity' => $consumedQuantity,
+                'remaining_quantity' => $remainingQuantity,
+                'unit_cost' => $unitCost,
+                'purchase_total' => $purchaseTotal,
+                'remaining_cost_total' => $remainingCost,
+                'estimated_remaining_net_revenue' => $estimatedRemainingNetRevenue,
+                'estimated_remaining_gross_revenue' => $estimatedRemainingGrossRevenue,
+                'estimated_remaining_profit' => $estimatedRemainingProfit,
+                'estimated_remaining_margin' => $estimatedRemainingMargin,
+                'status' => $remainingQuantity > 0 ? 'open' : 'consumed',
+            ];
+        }
+
+        $weightedUnitCost = $remainingUnitsTotal > 0
+            ? round($remainingCostTotal / $remainingUnitsTotal, 4)
+            : 0.0;
+        $weightedProfit = $priceNet > 0 ? round($priceNet - $weightedUnitCost, 4) : 0.0;
+        $weightedMargin = $priceNet > 0
+            ? round((($priceNet - $weightedUnitCost) / $priceNet) * 100, 1)
+            : 0.0;
+
+        return [
+            'product_id' => $productId,
+            'legacy_id' => trim((string)($product['legacyId'] ?? '')) ?: null,
+            'product_name' => trim((string)($product['name'] ?? '')),
+            'category' => trim((string)($product['category'] ?? '')),
+            'price_gross' => $priceGross,
+            'price_net' => $priceNet,
+            'tax_rate' => round($taxRate, 2),
+            'tax_exempt' => $taxRate <= 0,
+            'entries_count' => count($lots),
+            'open_lots_count' => $openLotsCount,
+            'purchased_units_total' => $purchasedUnitsTotal,
+            'consumed_units_total' => $consumedUnitsTotal,
+            'remaining_units_total' => $remainingUnitsTotal,
+            'remaining_cost_total' => round($remainingCostTotal, 4),
+            'weighted_unit_cost' => $weightedUnitCost,
+            'weighted_margin' => $weightedMargin,
+            'weighted_profit' => $weightedProfit,
+            'min_unit_cost' => count($openUnitCosts) > 0 ? min($openUnitCosts) : 0.0,
+            'max_unit_cost' => count($openUnitCosts) > 0 ? max($openUnitCosts) : 0.0,
+            'has_unlinked_stock' => $hasUnlinkedStock,
+            'lots' => $lots,
+        ];
     }
 
     private function getPublicBaseUrl() {
@@ -522,6 +746,63 @@ class ProductRepository {
         $rate = is_numeric($value) ? floatval($value) : 0;
         $this->taxRateCache = $rate;
         return $rate;
+    }
+
+    private function normalizeBooleanAttribute($value, bool $default = false): bool {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return (float)$value !== 0.0;
+        }
+        if (is_string($value)) {
+            $normalized = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+            if ($normalized !== null) {
+                return $normalized;
+            }
+        }
+        return $default;
+    }
+
+    private function normalizeProductAttributes($attributes): array {
+        if (!is_array($attributes)) {
+            return [];
+        }
+        $normalized = $attributes;
+        $taxExempt = $this->normalizeBooleanAttribute(
+            $normalized['taxExempt'] ?? ($normalized['tax_exempt'] ?? false),
+            false
+        );
+        $normalized['taxExempt'] = $taxExempt ? 'true' : 'false';
+        unset($normalized['tax_exempt']);
+        return $normalized;
+    }
+
+    private function isProductTaxExempt($attributes): bool {
+        if (!is_array($attributes)) {
+            return false;
+        }
+        return $this->normalizeBooleanAttribute(
+            $attributes['taxExempt'] ?? ($attributes['tax_exempt'] ?? false),
+            false
+        );
+    }
+
+    private function getProductTaxRateForAttributes($attributes): float {
+        if ($this->isProductTaxExempt($attributes)) {
+            return 0.0;
+        }
+
+        $rawRate = is_array($attributes) ? ($attributes['taxRate'] ?? null) : null;
+        if ($rawRate !== null && $rawRate !== '' && is_numeric($rawRate)) {
+            return max(0, round((float)$rawRate, 2));
+        }
+
+        return $this->getTaxRate();
+    }
+
+    private function getProductTaxMultiplierForAttributes($attributes): float {
+        return 1 + ($this->getProductTaxRateForAttributes($attributes) / 100);
     }
 
     private function getPricingSettings() {
@@ -634,15 +915,14 @@ class ProductRepository {
         return max(0, $adjusted);
     }
 
-    private function getSuggestedNetPriceForCost($cost) {
+    private function getSuggestedNetPriceForCost($cost, $taxMultiplier = null) {
         $cost = max(0, round((float)$cost, 2));
         if ($cost <= 0) {
             return 0.0;
         }
 
         $pricing = $this->getPricingSettings();
-        $taxRate = $this->getTaxRate();
-        $taxMultiplier = 1 + ($taxRate / 100);
+        $taxMultiplier = $taxMultiplier !== null ? max(1, (float)$taxMultiplier) : $this->getProductTaxMultiplierForAttributes([]);
 
         $minMargin = $pricing['minMargin'];
         $baseMargin = $pricing['baseMargin'];
@@ -694,15 +974,27 @@ class ProductRepository {
         return $purchaseInvoice;
     }
 
-    private function recordPurchaseInvoiceStockEntry(string $productId, string $productName, int $quantity, float $unitCost, array $data, string $reason): array {
+    private function recordPurchaseInvoiceStockEntry(string $productId, string $productName, int $quantity, float $unitCost, array $data, string $reason, ?array $fallbackAttributes = null): array {
         $purchaseInvoices = new PurchaseInvoiceRepository($this->db);
+        $rawAttributes = is_array($data['attributes'] ?? null)
+            ? $data['attributes']
+            : (is_array($fallbackAttributes) ? $fallbackAttributes : []);
+        $normalizedAttributes = $this->normalizeProductAttributes($rawAttributes);
+        if (array_key_exists('taxExempt', $data) && !array_key_exists('taxExempt', $normalizedAttributes)) {
+            $normalizedAttributes['taxExempt'] = $data['taxExempt'] ? 'true' : 'false';
+        }
+        $taxRate = $this->getProductTaxRateForAttributes($normalizedAttributes);
         return $purchaseInvoices->recordStockEntry(
             $this->requirePurchaseInvoicePayload($data),
             $productId,
             $productName,
             $quantity,
             $unitCost,
-            ['reason' => $reason]
+            [
+                'reason' => $reason,
+                'tax_rate' => round($taxRate, 2),
+                'tax_exempt' => $taxRate <= 0,
+            ]
         );
     }
 
@@ -713,6 +1005,13 @@ class ProductRepository {
         }
 
         try {
+            $price = isset($data['price']) && is_numeric($data['price']) ? round((float)$data['price'], 2) : 0.0;
+            $originalPrice = (isset($data['originPrice']) && is_numeric($data['originPrice']))
+                ? max(round((float)$data['originPrice'], 2), $price)
+                : $price;
+            $isSale = (isset($data['sale']) ? (bool)$data['sale'] : ($originalPrice > $price))
+                && $originalPrice > $price;
+
             $sql = '
                 INSERT INTO "Product" (
                     id, legacy_id, tenant_id, category, product_type, name, gender, is_new, is_sale, is_published, price, original_price, cost, brand, sold, quantity, description, action, slug, attributes, created_at, updated_at
@@ -745,12 +1044,12 @@ class ProductRepository {
                 'name' => $data['name'],
                 'gender' => ProductAudience::resolveGender($attributes['species'] ?? null, (string)($data['gender'] ?? '')),
                 'is_new' => isset($data['new']) ? ($data['new'] ? 'true' : 'false') : 'true',
-                'is_sale' => isset($data['sale']) ? ($data['sale'] ? 'true' : 'false') : 'false',
+                'is_sale' => $isSale ? 'true' : 'false',
                 'is_published' => array_key_exists('published', $data)
                     ? ($data['published'] ? 'true' : 'false')
                     : (array_key_exists('isPublished', $data) ? ($data['isPublished'] ? 'true' : 'false') : 'true'),
-                'price' => $data['price'],
-                'original_price' => $data['originPrice'] ?? $data['price'],
+                'price' => $price,
+                'original_price' => $originalPrice,
                 'cost' => $data['cost'] ?? 0,
                 'brand' => $data['brand'] ?? 'Generico',
                 'sold' => $data['sold'] ?? 0,
@@ -788,7 +1087,8 @@ class ProductRepository {
                     $initialQuantity,
                     round((float)($params['cost'] ?? 0), 4),
                     $data,
-                    'initial_stock'
+                    'initial_stock',
+                    $attributes
                 );
                 $inventoryLots = new InventoryLotRepository($this->db);
                 $inventoryLots->recordStockIncrease(
@@ -827,7 +1127,7 @@ class ProductRepository {
 
         try {
             $stmtCurrent = $this->db->prepare('
-                SELECT cost, price, original_price, is_sale, quantity, name, gender
+                SELECT cost, price, original_price, is_sale, quantity, name, gender, category, product_type, attributes
                 FROM "Product"
                 WHERE (id = :id OR legacy_id = :id) AND tenant_id = :tenant_id
                 LIMIT 1
@@ -848,9 +1148,13 @@ class ProductRepository {
             if (array_key_exists('cost', $data) && is_numeric($data['cost'])) {
                 $incomingCost = round((float)$data['cost'], 2);
                 $currentCost = round((float)($current['cost'] ?? 0), 2);
+                $incomingAttributes = is_array($data['attributes'] ?? null)
+                    ? $this->normalizeProductAttributes($data['attributes'])
+                    : $this->normalizeProductAttributes($current['attributes'] ?? []);
+                $taxMultiplier = $this->getProductTaxMultiplierForAttributes($incomingAttributes);
 
                 if (abs($incomingCost - $currentCost) > 0.00001) {
-                    $suggestedPrice = $this->getSuggestedNetPriceForCost($incomingCost);
+                    $suggestedPrice = $this->getSuggestedNetPriceForCost($incomingCost, $taxMultiplier);
                     $currentPrice = round((float)($current['price'] ?? 0), 2);
                     $requestedPrice = (array_key_exists('price', $data) && is_numeric($data['price']))
                         ? round((float)$data['price'], 2)
@@ -864,15 +1168,23 @@ class ProductRepository {
 
                     if (array_key_exists('originPrice', $data) && is_numeric($data['originPrice'])) {
                         $data['originPrice'] = max((float)$data['originPrice'], $nextPrice);
-                    } else {
-                        $currentOriginPrice = round((float)($current['original_price'] ?? 0), 2);
-                        $data['originPrice'] = max($nextPrice, $currentOriginPrice);
-                    }
-
-                    if (!array_key_exists('sale', $data) && (float)$data['originPrice'] <= $nextPrice) {
-                        $data['sale'] = false;
                     }
                 }
+            }
+
+            if (array_key_exists('price', $data) || array_key_exists('originPrice', $data) || array_key_exists('sale', $data)) {
+                $effectivePrice = (array_key_exists('price', $data) && is_numeric($data['price']))
+                    ? round((float)$data['price'], 2)
+                    : round((float)($current['price'] ?? 0), 2);
+                $normalizedOriginPrice = (array_key_exists('originPrice', $data) && is_numeric($data['originPrice']))
+                    ? max(round((float)$data['originPrice'], 2), $effectivePrice)
+                    : $effectivePrice;
+                $requestedSale = array_key_exists('sale', $data)
+                    ? (bool)$data['sale']
+                    : ($normalizedOriginPrice > $effectivePrice);
+
+                $data['originPrice'] = $normalizedOriginPrice;
+                $data['sale'] = $requestedSale && $normalizedOriginPrice > $effectivePrice;
             }
 
             $fields = [];
@@ -991,7 +1303,10 @@ class ProductRepository {
                     $increaseQty,
                     $nextCost,
                     $data,
-                    'manual_stock_increase'
+                    'manual_stock_increase',
+                    is_array($current['attributes'] ?? null)
+                        ? $current['attributes']
+                        : (json_decode((string)($current['attributes'] ?? '{}'), true) ?: [])
                 );
                 $inventoryLots->recordStockIncrease(
                     $id,

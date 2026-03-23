@@ -17,6 +17,98 @@ class UserController {
         return Auth::requireUser();
     }
 
+    private function normalizeText($value, int $maxLength = 255): ?string {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = trim((string)$value);
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (mb_strlen($normalized) > $maxLength) {
+            $normalized = mb_substr($normalized, 0, $maxLength);
+        }
+
+        return $normalized;
+    }
+
+    private function normalizeRole($value): string {
+        $normalized = strtolower(trim((string)$value));
+        if ($normalized === 'admin') {
+            return 'admin';
+        }
+        return 'customer';
+    }
+
+    private function normalizeManagedProfile(array $data, array $existingProfile = []): array {
+        $profile = $existingProfile;
+        $phone = $this->normalizeText($data['phone'] ?? ($data['profile']['phone'] ?? null), 60);
+
+        if ($phone !== null) {
+            $profile['phone'] = $phone;
+        } else {
+            unset($profile['phone']);
+        }
+
+        return $profile;
+    }
+
+    private function validateManagedPayload(array $data, bool $isCreate, array $existingUser = []): array {
+        $name = $this->normalizeText($data['name'] ?? null, 160);
+        if ($name === null || mb_strlen($name) < 3) {
+            Response::error('El nombre debe tener al menos 3 caracteres', 400, 'USER_NAME_INVALID');
+            exit;
+        }
+
+        $email = strtolower((string)$this->normalizeText($data['email'] ?? null, 190));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            Response::error('Correo electrónico inválido', 400, 'USER_EMAIL_INVALID');
+            exit;
+        }
+
+        $role = $this->normalizeRole($data['role'] ?? 'customer');
+        $password = trim((string)($data['password'] ?? ''));
+        if ($isCreate && $password === '') {
+            Response::error('La contraseña es obligatoria', 400, 'USER_PASSWORD_REQUIRED');
+            exit;
+        }
+
+        if ($password !== '' && mb_strlen($password) < 12) {
+            Response::error('La contraseña debe tener al menos 12 caracteres', 400, 'USER_PASSWORD_WEAK');
+            exit;
+        }
+
+        $documentType = $this->normalizeText($data['documentType'] ?? ($data['document_type'] ?? null), 40);
+        $documentNumber = $this->normalizeText($data['documentNumber'] ?? ($data['document_number'] ?? null), 80);
+
+        if (($documentType && !$documentNumber) || ($documentNumber && !$documentType)) {
+            Response::error('Tipo y número de documento deben completarse juntos', 400, 'USER_DOCUMENT_INCOMPLETE');
+            exit;
+        }
+
+        $existingProfile = [];
+        if (!empty($existingUser['profile'])) {
+            $decoded = json_decode((string)$existingUser['profile'], true);
+            if (is_array($decoded)) {
+                $existingProfile = $decoded;
+            }
+        }
+
+        return [
+            'name' => $name,
+            'email' => $email,
+            'role' => $role,
+            'password' => $password,
+            'email_verified' => (bool)($data['emailVerified'] ?? ($data['email_verified'] ?? true)),
+            'document_type' => $documentType,
+            'document_number' => $documentNumber,
+            'business_name' => $this->normalizeText($data['businessName'] ?? ($data['business_name'] ?? null), 180),
+            'profile' => $this->normalizeManagedProfile($data, $existingProfile),
+        ];
+    }
+
     public function index() {
         Auth::requireAdmin();
         try {
@@ -24,6 +116,65 @@ class UserController {
             Response::json($users);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 500, 'USERS_LIST_FAILED');
+        }
+    }
+
+    public function store() {
+        $admin = Auth::requireAdmin();
+        $data = json_decode(file_get_contents('php://input'), true);
+
+        if (!is_array($data)) {
+            Response::error('Carga inválida', 400, 'USER_PAYLOAD_INVALID');
+            return;
+        }
+
+        $payload = $this->validateManagedPayload($data, true);
+
+        if ($this->userRepository->emailExists($payload['email'])) {
+            Response::error('Ya existe un usuario con ese correo', 409, 'USER_EMAIL_EXISTS');
+            return;
+        }
+
+        try {
+            $created = $this->userRepository->createManaged($payload);
+            Response::json($created, 201, null, sprintf('Usuario creado correctamente por %s.', $admin['name'] ?? 'administrador'));
+        } catch (\Exception $e) {
+            Response::error($e->getMessage(), 500, 'USER_CREATE_FAILED');
+        }
+    }
+
+    public function update($id) {
+        $admin = Auth::requireAdmin();
+        $data = json_decode(file_get_contents('php://input'), true);
+
+        if (!is_array($data)) {
+            Response::error('Carga inválida', 400, 'USER_PAYLOAD_INVALID');
+            return;
+        }
+
+        $existingUser = $this->userRepository->getAdminUserById($id);
+        if (!$existingUser) {
+            Response::error('Usuario no encontrado', 404, 'USER_NOT_FOUND');
+            return;
+        }
+
+        $payload = $this->validateManagedPayload($data, false, $existingUser);
+
+        if (($admin['sub'] ?? null) === $id && $payload['role'] !== 'admin') {
+            Response::error('No puedes quitarte tu propio rol de administrador desde aquí', 400, 'USER_SELF_ROLE_CHANGE_FORBIDDEN');
+            return;
+        }
+
+        if ($this->userRepository->emailExists($payload['email'], $id)) {
+            Response::error('Ya existe otro usuario con ese correo', 409, 'USER_EMAIL_EXISTS');
+            return;
+        }
+
+        try {
+            $updated = $this->userRepository->updateManaged($id, $payload);
+            Response::json($updated, 200, null, 'Usuario actualizado correctamente.');
+        } catch (\Exception $e) {
+            Response::error($e->getMessage(), 500, 'USER_UPDATE_FAILED');
         }
     }
 
