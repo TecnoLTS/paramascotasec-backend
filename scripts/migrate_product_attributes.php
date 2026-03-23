@@ -17,7 +17,7 @@ $rows = $stmt->fetchAll();
 
 $mapProductType = function ($category) {
     $cat = strtolower(trim((string)$category));
-    if (in_array($cat, ['comida', 'alimentos', 'alimento', 'food'])) return 'comida';
+    if (in_array($cat, ['Alimento', 'alimentos', 'alimento', 'food'])) return 'Alimento';
     if (in_array($cat, ['ropa', 'vestimenta', 'moda'])) return 'ropa';
     if (in_array($cat, ['accesorios', 'juguetes', 'higiene', 'salud'])) return 'accesorios';
     return 'accesorios';

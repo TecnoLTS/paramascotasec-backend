@@ -37,8 +37,8 @@ function usesFoodPricing(array $row): bool
     $productType = strtolower(trim((string)($row['product_type'] ?? '')));
     $category = strtolower(trim((string)($row['category'] ?? '')));
 
-    return $productType === 'comida'
-        || str_contains($category, 'comida')
+    return $productType === 'Alimento'
+        || str_contains($category, 'Alimento')
         || str_contains($category, 'alimento')
         || str_contains($category, 'snack')
         || str_contains($category, 'premio');

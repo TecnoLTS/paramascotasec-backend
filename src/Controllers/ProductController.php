@@ -234,7 +234,7 @@ class ProductController {
             $this->normalizeAudienceFields($data, null);
             $productType = ProductAudience::normalizeProductType((string)($data['productType'] ?? $data['product_type'] ?? ''), (string)($data['category'] ?? ''));
             $attributes = $data['attributes'] ?? [];
-            $allowedTypes = ['comida', 'ropa', 'cuidado', 'accesorios'];
+            $allowedTypes = ['Alimento', 'ropa', 'cuidado', 'accesorios'];
             if (!$productType) {
                 Response::error('Tipo de producto requerido', 400, 'PRODUCT_TYPE_REQUIRED');
                 return;
@@ -268,7 +268,7 @@ class ProductController {
                 Response::error('Descripción requerida', 400, 'PRODUCT_DESCRIPTION_REQUIRED');
                 return;
             }
-            $required = ['sku', 'tag', 'species'];
+            $required = ['sku', 'species'];
             foreach ($required as $key) {
                 if (!isset($attributes[$key]) || trim((string)$attributes[$key]) === '') {
                     Response::error('Atributos obligatorios incompletos', 400, 'PRODUCT_ATTRIBUTES_REQUIRED', ['field' => $key]);
@@ -276,8 +276,8 @@ class ProductController {
                 }
             }
             $expirationDateRaw = trim((string)($attributes['expirationDate'] ?? $attributes['expiryDate'] ?? ''));
-            if ($productType === 'comida' && $quantity > 0 && $expirationDateRaw === '') {
-                Response::error('La fecha de vencimiento es obligatoria para productos de comida.', 400, 'PRODUCT_EXPIRY_DATE_REQUIRED');
+            if ($productType === 'Alimento' && $quantity > 0 && $expirationDateRaw === '') {
+                Response::error('La fecha de vencimiento es obligatoria para productos de Alimento.', 400, 'PRODUCT_EXPIRY_DATE_REQUIRED');
                 return;
             }
             if ($expirationDateRaw !== '') {
@@ -330,7 +330,7 @@ class ProductController {
                 )
                 : null;
             if ($productType !== null) {
-                $allowedTypes = ['comida', 'ropa', 'cuidado', 'accesorios'];
+                $allowedTypes = ['Alimento', 'ropa', 'cuidado', 'accesorios'];
                 if ($productType === '') {
                     Response::error('Tipo de producto requerido', 400, 'PRODUCT_TYPE_REQUIRED');
                     return;
@@ -371,7 +371,7 @@ class ProductController {
                 if (!is_array($attributes)) {
                     $attributes = [];
                 }
-                $required = ['sku', 'tag', 'species'];
+                $required = ['sku', 'species'];
                 foreach ($required as $key) {
                     if (!isset($attributes[$key]) || trim((string)$attributes[$key]) === '') {
                         Response::error('Atributos obligatorios incompletos', 400, 'PRODUCT_ATTRIBUTES_REQUIRED', ['field' => $key]);
@@ -386,8 +386,8 @@ class ProductController {
                     ? intval($data['quantity'])
                     : intval($currentProduct['quantity'] ?? 0);
                 $expirationDateRaw = trim((string)($attributes['expirationDate'] ?? $attributes['expiryDate'] ?? ''));
-                if ($effectiveType === 'comida' && $effectiveQuantity > 0 && $expirationDateRaw === '') {
-                    Response::error('La fecha de vencimiento es obligatoria para productos de comida.', 400, 'PRODUCT_EXPIRY_DATE_REQUIRED');
+                if ($effectiveType === 'Alimento' && $effectiveQuantity > 0 && $expirationDateRaw === '') {
+                    Response::error('La fecha de vencimiento es obligatoria para productos de Alimento.', 400, 'PRODUCT_EXPIRY_DATE_REQUIRED');
                     return;
                 }
                 if ($expirationDateRaw !== '') {

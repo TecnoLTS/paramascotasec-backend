@@ -16,18 +16,18 @@ function mapProductType(string $category, ?string $current = null): string {
     $normalized = strtolower(trim($category));
 
     if (
-        str_contains($normalized, 'comida')
+        str_contains($normalized, 'Alimento')
         || str_contains($normalized, 'alimento')
         || str_contains($normalized, 'snack')
         || str_contains($normalized, 'premio')
     ) {
-        return 'comida';
+        return 'Alimento';
     }
     if (str_contains($normalized, 'ropa') || str_contains($normalized, 'vestimenta')) {
         return 'ropa';
     }
     $currentType = strtolower(trim((string)$current));
-    if (in_array($currentType, ['comida', 'ropa', 'accesorios'], true)) {
+    if (in_array($currentType, ['Alimento', 'ropa', 'accesorios'], true)) {
         return $currentType;
     }
     return 'accesorios';
@@ -123,14 +123,14 @@ foreach ($products as $row) {
         $costUpdated++;
     }
 
-    $reorderPointDefault = $productType === 'comida' ? 15 : (6 + ($seed % 5));
-    $overstockThresholdDefault = $productType === 'comida' ? (90 + (($seed % 4) * 25)) : (70 + (($seed % 6) * 20));
+    $reorderPointDefault = $productType === 'Alimento' ? 15 : (6 + ($seed % 5));
+    $overstockThresholdDefault = $productType === 'Alimento' ? (90 + (($seed % 4) * 25)) : (70 + (($seed % 6) * 20));
     $stockMaxDefault = $overstockThresholdDefault + max(20, (int)round($overstockThresholdDefault * 0.25));
 
     $reorderPoint = normalizePositiveInt($attributes['reorderPoint'] ?? null, $reorderPointDefault, 1, 5000);
     $overstockThreshold = normalizePositiveInt($attributes['overstockThreshold'] ?? null, $overstockThresholdDefault, $reorderPoint + 1, 10000);
     $stockMax = normalizePositiveInt($attributes['stockMax'] ?? null, $stockMaxDefault, $overstockThreshold, 15000);
-    if ($productType === 'comida') {
+    if ($productType === 'Alimento') {
         $reorderPoint = max(12, $reorderPoint);
         $overstockThreshold = max(90, $overstockThreshold);
         $stockMax = max($stockMax, $overstockThreshold + 20);
@@ -147,7 +147,7 @@ foreach ($products as $row) {
     $finalQuantity = $currentQuantity;
     $finalSold = normalizePositiveInt($row['sold'] ?? null, 0, 0, 1000000);
 
-    if ($productType === 'comida') {
+    if ($productType === 'Alimento') {
         $foodWithExpiry++;
         $bucket = $seed % 4;
         if ($bucket === 0) {
@@ -198,6 +198,6 @@ foreach ($products as $row) {
 echo "Tenant: {$tenantId}\n";
 echo "Productos actualizados: {$updated}\n";
 echo "Productos con costo normalizado: {$costUpdated}\n";
-echo "Productos comida con vencimiento: {$foodWithExpiry}\n";
-echo "Comida vencida con stock (demo): {$expiredWithStock}\n";
-echo "Comida por vencer con stock (demo): {$expiringWithStock}\n";
+echo "Productos Alimento con vencimiento: {$foodWithExpiry}\n";
+echo "Alimento vencida con stock (demo): {$expiredWithStock}\n";
+echo "Alimento por vencer con stock (demo): {$expiringWithStock}\n";

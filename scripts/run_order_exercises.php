@@ -37,7 +37,7 @@ $requiredProductNames = [
     'Pelota para Perro 3',
     'Juguete Ratón para Gato',
     'Alimento Premium Royal Canin',
-    'Comida Natural Milo Kitchen',
+    'Alimento Natural Milo Kitchen',
     'Correa para Perro',
     'Arnés Ajustable para Perro',
     'Cama Acogedora para Perro',
@@ -189,7 +189,7 @@ $scenarios = [
         'created_at' => '2026-02-15 09:15:00',
         'items' => [
             ['name' => 'Alimento Premium Royal Canin', 'qty' => 2],
-            ['name' => 'Comida Natural Milo Kitchen', 'qty' => 1],
+            ['name' => 'Alimento Natural Milo Kitchen', 'qty' => 1],
         ],
     ],
     [

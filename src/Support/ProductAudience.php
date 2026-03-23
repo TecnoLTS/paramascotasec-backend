@@ -30,7 +30,7 @@ final class ProductAudience
 
         $category = self::normalizeCategoryToken((string)$fallbackCategory);
         return match ($category) {
-            'comida' => 'comida',
+            'Alimento' => 'Alimento',
             'ropa' => 'ropa',
             'salud' => 'cuidado',
             'accesorios' => 'accesorios',
@@ -41,7 +41,7 @@ final class ProductAudience
     public static function categoryForProductType(?string $productType): string
     {
         return match (self::normalizeProductType($productType)) {
-            'comida' => 'comida',
+            'Alimento' => 'Alimento',
             'ropa' => 'ropa',
             'cuidado' => 'salud',
             'accesorios' => 'accesorios',
@@ -147,8 +147,8 @@ final class ProductAudience
             return 'salud';
         }
 
-        if (self::tokenContainsAny($token, ['comida', 'alimento', 'snack', 'golosina', 'croqueta', 'pienso', 'lata'])) {
-            return 'comida';
+        if (self::tokenContainsAny($token, ['Alimento', 'alimento', 'snack', 'golosina', 'croqueta', 'pienso', 'lata'])) {
+            return 'Alimento';
         }
 
         if (self::tokenContainsAny($token, ['accesorio', 'accesorios', 'juguete', 'juguetes', 'cama', 'camas', 'comedero', 'comederos', 'plato', 'platos', 'correa', 'correas', 'collar', 'collares', 'arnes', 'arneses', 'transportadora', 'transportadoras', 'bolsa', 'bolsas'])) {
@@ -173,8 +173,8 @@ final class ProductAudience
             return 'cuidado';
         }
 
-        if (self::tokenContainsAny($token, ['comida', 'alimento', 'snack', 'golosina', 'croqueta', 'pienso', 'lata'])) {
-            return 'comida';
+        if (self::tokenContainsAny($token, ['Alimento', 'alimento', 'snack', 'golosina', 'croqueta', 'pienso', 'lata'])) {
+            return 'Alimento';
         }
 
         if (self::tokenContainsAny($token, ['accesorio', 'accesorios', 'juguete', 'juguetes', 'cama', 'camas', 'comedero', 'comederos', 'plato', 'platos', 'correa', 'correas', 'collar', 'collares', 'arnes', 'arneses', 'transportadora', 'transportadoras', 'bolsa', 'bolsas'])) {

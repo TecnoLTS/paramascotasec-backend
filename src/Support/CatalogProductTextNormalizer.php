@@ -348,7 +348,7 @@ final class CatalogProductTextNormalizer
         if (str_starts_with($target, 'snacks') || preg_match('/\b(galletas|palitos|banditas|bocaditos|minihuesos|huesos|rejos|dreambones|smartbones|delibites|cat chup)\b/i', $full)) {
             return 'snack';
         }
-        if ($category === 'comida para perros' || $category === 'comida para gatos' || $productType === 'comida' || preg_match('/\b(kg|lb)\b/i', $size)) {
+        if ($category === 'Alimento para perros' || $category === 'Alimento para gatos' || $productType === 'Alimento' || preg_match('/\b(kg|lb)\b/i', $size)) {
             return 'dry-food';
         }
 
@@ -647,8 +647,8 @@ final class CatalogProductTextNormalizer
     private static function buildGenericSentence(string $brand, string $name, string $category, string $gender): string
     {
         $subject = match ($category) {
-            'comida para perros' => 'Producto para perros',
-            'comida para gatos' => 'Producto para gatos',
+            'Alimento para perros' => 'Producto para perros',
+            'Alimento para gatos' => 'Producto para gatos',
             'cuidado' => 'Producto de cuidado para mascotas',
             default => 'Producto para mascotas',
         };
