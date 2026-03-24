@@ -375,6 +375,11 @@ class ProductController {
                     return;
                 }
             }
+            $normalizedSku = strtoupper(trim((string)($attributes['sku'] ?? '')));
+            if ($normalizedSku !== '' && $this->productRepository->skuExists($normalizedSku)) {
+                Response::error('Ya existe un producto con ese SKU', 400, 'PRODUCT_SKU_DUPLICATE');
+                return;
+            }
             $expirationDateRaw = trim((string)($attributes['expirationDate'] ?? $attributes['expiryDate'] ?? ''));
             if ($productType === 'Alimento' && $quantity > 0 && $expirationDateRaw === '') {
                 Response::error('La fecha de vencimiento es obligatoria para productos de Alimento.', 400, 'PRODUCT_EXPIRY_DATE_REQUIRED');
@@ -478,6 +483,12 @@ class ProductController {
                         Response::error('Atributos obligatorios incompletos', 400, 'PRODUCT_ATTRIBUTES_REQUIRED', ['field' => $key]);
                         return;
                     }
+                }
+                $currentProductId = (string)($currentProduct['id'] ?? '');
+                $normalizedSku = strtoupper(trim((string)($attributes['sku'] ?? '')));
+                if ($normalizedSku !== '' && $this->productRepository->skuExists($normalizedSku, $currentProductId)) {
+                    Response::error('Ya existe un producto con ese SKU', 400, 'PRODUCT_SKU_DUPLICATE');
+                    return;
                 }
                 $effectiveType = $productType ?? ProductAudience::normalizeProductType(
                     (string)($currentProduct['productType'] ?? ''),

@@ -194,6 +194,36 @@ class ProductRepository {
         return $formatted;
     }
 
+    public function skuExists(string $sku, ?string $excludeProductId = null): bool {
+        $normalizedSku = strtoupper(trim($sku));
+        if ($normalizedSku === '') {
+            return false;
+        }
+
+        $sql = '
+            SELECT 1
+            FROM "Product"
+            WHERE tenant_id = :tenant_id
+              AND UPPER(COALESCE(attributes->>\'sku\', \'\')) = :sku
+        ';
+
+        $params = [
+            'tenant_id' => $this->getTenantId(),
+            'sku' => $normalizedSku,
+        ];
+
+        if ($excludeProductId !== null && trim($excludeProductId) !== '') {
+            $sql .= ' AND id <> :exclude_id';
+            $params['exclude_id'] = $excludeProductId;
+        }
+
+        $sql .= ' LIMIT 1';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        return (bool)$stmt->fetchColumn();
+    }
+
     private function formatRow($row) {
         $row['images'] = json_decode($row['images'] ?? '[]', true);
         $row['thumbImage'] = json_decode($row['thumbs'] ?? '[]', true);
