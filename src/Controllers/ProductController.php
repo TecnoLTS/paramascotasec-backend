@@ -560,8 +560,13 @@ class ProductController {
     public function destroy($id) {
         Auth::requireAdmin();
         try {
-            $this->productRepository->delete($id);
-            Response::json(['deleted' => true], 200, null, 'Producto eliminado');
+            $result = $this->productRepository->delete($id);
+            if (!$result) {
+                Response::error('Producto no encontrado', 404, 'PRODUCT_NOT_FOUND');
+                return;
+            }
+
+            Response::json($result, 200, null, 'Producto retirado correctamente');
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 500, 'PRODUCT_DELETE_FAILED');
         }

@@ -159,15 +159,25 @@ class ProductRepository {
         ' . $procurementJoin;
     }
 
+    private function getArchivedFilter(bool $includeArchived = false): string {
+        if ($includeArchived) {
+            return '';
+        }
+
+        return " AND COALESCE(p.attributes->>'archived', 'false') <> 'true'";
+    }
+
     public function getAll(array $options = []) {
         $includeUnpublished = (bool)($options['includeUnpublished'] ?? false);
         $includeProcurement = (bool)($options['includeProcurement'] ?? false);
+        $includeArchived = (bool)($options['includeArchived'] ?? false);
         $includeOutOfStock = array_key_exists('includeOutOfStock', $options)
             ? (bool)$options['includeOutOfStock']
             : $includeUnpublished;
         $visibilityFilter = $includeUnpublished ? '' : ' AND COALESCE(p.is_published, true) = true';
         $stockFilter = $includeOutOfStock ? '' : ' AND COALESCE(p.quantity, 0) > 0';
-        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id' . $visibilityFilter . $stockFilter . ' ORDER BY p.created_at DESC';
+        $archivedFilter = $this->getArchivedFilter($includeArchived);
+        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id' . $visibilityFilter . $stockFilter . $archivedFilter . ' ORDER BY p.created_at DESC';
         $stmt = $this->db->prepare($sql);
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $rows = $stmt->fetchAll();
@@ -178,12 +188,14 @@ class ProductRepository {
         $includeUnpublished = (bool)($options['includeUnpublished'] ?? false);
         $includeProcurement = (bool)($options['includeProcurement'] ?? false);
         $includeProcurementDetail = (bool)($options['includeProcurementDetail'] ?? false);
+        $includeArchived = (bool)($options['includeArchived'] ?? false);
         $includeOutOfStock = array_key_exists('includeOutOfStock', $options)
             ? (bool)$options['includeOutOfStock']
             : $includeUnpublished;
         $visibilityFilter = $includeUnpublished ? '' : ' AND COALESCE(p.is_published, true) = true';
         $stockFilter = $includeOutOfStock ? '' : ' AND COALESCE(p.quantity, 0) > 0';
-        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id AND (p.id = :id OR p.legacy_id = :id OR p.slug = :id)' . $visibilityFilter . $stockFilter . ' LIMIT 1';
+        $archivedFilter = $this->getArchivedFilter($includeArchived);
+        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id AND (p.id = :id OR p.legacy_id = :id OR p.slug = :id)' . $visibilityFilter . $stockFilter . $archivedFilter . ' LIMIT 1';
         $stmt = $this->db->prepare($sql);
         $stmt->execute([
             'id' => $idOrLegacyOrSlug,
@@ -1383,7 +1395,56 @@ class ProductRepository {
     }
 
     public function delete($id) {
-        // Delete related images and variations first (if cascading isn't set up, but let's assume simple delete for now)
-         $stmt = $this->db->prepare('DELETE FROM "Product" WHERE (id = :id OR legacy_id = :id) AND tenant_id = :tenant_id');
-         $stmt->execute(['id' => $id, 'tenant_id' => $this->getTenantId()]);
+        $tenantId = $this->getTenantId();
+        $selectStmt = $this->db->prepare('
+            SELECT id, legacy_id, name, attributes
+            FROM "Product"
+            WHERE (id = :id OR legacy_id = :id)
+              AND tenant_id = :tenant_id
+            LIMIT 1
+        ');
+        $selectStmt->execute([
+            'id' => $id,
+            'tenant_id' => $tenantId,
+        ]);
+        $current = $selectStmt->fetch();
+
+        if (!$current) {
+            return null;
+        }
+
+        $attributes = json_decode($current['attributes'] ?? '{}', true);
+        if (!is_array($attributes)) {
+            $attributes = [];
+        }
+
+        $attributes['archived'] = 'true';
+        $attributes['archivedAt'] = gmdate('c');
+        $attributes['archivedProductId'] = (string)($current['id'] ?? '');
+        $attributes['archivedLegacyId'] = (string)($current['legacy_id'] ?? '');
+        if (!isset($attributes['archivedName']) || trim((string)$attributes['archivedName']) === '') {
+            $attributes['archivedName'] = trim((string)($current['name'] ?? ''));
+        }
+
+        $updateStmt = $this->db->prepare('
+            UPDATE "Product"
+            SET is_published = false,
+                quantity = 0,
+                updated_at = NOW(),
+                attributes = :attributes::jsonb
+            WHERE id = :product_id
+              AND tenant_id = :tenant_id
+        ');
+
+        $updateStmt->execute([
+            'attributes' => json_encode($attributes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'product_id' => $current['id'],
+            'tenant_id' => $tenantId,
+        ]);
+
+        return [
+            'id' => $current['id'],
+            'archived' => true,
+            'deleted' => true,
+        ];
     }}

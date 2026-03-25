@@ -182,6 +182,16 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
             value text NOT NULL,
             tenant_id text
         )',
+        'CREATE TABLE IF NOT EXISTS "ProductReferenceCatalog" (
+            id text PRIMARY KEY,
+            tenant_id text NOT NULL,
+            catalog_key text NOT NULL,
+            label text NOT NULL,
+            payload jsonb DEFAULT \'{}\'::jsonb,
+            sort_order integer DEFAULT 0 NOT NULL,
+            created_at timestamp without time zone DEFAULT NOW() NOT NULL,
+            updated_at timestamp without time zone DEFAULT NOW() NOT NULL
+        )',
         'CREATE TABLE IF NOT EXISTS "DiscountCode" (
             id text PRIMARY KEY,
             tenant_id text NOT NULL,
@@ -213,6 +223,18 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
             amount numeric(12,2),
             payload jsonb,
             user_id text,
+            created_at timestamp without time zone DEFAULT NOW() NOT NULL
+        )',
+        'CREATE TABLE IF NOT EXISTS "AuthSecurityEvent" (
+            id text PRIMARY KEY,
+            tenant_id text NOT NULL,
+            user_id text,
+            email text,
+            event_type text NOT NULL,
+            status text DEFAULT \'info\' NOT NULL,
+            ip_address text,
+            user_agent text,
+            metadata jsonb DEFAULT \'{}\'::jsonb,
             created_at timestamp without time zone DEFAULT NOW() NOT NULL
         )',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS addresses jsonb',
@@ -348,12 +370,18 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'CREATE INDEX IF NOT EXISTS "Image_product_id_idx" ON "Image" (product_id)',
         'CREATE INDEX IF NOT EXISTS "Variation_product_id_idx" ON "Variation" (product_id)',
         'CREATE INDEX IF NOT EXISTS "Setting_tenant_id_idx" ON "Setting" (tenant_id)',
+        'CREATE INDEX IF NOT EXISTS "ProductReferenceCatalog_tenant_id_idx" ON "ProductReferenceCatalog" (tenant_id)',
+        'CREATE INDEX IF NOT EXISTS "ProductReferenceCatalog_tenant_catalog_idx" ON "ProductReferenceCatalog" (tenant_id, catalog_key, sort_order)',
         'CREATE UNIQUE INDEX IF NOT EXISTS "DiscountCode_tenant_code_uidx" ON "DiscountCode" (tenant_id, code)',
         'CREATE INDEX IF NOT EXISTS "DiscountCode_tenant_active_idx" ON "DiscountCode" (tenant_id, is_active)',
         'CREATE INDEX IF NOT EXISTS "DiscountCode_tenant_window_idx" ON "DiscountCode" (tenant_id, starts_at, ends_at)',
         'CREATE INDEX IF NOT EXISTS "DiscountAudit_tenant_created_idx" ON "DiscountAudit" (tenant_id, created_at DESC)',
         'CREATE INDEX IF NOT EXISTS "DiscountAudit_tenant_code_idx" ON "DiscountAudit" (tenant_id, code)',
         'CREATE INDEX IF NOT EXISTS "DiscountAudit_tenant_order_idx" ON "DiscountAudit" (tenant_id, order_id)',
+        'CREATE INDEX IF NOT EXISTS "AuthSecurityEvent_tenant_created_idx" ON "AuthSecurityEvent" (tenant_id, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "AuthSecurityEvent_tenant_event_idx" ON "AuthSecurityEvent" (tenant_id, event_type, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "AuthSecurityEvent_tenant_user_idx" ON "AuthSecurityEvent" (tenant_id, user_id, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "AuthSecurityEvent_tenant_email_idx" ON "AuthSecurityEvent" (tenant_id, email, created_at DESC)',
     ];
 
     foreach ($statements as $sql) {
@@ -423,6 +451,98 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'prefix' => $defaultTenant . ':',
         'pattern' => '%:%',
     ]);
+
+    $catalogCountStmt = $pdo->prepare('SELECT COUNT(*) FROM "ProductReferenceCatalog" WHERE tenant_id = :tenant_id');
+    $catalogCountStmt->execute(['tenant_id' => $defaultTenant]);
+    $catalogCount = (int)$catalogCountStmt->fetchColumn();
+
+    if ($catalogCount === 0) {
+        $legacySettingStmt = $pdo->prepare('SELECT value FROM "Setting" WHERE key = :key LIMIT 1');
+        $legacySettingStmt->execute(['key' => $defaultTenant . ':product_reference_data']);
+        $legacyRaw = $legacySettingStmt->fetchColumn();
+
+        if (is_string($legacyRaw) && trim($legacyRaw) !== '') {
+            $decoded = json_decode($legacyRaw, true);
+            if (is_array($decoded)) {
+                $insertCatalogStmt = $pdo->prepare('
+                    INSERT INTO "ProductReferenceCatalog" (
+                        id,
+                        tenant_id,
+                        catalog_key,
+                        label,
+                        payload,
+                        sort_order,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        :id,
+                        :tenant_id,
+                        :catalog_key,
+                        :label,
+                        :payload::jsonb,
+                        :sort_order,
+                        NOW(),
+                        NOW()
+                    )
+                ');
+
+                foreach ($decoded as $catalogKey => $values) {
+                    if (!is_array($values)) {
+                        continue;
+                    }
+
+                    foreach (array_values($values) as $index => $value) {
+                        if ($catalogKey === 'suppliers' && is_array($value)) {
+                            $name = trim((string)($value['name'] ?? ''));
+                            if ($name === '') {
+                                continue;
+                            }
+
+                            $supplierId = trim((string)($value['id'] ?? ''));
+                            if ($supplierId === '') {
+                                $supplierId = 'prc_' . substr(hash('sha256', $defaultTenant . '|suppliers|' . $name . '|' . ($index + 1)), 0, 28);
+                            }
+
+                            $payload = [
+                                'id' => $supplierId,
+                                'name' => $name,
+                                'document' => trim((string)($value['document'] ?? '')),
+                                'email' => trim((string)($value['email'] ?? '')),
+                                'phone' => trim((string)($value['phone'] ?? '')),
+                                'contactName' => trim((string)($value['contactName'] ?? '')),
+                                'address' => trim((string)($value['address'] ?? '')),
+                                'notes' => trim((string)($value['notes'] ?? '')),
+                            ];
+
+                            $insertCatalogStmt->execute([
+                                'id' => $supplierId,
+                                'tenant_id' => $defaultTenant,
+                                'catalog_key' => 'suppliers',
+                                'label' => $name,
+                                'payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                                'sort_order' => $index,
+                            ]);
+                            continue;
+                        }
+
+                        $label = trim((string)$value);
+                        if ($label === '') {
+                            continue;
+                        }
+
+                        $insertCatalogStmt->execute([
+                            'id' => 'prc_' . substr(hash('sha256', $defaultTenant . '|' . $catalogKey . '|' . $label . '|' . ($index + 1)), 0, 28),
+                            'tenant_id' => $defaultTenant,
+                            'catalog_key' => (string)$catalogKey,
+                            'label' => $label,
+                            'payload' => json_encode(['label' => $label], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                            'sort_order' => $index,
+                        ]);
+                    }
+                }
+            }
+        }
+    }
 }
 
 $defaultConfig = [

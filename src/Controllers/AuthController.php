@@ -2,6 +2,8 @@
 
 namespace App\Controllers;
 
+use App\Repositories\AuthSecurityRepository;
+use App\Repositories\SettingsRepository;
 use App\Repositories\UserRepository;
 use App\Services\MailService;
 use Firebase\JWT\JWT;
@@ -11,9 +13,13 @@ use App\Core\TenantContext;
 
 class AuthController {
     private $userRepository;
+    private $settingsRepository;
+    private $authSecurityRepository;
 
     public function __construct() {
         $this->userRepository = new UserRepository();
+        $this->settingsRepository = new SettingsRepository();
+        $this->authSecurityRepository = new AuthSecurityRepository();
     }
 
     private function isDevelopment(): bool {
@@ -91,10 +97,40 @@ class AuthController {
         return !$this->isTruthyDbValue($user['email_verified'] ?? false);
     }
 
+    private function adminRecoveryCodeValues(): array {
+        $currentKey = 'security.admin_mfa_recovery_code.current';
+        $previousKey = 'security.admin_mfa_recovery_code.previous';
+
+        $current = trim((string)$this->settingsRepository->get($currentKey));
+        $previous = trim((string)$this->settingsRepository->get($previousKey));
+
+        if ($current === '') {
+            $legacyCurrent = trim((string)($_ENV['ADMIN_MFA_RECOVERY_CODE'] ?? ''));
+            if ($legacyCurrent !== '') {
+                $this->settingsRepository->set($currentKey, $legacyCurrent);
+                $current = $legacyCurrent;
+            }
+        }
+
+        if ($previous === '') {
+            $legacyPrevious = trim((string)($_ENV['ADMIN_MFA_RECOVERY_CODE_PREVIOUS'] ?? ''));
+            if ($legacyPrevious !== '') {
+                $this->settingsRepository->set($previousKey, $legacyPrevious);
+                $previous = $legacyPrevious;
+            }
+        }
+
+        return [
+            'current' => $current,
+            'previous' => $previous,
+        ];
+    }
+
     private function adminRecoveryCodes(): array {
         $codes = [];
-        foreach (['ADMIN_MFA_RECOVERY_CODE', 'ADMIN_MFA_RECOVERY_CODE_PREVIOUS'] as $key) {
-            $rawCode = trim((string)($_ENV[$key] ?? ''));
+        $values = $this->adminRecoveryCodeValues();
+
+        foreach ([$values['current'] ?? '', $values['previous'] ?? ''] as $rawCode) {
             if ($rawCode === '') {
                 continue;
             }
@@ -214,6 +250,37 @@ class AuthController {
         $this->userRepository->setLoginFailureState($user['id'], $nextAttempts, $lockedUntil);
     }
 
+    private function getClientIp(): ?string {
+        if (function_exists('get_client_ip')) {
+            $ip = trim((string)\get_client_ip());
+            return $ip !== '' ? $ip : null;
+        }
+
+        $ip = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+        return $ip !== '' ? $ip : null;
+    }
+
+    private function getUserAgent(): ?string {
+        $userAgent = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+        return $userAgent !== '' ? $userAgent : null;
+    }
+
+    private function recordAuthEvent(?array $user, string $eventType, string $status = 'info', array $metadata = []): void {
+        try {
+            $this->authSecurityRepository->recordEvent(
+                $eventType,
+                $status,
+                $user['id'] ?? null,
+                $user['email'] ?? ($metadata['email'] ?? null),
+                $this->getClientIp(),
+                $this->getUserAgent(),
+                $metadata
+            );
+        } catch (\Throwable $exception) {
+            error_log('[AUTH_SECURITY_EVENT_FAILED] ' . $exception->getMessage());
+        }
+    }
+
     private function serializeUser(array $user): array {
         return [
             'id' => $user['id'],
@@ -256,23 +323,29 @@ class AuthController {
     private function validateAdminMfa(array $user, string $code): bool {
         $attempts = (int)($user['otp_attempts'] ?? 0);
         if ($attempts >= 5) {
+            $this->recordAuthEvent($user, 'admin_mfa_blocked', 'blocked', [
+                'reason' => 'too_many_attempts',
+            ]);
             Response::error('Demasiados intentos de MFA. Solicita un nuevo código.', 429, 'AUTH_MFA_TOO_MANY_ATTEMPTS');
             return false;
         }
 
         $expiresAt = $user['otp_expires_at'] ?? null;
         if (!$expiresAt || strtotime((string)$expiresAt) < time()) {
+            $this->recordAuthEvent($user, 'admin_mfa_expired', 'failure');
             Response::error('El código MFA ha expirado. Inicia sesión otra vez para recibir uno nuevo.', 400, 'AUTH_MFA_EXPIRED');
             return false;
         }
 
         if (($user['otp_code'] ?? '') !== $code) {
             $this->userRepository->incrementOtpAttempts($user['id']);
+            $this->recordAuthEvent($user, 'admin_mfa_invalid', 'failure');
             Response::error('Código MFA incorrecto', 400, 'AUTH_MFA_INVALID');
             return false;
         }
 
         $this->userRepository->markEmailVerifiedByOtp($user['id']);
+        $this->recordAuthEvent($user, 'admin_mfa_verified', 'success');
         return true;
     }
 
@@ -287,6 +360,7 @@ class AuthController {
         $user = $this->userRepository->getByEmail($data['email']);
 
         if ($user && $this->isLoginLocked($user)) {
+            $this->recordAuthEvent($user, 'login_locked', 'blocked');
             Response::error($this->lockoutMessage($user), 429, 'AUTH_LOGIN_LOCKED');
             return;
         }
@@ -294,6 +368,17 @@ class AuthController {
         if (!$user || !password_verify($data['password'], $user['password'])) {
             if ($user) {
                 $this->registerFailedLoginAttempt($user);
+                $refreshedUser = $this->userRepository->getByEmail($data['email']);
+                $locked = $refreshedUser && $this->isLoginLocked($refreshedUser);
+                $this->recordAuthEvent($refreshedUser ?: $user, $locked ? 'login_locked' : 'login_failed', $locked ? 'blocked' : 'failure', [
+                    'failed_login_attempts' => (int)($refreshedUser['failed_login_attempts'] ?? $user['failed_login_attempts'] ?? 0),
+                    'login_locked_until' => $refreshedUser['login_locked_until'] ?? ($user['login_locked_until'] ?? null),
+                ]);
+            } else {
+                $this->recordAuthEvent(null, 'login_failed', 'failure', [
+                    'email' => strtolower(trim((string)$data['email'])),
+                    'reason' => 'user_not_found_or_invalid_password',
+                ]);
             }
             Response::error('Credenciales inválidas', 401, 'AUTH_LOGIN_INVALID');
             return;
@@ -302,6 +387,7 @@ class AuthController {
         $this->userRepository->clearLoginFailures($user['id']);
 
         if (!$this->isTruthyDbValue($user['email_verified'] ?? false)) {
+            $this->recordAuthEvent($user, 'login_unverified_email', 'failure');
             Response::error('Por favor, confirma tu dirección de correo electrónico antes de iniciar sesión', 403, 'AUTH_EMAIL_NOT_VERIFIED');
             return;
         }
@@ -316,6 +402,9 @@ class AuthController {
 
                 $recipient = $this->sendAdminMfaCode($user, $code);
                 if ($recipient) {
+                    $this->recordAuthEvent($user, 'admin_mfa_email_sent', 'success', [
+                        'delivery' => 'email',
+                    ]);
                     Response::json([
                         'mfaRequired' => true,
                         'mfaMethod' => 'email_otp',
@@ -325,6 +414,9 @@ class AuthController {
 
                 if ($this->isAdminRecoveryAllowed() && $this->adminRecoveryCodes() !== []) {
                     error_log('[AUTH_MFA_RECOVERY_FALLBACK] SMTP unavailable, allowing private recovery flow for admin ' . $user['id']);
+                    $this->recordAuthEvent($user, 'admin_mfa_recovery_required', 'warning', [
+                        'reason' => 'smtp_unavailable',
+                    ]);
                     Response::json([
                         'mfaRequired' => true,
                         'mfaMethod' => 'recovery_code',
@@ -332,6 +424,9 @@ class AuthController {
                     return;
                 }
 
+                $this->recordAuthEvent($user, 'admin_mfa_email_failed', 'failure', [
+                    'reason' => 'smtp_send_failed',
+                ]);
                 Response::error('No se pudo enviar el código MFA al correo del administrador', 500, 'AUTH_MFA_SEND_FAILED');
                 return;
             }
@@ -344,6 +439,7 @@ class AuthController {
                 && in_array($this->normalizeRecoveryCode($mfaCode), $acceptedRecoveryCodes, true)
             ) {
                 error_log('[AUTH_MFA_RECOVERY_SUCCESS] Admin recovery code used for ' . $user['id']);
+                $this->recordAuthEvent($user, 'admin_mfa_recovery_success', 'success');
                 if ($userWithOtp) {
                     $user = array_merge($user, $userWithOtp);
                 }
@@ -354,6 +450,7 @@ class AuthController {
             }
         }
 
+        $this->recordAuthEvent($user, 'login_success', 'success');
         $this->issueSession($user);
     }
 
@@ -540,6 +637,9 @@ class AuthController {
 
         $user = $this->userRepository->getByEmail($email);
         if (!$user) {
+            $this->recordAuthEvent(null, 'otp_request_unknown_email', 'info', [
+                'email' => strtolower(trim((string)$email)),
+            ]);
             // Avoid user enumeration.
             Response::json(['sent' => true], 200, null, 'Si el correo existe, se enviará un código de verificación.');
             return;
@@ -550,10 +650,14 @@ class AuthController {
         $this->userRepository->setOtpForEmail($email, $code, $expiresAt);
 
         if (!$this->sendOtpEmail($email, $user['name'] ?? 'Usuario', $code)) {
+            $this->recordAuthEvent($user, 'otp_send_failed', 'failure');
             Response::error('No se pudo enviar el código de verificación', 500, 'AUTH_OTP_SEND_FAILED');
             return;
         }
 
+        $this->recordAuthEvent($user, 'otp_sent', 'success', [
+            'delivery' => 'email',
+        ]);
         Response::json([
             'sent' => true,
             'delivery' => 'email',
@@ -571,29 +675,38 @@ class AuthController {
 
         $user = $this->userRepository->getByEmailWithOtp($email);
         if (!$user) {
+            $this->recordAuthEvent(null, 'otp_verify_unknown_email', 'failure', [
+                'email' => strtolower(trim((string)$email)),
+            ]);
             Response::error('Usuario no encontrado', 404, 'AUTH_OTP_USER_NOT_FOUND');
             return;
         }
 
         $attempts = (int)($user['otp_attempts'] ?? 0);
         if ($attempts >= 5) {
+            $this->recordAuthEvent($user, 'otp_blocked', 'blocked', [
+                'reason' => 'too_many_attempts',
+            ]);
             Response::error('Demasiados intentos. Solicita un nuevo código.', 429, 'AUTH_OTP_TOO_MANY_ATTEMPTS');
             return;
         }
 
         $expiresAt = $user['otp_expires_at'] ?? null;
         if (!$expiresAt || strtotime($expiresAt) < time()) {
+            $this->recordAuthEvent($user, 'otp_expired', 'failure');
             Response::error('El código ha expirado. Solicita uno nuevo.', 400, 'AUTH_OTP_EXPIRED');
             return;
         }
 
         if (($user['otp_code'] ?? '') !== $code) {
             $this->userRepository->incrementOtpAttempts($user['id']);
+            $this->recordAuthEvent($user, 'otp_invalid', 'failure');
             Response::error('Código incorrecto', 400, 'AUTH_OTP_INVALID');
             return;
         }
 
         $this->userRepository->markEmailVerifiedByOtp($user['id']);
+        $this->recordAuthEvent($user, 'otp_verified', 'success');
         Response::json(['verified' => true], 200, null, 'Correo verificado correctamente.');
     }
 

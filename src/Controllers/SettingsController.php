@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Repositories\SettingsRepository;
+use App\Repositories\ProductReferenceCatalogRepository;
 use App\Repositories\UserRepository;
 use App\Core\Response;
 use App\Core\Auth;
@@ -606,12 +607,21 @@ class SettingsController {
         $user = $this->authenticate();
         $this->requireAdmin($user);
         $settings = new SettingsRepository();
+        $catalogRepository = new ProductReferenceCatalogRepository();
 
-        $stored = $settings->getJson('product_reference_data', []);
+        if (!$catalogRepository->hasAnyEntries()) {
+            $stored = $settings->getJson('product_reference_data', []);
+            $normalizedLegacy = $this->normalizeProductReferenceDataPayload($stored);
+            if ($normalizedLegacy !== $this->getDefaultProductReferenceData()) {
+                $catalogRepository->replaceAll($normalizedLegacy);
+            }
+        }
+
+        $stored = $catalogRepository->getAll();
         $normalized = $this->normalizeProductReferenceDataPayload($stored);
 
         if ($stored !== $normalized) {
-            $settings->setJson('product_reference_data', $normalized);
+            $catalogRepository->replaceAll($normalized);
         }
 
         Response::json($normalized);
@@ -623,8 +633,8 @@ class SettingsController {
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $normalized = $this->normalizeProductReferenceDataPayload($data);
-        $settings = new SettingsRepository();
-        $settings->setJson('product_reference_data', $normalized);
+        $catalogRepository = new ProductReferenceCatalogRepository();
+        $catalogRepository->replaceAll($normalized);
 
         Response::json($normalized);
     }

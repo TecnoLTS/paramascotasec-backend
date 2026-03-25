@@ -1,0 +1,191 @@
+<?php
+
+namespace App\Repositories;
+
+use App\Core\Database;
+use App\Core\TenantContext;
+
+class ProductReferenceCatalogRepository {
+    private $db;
+
+    public function __construct() {
+        $this->db = Database::getInstance();
+    }
+
+    private function getTenantId(): string {
+        return TenantContext::id() ?? ($_ENV['DEFAULT_TENANT'] ?? 'paramascotasec');
+    }
+
+    public function hasAnyEntries(): bool {
+        $stmt = $this->db->prepare('
+            SELECT 1
+            FROM "ProductReferenceCatalog"
+            WHERE tenant_id = :tenant_id
+            LIMIT 1
+        ');
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
+        return (bool)$stmt->fetchColumn();
+    }
+
+    public function getAll(): array {
+        $result = [
+            'brands' => [],
+            'suppliers' => [],
+            'sizes' => [],
+            'materials' => [],
+            'colors' => [],
+            'usages' => [],
+            'presentations' => [],
+            'activeIngredients' => [],
+            'storageLocations' => [],
+            'tags' => [],
+            'flavors' => [],
+            'ageRanges' => [],
+        ];
+
+        $stmt = $this->db->prepare('
+            SELECT id, catalog_key, label, payload, sort_order
+            FROM "ProductReferenceCatalog"
+            WHERE tenant_id = :tenant_id
+            ORDER BY catalog_key ASC, sort_order ASC, created_at ASC, id ASC
+        ');
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
+        $rows = $stmt->fetchAll() ?: [];
+
+        foreach ($rows as $row) {
+            $catalogKey = trim((string)($row['catalog_key'] ?? ''));
+            if (!array_key_exists($catalogKey, $result)) {
+                continue;
+            }
+
+            $payload = json_decode((string)($row['payload'] ?? '{}'), true);
+            if (!is_array($payload)) {
+                $payload = [];
+            }
+
+            if ($catalogKey === 'suppliers') {
+                $result['suppliers'][] = [
+                    'id' => trim((string)($payload['id'] ?? $row['id'] ?? '')),
+                    'name' => trim((string)($payload['name'] ?? $row['label'] ?? '')),
+                    'document' => trim((string)($payload['document'] ?? '')),
+                    'email' => trim((string)($payload['email'] ?? '')),
+                    'phone' => trim((string)($payload['phone'] ?? '')),
+                    'contactName' => trim((string)($payload['contactName'] ?? '')),
+                    'address' => trim((string)($payload['address'] ?? '')),
+                    'notes' => trim((string)($payload['notes'] ?? '')),
+                ];
+                continue;
+            }
+
+            $label = trim((string)($row['label'] ?? ($payload['label'] ?? '')));
+            if ($label !== '') {
+                $result[$catalogKey][] = $label;
+            }
+        }
+
+        return $result;
+    }
+
+    public function replaceAll(array $data): array {
+        $tenantId = $this->getTenantId();
+        $startedTransaction = false;
+
+        try {
+            if (!$this->db->inTransaction()) {
+                $this->db->beginTransaction();
+                $startedTransaction = true;
+            }
+
+            $deleteStmt = $this->db->prepare('DELETE FROM "ProductReferenceCatalog" WHERE tenant_id = :tenant_id');
+            $deleteStmt->execute(['tenant_id' => $tenantId]);
+
+            $insertStmt = $this->db->prepare('
+                INSERT INTO "ProductReferenceCatalog" (
+                    id,
+                    tenant_id,
+                    catalog_key,
+                    label,
+                    payload,
+                    sort_order,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    :id,
+                    :tenant_id,
+                    :catalog_key,
+                    :label,
+                    :payload::jsonb,
+                    :sort_order,
+                    NOW(),
+                    NOW()
+                )
+            ');
+
+            foreach ($data as $catalogKey => $values) {
+                if (!is_array($values)) {
+                    continue;
+                }
+
+                foreach (array_values($values) as $index => $value) {
+                    if ($catalogKey === 'suppliers' && is_array($value)) {
+                        $supplierId = trim((string)($value['id'] ?? ''));
+                        $supplierName = trim((string)($value['name'] ?? ''));
+                        if ($supplierName === '') {
+                            continue;
+                        }
+
+                        $payload = [
+                            'id' => $supplierId !== '' ? $supplierId : $this->buildRowId($catalogKey, $supplierName, $index + 1),
+                            'name' => $supplierName,
+                            'document' => trim((string)($value['document'] ?? '')),
+                            'email' => trim((string)($value['email'] ?? '')),
+                            'phone' => trim((string)($value['phone'] ?? '')),
+                            'contactName' => trim((string)($value['contactName'] ?? '')),
+                            'address' => trim((string)($value['address'] ?? '')),
+                            'notes' => trim((string)($value['notes'] ?? '')),
+                        ];
+
+                        $insertStmt->execute([
+                            'id' => $payload['id'],
+                            'tenant_id' => $tenantId,
+                            'catalog_key' => $catalogKey,
+                            'label' => $supplierName,
+                            'payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                            'sort_order' => $index,
+                        ]);
+                        continue;
+                    }
+
+                    $label = trim((string)$value);
+                    if ($label === '') {
+                        continue;
+                    }
+
+                    $insertStmt->execute([
+                        'id' => $this->buildRowId($catalogKey, $label, $index + 1),
+                        'tenant_id' => $tenantId,
+                        'catalog_key' => $catalogKey,
+                        'label' => $label,
+                        'payload' => json_encode(['label' => $label], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                        'sort_order' => $index,
+                    ]);
+                }
+            }
+
+            if ($startedTransaction) {
+                $this->db->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($startedTransaction && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+
+        return $this->getAll();
+    }
+
+    private function buildRowId(string $catalogKey, string $label, int $position): string {
+        return 'prc_' . substr(hash('sha256', $this->getTenantId() . '|' . $catalogKey . '|' . $label . '|' . $position), 0, 28);
+    }
+}
