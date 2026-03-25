@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Repositories\OrderRepository;
 use App\Repositories\SettingsRepository;
+use App\Repositories\UserRepository;
 use App\Core\Response;
 use App\Core\Auth;
 use App\Core\TenantContext;
@@ -13,6 +14,7 @@ use Dompdf\Options;
 
 class OrderController {
     private $orderRepository;
+    private $userRepository;
     private $forbiddenDiscountPayloadKeys = [
         'discount',
         'discounts',
@@ -25,6 +27,7 @@ class OrderController {
 
     public function __construct() {
         $this->orderRepository = new OrderRepository();
+        $this->userRepository = new UserRepository();
     }
 
     private function authenticate() {
@@ -286,6 +289,38 @@ class OrderController {
                 $e->getMessage()
             ));
         }
+    }
+
+    private function resolveCustomerUserId(array $data, array $user): ?string {
+        $role = strtolower(trim((string)($user['role'] ?? 'customer')));
+        $channel = strtolower(trim((string)($data['payment_details']['channel'] ?? '')));
+
+        if ($role === 'admin' && $channel === 'local_pos') {
+            $shippingAddress = $this->decodeAddress($data['shipping_address'] ?? null);
+            $billingAddress = $this->decodeAddress($data['billing_address'] ?? null);
+            $address = !empty($shippingAddress) ? $shippingAddress : $billingAddress;
+
+            $firstName = trim((string)($address['firstName'] ?? ''));
+            $lastName = trim((string)($address['lastName'] ?? ''));
+            $fullName = trim((string)($address['name'] ?? trim($firstName . ' ' . $lastName)));
+
+            $customerUser = $this->userRepository->upsertLocalSaleCustomer([
+                'name' => $fullName !== '' ? $fullName : 'Cliente local',
+                'first_name' => $firstName,
+                'last_name' => $lastName,
+                'email' => $address['email'] ?? null,
+                'phone' => $address['phone'] ?? null,
+                'street' => $address['street'] ?? null,
+                'city' => $address['city'] ?? null,
+                'document_type' => $address['documentType'] ?? null,
+                'document_number' => $address['documentNumber'] ?? null,
+                'business_name' => $address['company'] ?? null,
+            ]);
+
+            return $customerUser['id'] ?? null;
+        }
+
+        return !empty($user['sub']) ? (string)$user['sub'] : null;
     }
 
     private function buildFacturadorPayload(array $order): array {
@@ -604,7 +639,7 @@ class OrderController {
                 Response::error('Debes iniciar sesión para comprar', 403, 'GUEST_PURCHASE_DISABLED');
                 return;
             }
-            $data['user_id'] = $user['sub'];
+            $data['user_id'] = $this->resolveCustomerUserId($data, $user);
 
             // Always generate a server-side order id to avoid collisions/tampering.
             $data['id'] = 'ORD-' . date('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(4)));

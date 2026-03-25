@@ -9,16 +9,39 @@ use Firebase\JWT\Key;
 class Auth {
     private static ?array $payload = null;
 
+    private static function authCookieName(): string {
+        return trim((string)($_ENV['AUTH_COOKIE_NAME'] ?? 'pm_auth')) ?: 'pm_auth';
+    }
+
+    private static function isWeakJwtSecret(string $secretKey): bool {
+        $weakValues = [
+            'default_secret',
+            'super-secret-key-change-this-in-production',
+            'change-me-to-a-long-random-secret',
+        ];
+
+        return strlen($secretKey) < 32 || in_array($secretKey, $weakValues, true);
+    }
+
     private static function getJwtSecretOrFail(): string {
         $secretKey = (string)($_ENV['JWT_SECRET'] ?? '');
-        if ($secretKey === '') {
+        if ($secretKey === '' || self::isWeakJwtSecret($secretKey)) {
             Response::error('Configuración JWT inválida', 500, 'AUTH_CONFIG_INVALID');
             exit;
         }
-        if ($secretKey === 'default_secret') {
-            error_log('[SECURITY] JWT_SECRET is using insecure default value.');
-        }
         return $secretKey;
+    }
+
+    private static function getJwtSecretsForDecodeOrFail(): array {
+        $current = self::getJwtSecretOrFail();
+        $secrets = [$current];
+
+        $previous = trim((string)($_ENV['JWT_SECRET_PREVIOUS'] ?? ''));
+        if ($previous !== '' && !self::isWeakJwtSecret($previous) && !in_array($previous, $secrets, true)) {
+            $secrets[] = $previous;
+        }
+
+        return $secrets;
     }
 
     public static function requireUser(): array {
@@ -33,12 +56,7 @@ class Auth {
     public static function requireAdmin(): array {
         $payload = self::requireUser();
         $sub = $payload['sub'] ?? null;
-        $role = strtolower((string)($payload['role'] ?? 'customer'));
-
-        if ($sub === 'service') {
-            if (in_array($role, ['admin', 'service'], true)) {
-                return $payload;
-            }
+        if (!$sub || !is_string($sub)) {
             Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
             exit;
         }
@@ -64,88 +82,128 @@ class Auth {
         if (self::$payload !== null) {
             return self::$payload;
         }
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? null;
-        if (!$authHeader || !preg_match('/Bearer\\s(\\S+)/', $authHeader, $matches)) {
-            return $required ? null : null;
+        $candidates = self::extractTokenCandidates();
+        if ($candidates === []) {
+            return null;
         }
-        $jwt = $matches[1];
-        $secretKey = self::getJwtSecretOrFail();
-        try {
-            $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
-        } catch (\Exception $e) {
+
+        $secretKeys = self::getJwtSecretsForDecodeOrFail();
+        foreach ($candidates as $jwt) {
+            foreach ($secretKeys as $secretKey) {
+                try {
+                    $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
+                    $payload = (array)$decoded;
+                    self::validateTenantOrThrow($payload);
+                    self::validateActiveTokenOrThrow($payload);
+                    self::$payload = $payload;
+                    return $payload;
+                } catch (\Throwable $e) {
+                    continue;
+                }
+            }
+        }
+
+        if ($required) {
             Response::error('Token inválido', 401, 'AUTH_TOKEN_INVALID');
             exit;
         }
-        $payload = (array) $decoded;
-        self::assertTenant($payload);
-        self::assertActiveToken($payload);
-        self::$payload = $payload;
-        return $payload;
+
+        return null;
     }
 
     public static function validateRequestOrFail(): void {
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? null;
-        if (!$authHeader || !preg_match('/Bearer\\s(\\S+)/', $authHeader, $matches)) {
+        $payload = self::decodeFromRequest(false);
+        if ($payload === null) {
             Response::error('No autorizado', 401, 'AUTH_REQUIRED');
             exit;
         }
-        $jwt = $matches[1];
-        $secretKey = self::getJwtSecretOrFail();
-        try {
-            $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
-        } catch (\Exception $e) {
-            Response::error('Token inválido', 401, 'AUTH_TOKEN_INVALID');
-            exit;
-        }
-        $payload = (array) $decoded;
-        self::assertTenant($payload);
-        self::assertActiveToken($payload);
         self::$payload = $payload;
     }
 
+    private static function extractTokenCandidates(): array {
+        $candidates = [];
+
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? null;
+        if ($authHeader && preg_match('/Bearer\\s(\\S+)/', $authHeader, $matches)) {
+            $token = trim((string)$matches[1]);
+            if ($token !== '') {
+                $candidates[] = $token;
+            }
+        }
+
+        $cookieToken = trim((string)($_COOKIE[self::authCookieName()] ?? ''));
+        if ($cookieToken !== '' && !in_array($cookieToken, $candidates, true)) {
+            $candidates[] = $cookieToken;
+        }
+
+        return $candidates;
+    }
+
     private static function assertTenant(array $payload): void {
+        try {
+            self::validateTenantOrThrow($payload);
+        } catch (\RuntimeException $e) {
+            $code = $e->getMessage();
+            if ($code === 'TENANT_REQUIRED') {
+                Response::error('Tenant requerido', 400, 'TENANT_REQUIRED');
+            } else {
+                Response::error('Tenant inválido', 403, 'TENANT_FORBIDDEN');
+            }
+            exit;
+        }
+    }
+
+    private static function validateTenantOrThrow(array $payload): void {
         $tenantId = TenantContext::id();
         if (!$tenantId) {
-            Response::error('Tenant requerido', 400, 'TENANT_REQUIRED');
-            exit;
+            throw new \RuntimeException('TENANT_REQUIRED');
         }
         $payloadTenant = $payload['tenant_id'] ?? null;
         if (!$payloadTenant || $payloadTenant !== $tenantId) {
-            Response::error('Tenant inválido', 403, 'TENANT_FORBIDDEN');
-            exit;
+            throw new \RuntimeException('TENANT_FORBIDDEN');
         }
     }
 
     private static function assertActiveToken(array &$payload): void {
+        try {
+            self::validateActiveTokenOrThrow($payload);
+        } catch (\RuntimeException $e) {
+            $code = $e->getMessage();
+            if ($code === 'AUTH_TOKEN_REVOKED') {
+                Response::error('Token inválido', 401, 'AUTH_TOKEN_REVOKED');
+            } else {
+                Response::error('Token inválido', 401, 'AUTH_TOKEN_INVALID');
+            }
+            exit;
+        }
+    }
+
+    private static function validateActiveTokenOrThrow(array &$payload): void {
         $sub = $payload['sub'] ?? null;
         $jti = $payload['jti'] ?? null;
         if (!$sub) {
-            Response::error('Token inválido', 401, 'AUTH_TOKEN_INVALID');
-            exit;
+            throw new \RuntimeException('AUTH_TOKEN_INVALID');
         }
 
         if ($sub === 'service') {
-            return;
+            throw new \RuntimeException('AUTH_TOKEN_INVALID');
         }
 
         $repo = new UserRepository();
         $state = $repo->getAuthState($sub);
         if (!$state) {
-            Response::error('Token inválido', 401, 'AUTH_TOKEN_REVOKED');
-            exit;
+            throw new \RuntimeException('AUTH_TOKEN_REVOKED');
         }
 
         $activeTokenId = $state['active_token_id'] ?? null;
         if (!$activeTokenId || !$jti || $activeTokenId !== $jti) {
-            Response::error('Token inválido', 401, 'AUTH_TOKEN_REVOKED');
-            exit;
+            throw new \RuntimeException('AUTH_TOKEN_REVOKED');
         }
 
         $tokenRole = strtolower((string)($payload['role'] ?? 'customer'));
         $dbRole = strtolower((string)($state['role'] ?? 'customer'));
         if ($tokenRole !== $dbRole) {
-            Response::error('Token inválido', 401, 'AUTH_TOKEN_REVOKED');
-            exit;
+            throw new \RuntimeException('AUTH_TOKEN_REVOKED');
         }
 
         $payload['role'] = $dbRole;

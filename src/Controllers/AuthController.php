@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Repositories\UserRepository;
 use App\Services\MailService;
 use Firebase\JWT\JWT;
+use App\Core\Auth;
 use App\Core\Response;
 use App\Core\TenantContext;
 
@@ -26,14 +27,253 @@ class AuthController {
 
     private function getJwtSecretOrFail(): ?string {
         $secretKey = (string)($_ENV['JWT_SECRET'] ?? '');
-        if ($secretKey === '') {
+        $weakValues = [
+            'default_secret',
+            'super-secret-key-change-this-in-production',
+            'change-me-to-a-long-random-secret',
+        ];
+
+        if ($secretKey === '' || strlen($secretKey) < 32 || in_array($secretKey, $weakValues, true)) {
             Response::error('Configuración JWT inválida', 500, 'AUTH_CONFIG_INVALID');
             return null;
         }
-        if ($secretKey === 'default_secret') {
-            error_log('[SECURITY] JWT_SECRET is using insecure default value.');
-        }
         return $secretKey;
+    }
+
+    private function authCookieLifetimeSeconds(): int {
+        $configured = (int)($_ENV['AUTH_COOKIE_TTL_SECONDS'] ?? 10800);
+        return max(900, $configured);
+    }
+
+    private function normalizeRecoveryCode(string $code): string {
+        $normalized = preg_replace('/[^A-Z0-9]/i', '', strtoupper(trim($code)));
+        return is_string($normalized) ? $normalized : '';
+    }
+
+    private function isTruthyDbValue(mixed $value): bool {
+        return in_array($value, [true, 1, '1', 't', 'true', 'TRUE', 'yes', 'on'], true);
+    }
+
+    private function decodeJsonObject(mixed $value): array {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($value, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function isSyntheticLocalPosEmail(?string $email): bool {
+        $normalized = strtolower(trim((string)$email));
+        return $normalized !== '' && str_ends_with($normalized, '@local-pos.invalid');
+    }
+
+    private function canReplaceExistingRegistrationUser(array $user): bool {
+        $role = strtolower(trim((string)($user['role'] ?? 'customer')));
+        if ($role === 'admin' || $role === 'service') {
+            return false;
+        }
+
+        if ($this->isSyntheticLocalPosEmail((string)($user['email'] ?? ''))) {
+            return true;
+        }
+
+        $profile = $this->decodeJsonObject($user['profile'] ?? null);
+        $origin = strtolower(trim((string)($profile['origin'] ?? $profile['source'] ?? '')));
+        if ($origin === 'local_pos') {
+            return true;
+        }
+
+        return !$this->isTruthyDbValue($user['email_verified'] ?? false);
+    }
+
+    private function adminRecoveryCodes(): array {
+        $codes = [];
+        foreach (['ADMIN_MFA_RECOVERY_CODE', 'ADMIN_MFA_RECOVERY_CODE_PREVIOUS'] as $key) {
+            $rawCode = trim((string)($_ENV[$key] ?? ''));
+            if ($rawCode === '') {
+                continue;
+            }
+            $normalized = $this->normalizeRecoveryCode($rawCode);
+            if ($normalized !== '' && !in_array($normalized, $codes, true)) {
+                $codes[] = $normalized;
+            }
+        }
+
+        return $codes;
+    }
+
+    private function adminFallbackEmail(): ?string {
+        $email = trim((string)($_ENV['ADMIN_MFA_FALLBACK_EMAIL'] ?? ''));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return null;
+        }
+        return strtolower($email);
+    }
+
+    private function looksUndeliverableEmail(string $email): bool {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return true;
+        }
+
+        $domain = strtolower((string)substr(strrchr($email, '@') ?: '', 1));
+        return in_array($domain, ['example.com', 'example.org', 'example.net', 'localhost', 'local'], true);
+    }
+
+    private function maskEmail(string $email): string {
+        $email = trim(strtolower($email));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return 'correo de respaldo';
+        }
+
+        [$localPart, $domain] = explode('@', $email, 2);
+        $visibleLocal = strlen($localPart) <= 2 ? substr($localPart, 0, 1) : substr($localPart, 0, 2);
+        $maskedLocal = $visibleLocal . str_repeat('*', max(2, strlen($localPart) - strlen($visibleLocal)));
+        return $maskedLocal . '@' . $domain;
+    }
+
+    private function isAdminRecoveryAllowed(): bool {
+        if (!function_exists('get_client_ip') || !function_exists('client_ip_matches_allowlist')) {
+            return false;
+        }
+
+        $clientIp = \get_client_ip();
+        $mode = trim((string)($_ENV['ADMIN_IP_MODE'] ?? 'off'));
+        $allowlist = trim((string)($_ENV['ADMIN_IP_ALLOWLIST'] ?? ''));
+
+        return \client_ip_matches_allowlist($clientIp, $allowlist, $mode);
+    }
+
+    private function sendAdminMfaCode(array $user, string $code): ?string {
+        $recipients = [];
+        $primaryEmail = strtolower(trim((string)($user['email'] ?? '')));
+        if ($primaryEmail !== '' && !$this->looksUndeliverableEmail($primaryEmail)) {
+            $recipients[] = $primaryEmail;
+        }
+
+        $fallbackEmail = $this->adminFallbackEmail();
+        if ($fallbackEmail && !in_array($fallbackEmail, $recipients, true)) {
+            $recipients[] = $fallbackEmail;
+        }
+
+        foreach ($recipients as $recipient) {
+            if (MailService::send(
+                $recipient,
+                'Tu código MFA de administrador',
+                "Hola " . ($user['name'] ?? 'Administrador') . ",\n\nTu código MFA es: {$code}\n\nExpira en 10 minutos."
+            )) {
+                return $recipient;
+            }
+        }
+
+        return null;
+    }
+
+    private function loginMaxAttempts(): int {
+        $configured = (int)($_ENV['AUTH_LOGIN_MAX_ATTEMPTS'] ?? 5);
+        return max(3, $configured);
+    }
+
+    private function loginLockMinutes(): int {
+        $configured = (int)($_ENV['AUTH_LOGIN_LOCK_MINUTES'] ?? 15);
+        return max(5, $configured);
+    }
+
+    private function isLoginLocked(array $user): bool {
+        $lockedUntil = $user['login_locked_until'] ?? null;
+        return is_string($lockedUntil) && $lockedUntil !== '' && strtotime($lockedUntil) > time();
+    }
+
+    private function lockoutMessage(array $user): string {
+        $lockedUntil = $user['login_locked_until'] ?? null;
+        $formatted = is_string($lockedUntil) && $lockedUntil !== ''
+            ? date('H:i', strtotime($lockedUntil))
+            : null;
+
+        if ($formatted) {
+            return "Cuenta bloqueada temporalmente por intentos fallidos. Intenta otra vez después de las {$formatted}.";
+        }
+
+        return 'Cuenta bloqueada temporalmente por intentos fallidos. Intenta más tarde.';
+    }
+
+    private function registerFailedLoginAttempt(array $user): void {
+        $attempts = (int)($user['failed_login_attempts'] ?? 0);
+        $wasLockExpired = !$this->isLoginLocked($user) && !empty($user['login_locked_until']);
+        $nextAttempts = $wasLockExpired ? 1 : ($attempts + 1);
+        $lockedUntil = null;
+
+        if ($nextAttempts >= $this->loginMaxAttempts()) {
+            $lockedUntil = date('Y-m-d H:i:s', time() + ($this->loginLockMinutes() * 60));
+        }
+
+        $this->userRepository->setLoginFailureState($user['id'], $nextAttempts, $lockedUntil);
+    }
+
+    private function serializeUser(array $user): array {
+        return [
+            'id' => $user['id'],
+            'email' => $user['email'],
+            'name' => $user['name'],
+            'role' => $user['role'] ?? 'customer',
+        ];
+    }
+
+    private function issueSession(array $user): void {
+        $secretKey = $this->getJwtSecretOrFail();
+        if (!$secretKey) {
+            return;
+        }
+        $tokenId = bin2hex(random_bytes(16));
+        $expiresAt = time() + $this->authCookieLifetimeSeconds();
+        $payload = [
+            'iat' => time(),
+            'exp' => $expiresAt,
+            'sub' => $user['id'],
+            'email' => $user['email'],
+            'name' => $user['name'],
+            'role' => $user['role'] ?? 'customer',
+            'tenant_id' => TenantContext::id(),
+            'jti' => $tokenId,
+        ];
+
+        $this->userRepository->markSuccessfulLogin($user['id']);
+        $this->userRepository->setActiveTokenId($user['id'], $tokenId);
+        $jwt = JWT::encode($payload, $secretKey, 'HS256');
+        Response::noStore();
+        Response::setAuthCookie($jwt, $expiresAt);
+        Response::setCsrfCookie(bin2hex(random_bytes(32)), $expiresAt);
+
+        Response::json([
+            'user' => $this->serializeUser($user),
+        ]);
+    }
+
+    private function validateAdminMfa(array $user, string $code): bool {
+        $attempts = (int)($user['otp_attempts'] ?? 0);
+        if ($attempts >= 5) {
+            Response::error('Demasiados intentos de MFA. Solicita un nuevo código.', 429, 'AUTH_MFA_TOO_MANY_ATTEMPTS');
+            return false;
+        }
+
+        $expiresAt = $user['otp_expires_at'] ?? null;
+        if (!$expiresAt || strtotime((string)$expiresAt) < time()) {
+            Response::error('El código MFA ha expirado. Inicia sesión otra vez para recibir uno nuevo.', 400, 'AUTH_MFA_EXPIRED');
+            return false;
+        }
+
+        if (($user['otp_code'] ?? '') !== $code) {
+            $this->userRepository->incrementOtpAttempts($user['id']);
+            Response::error('Código MFA incorrecto', 400, 'AUTH_MFA_INVALID');
+            return false;
+        }
+
+        $this->userRepository->markEmailVerifiedByOtp($user['id']);
+        return true;
     }
 
     public function login() {
@@ -46,44 +286,103 @@ class AuthController {
 
         $user = $this->userRepository->getByEmail($data['email']);
 
+        if ($user && $this->isLoginLocked($user)) {
+            Response::error($this->lockoutMessage($user), 429, 'AUTH_LOGIN_LOCKED');
+            return;
+        }
+
         if (!$user || !password_verify($data['password'], $user['password'])) {
+            if ($user) {
+                $this->registerFailedLoginAttempt($user);
+            }
             Response::error('Credenciales inválidas', 401, 'AUTH_LOGIN_INVALID');
             return;
         }
 
-        if (!$user['email_verified']) {
+        $this->userRepository->clearLoginFailures($user['id']);
+
+        if (!$this->isTruthyDbValue($user['email_verified'] ?? false)) {
             Response::error('Por favor, confirma tu dirección de correo electrónico antes de iniciar sesión', 403, 'AUTH_EMAIL_NOT_VERIFIED');
             return;
         }
 
-        $secretKey = $this->getJwtSecretOrFail();
-        if (!$secretKey) {
+        $role = strtolower((string)($user['role'] ?? 'customer'));
+        if ($role === 'admin') {
+            $mfaCode = trim((string)($data['mfaCode'] ?? $data['mfa_code'] ?? ''));
+            if ($mfaCode === '') {
+                $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+                $expiresAt = date('Y-m-d H:i:s', time() + (10 * 60));
+                $this->userRepository->setOtpForEmail($user['email'], $code, $expiresAt);
+
+                $recipient = $this->sendAdminMfaCode($user, $code);
+                if ($recipient) {
+                    Response::json([
+                        'mfaRequired' => true,
+                        'mfaMethod' => 'email_otp',
+                    ], 202, null, 'Te enviamos un código MFA a ' . $this->maskEmail($recipient) . '.');
+                    return;
+                }
+
+                if ($this->isAdminRecoveryAllowed() && $this->adminRecoveryCodes() !== []) {
+                    error_log('[AUTH_MFA_RECOVERY_FALLBACK] SMTP unavailable, allowing private recovery flow for admin ' . $user['id']);
+                    Response::json([
+                        'mfaRequired' => true,
+                        'mfaMethod' => 'recovery_code',
+                    ], 202, null, 'No se pudo enviar el código por correo. Usa el código de recuperación del administrador desde una red privada/autorizada.');
+                    return;
+                }
+
+                Response::error('No se pudo enviar el código MFA al correo del administrador', 500, 'AUTH_MFA_SEND_FAILED');
+                return;
+            }
+
+            $userWithOtp = $this->userRepository->getByEmailWithOtp($user['email']);
+            $acceptedRecoveryCodes = $this->adminRecoveryCodes();
+            if (
+                $acceptedRecoveryCodes !== []
+                && $this->isAdminRecoveryAllowed()
+                && in_array($this->normalizeRecoveryCode($mfaCode), $acceptedRecoveryCodes, true)
+            ) {
+                error_log('[AUTH_MFA_RECOVERY_SUCCESS] Admin recovery code used for ' . $user['id']);
+                if ($userWithOtp) {
+                    $user = array_merge($user, $userWithOtp);
+                }
+            } elseif (!$userWithOtp || !$this->validateAdminMfa($userWithOtp, $mfaCode)) {
+                return;
+            } else {
+                $user = array_merge($user, $userWithOtp);
+            }
+        }
+
+        $this->issueSession($user);
+    }
+
+    public function session() {
+        $payload = Auth::requireUser();
+        $user = $this->userRepository->getById((string)($payload['sub'] ?? ''));
+        if (!$user) {
+            Response::clearAuthCookie();
+            Response::clearCsrfCookie();
+            Response::error('Sesión inválida', 401, 'AUTH_TOKEN_REVOKED');
             return;
         }
-        $tokenId = bin2hex(random_bytes(16));
-        $payload = [
-            'iat' => time(),
-            'exp' => time() + (60 * 60 * 3), // 3 hours
-            'sub' => $user['id'],
-            'email' => $user['email'],
-            'name' => $user['name'],
-            'role' => $user['role'] ?? 'customer',
-            'tenant_id' => TenantContext::id(),
-            'jti' => $tokenId
-        ];
-
-        $this->userRepository->setActiveTokenId($user['id'], $tokenId);
-        $jwt = JWT::encode($payload, $secretKey, 'HS256');
-
+        Response::noStore();
+        Response::ensureCsrfCookie((int)($payload['exp'] ?? (time() + 10800)));
         Response::json([
-            'token' => $jwt,
-            'user' => [
-                'id' => $user['id'],
-                'email' => $user['email'],
-                'name' => $user['name'],
-                'role' => $user['role'] ?? 'customer'
-            ]
+            'user' => $this->serializeUser($user),
         ]);
+    }
+
+    public function logout() {
+        $payload = Auth::optionalUser();
+        if ($payload && !empty($payload['sub'])) {
+            $this->userRepository->clearActiveTokenId((string)$payload['sub']);
+        }
+        Response::noStore();
+        Response::clearAuthCookie();
+        Response::clearCsrfCookie();
+        header('Clear-Site-Data: "storage"');
+        Response::json(['loggedOut' => true], 200, null, 'Sesión cerrada correctamente.');
     }
 
     public function register() {
@@ -106,20 +405,65 @@ class AuthController {
             return;
         }
 
-        // Check if user already exists
-        if ($this->userRepository->getByEmail($data['email'])) {
-            Response::error('El usuario ya existe', 409, 'AUTH_REGISTER_EXISTS');
-            return;
-        }
-
         try {
             $data['document_type'] = $docType;
             $data['document_number'] = $docNumber;
             $data['business_name'] = $data['businessName'] ?? ($data['business_name'] ?? null);
             $skipVerificationEmail = (bool)($data['skipVerificationEmail'] ?? ($data['skip_verification_email'] ?? false));
-            $result = $this->userRepository->create($data, [
-                'skip_verification_token' => $skipVerificationEmail
-            ]);
+            $sendOtpOnCreate = (bool)($data['sendOtpOnCreate'] ?? ($data['send_otp_on_create'] ?? false));
+            $existingUser = $this->userRepository->getByEmail($data['email']);
+            $existingByDocument = $this->userRepository->getByDocumentNumber($docNumber);
+            $replaceUserId = null;
+
+            if ($existingUser) {
+                if ($this->canReplaceExistingRegistrationUser($existingUser)) {
+                    $replaceUserId = (string)$existingUser['id'];
+                } else {
+                    Response::error('El usuario ya existe', 409, 'AUTH_REGISTER_EXISTS');
+                    return;
+                }
+            }
+
+            if ($existingByDocument && (!$replaceUserId || $replaceUserId !== (string)$existingByDocument['id'])) {
+                if ($this->canReplaceExistingRegistrationUser($existingByDocument)) {
+                    $replaceUserId = (string)$existingByDocument['id'];
+                } else {
+                    Response::error('Ya existe un usuario con ese documento', 409, 'AUTH_REGISTER_DOCUMENT_EXISTS');
+                    return;
+                }
+            }
+
+            $replacedExistingUser = $replaceUserId !== null;
+            if ($replaceUserId) {
+                $result = $this->userRepository->replaceRegistrationData($replaceUserId, $data, [
+                    'skip_verification_token' => $skipVerificationEmail
+                ]);
+            } else {
+                $result = $this->userRepository->create($data, [
+                    'skip_verification_token' => $skipVerificationEmail
+                ]);
+            }
+
+            if ($skipVerificationEmail && $sendOtpOnCreate) {
+                $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+                $expiresAt = date('Y-m-d H:i:s', time() + (10 * 60));
+                $this->userRepository->setOtpForEmail($data['email'], $code, $expiresAt);
+
+                if (!$this->sendOtpEmail($data['email'], $data['name'], $code)) {
+                    if (!$replacedExistingUser) {
+                        $this->userRepository->deleteById($result['id']);
+                    }
+                    Response::error('No se pudo enviar el código de verificación', 500, 'AUTH_OTP_SEND_FAILED');
+                    return;
+                }
+
+                Response::json([
+                    'id' => $result['id'],
+                    'otpSent' => true,
+                ], 201, null, 'Cuenta creada. Te enviamos un código al correo para verificarla.');
+                return;
+            }
+
             if (!$skipVerificationEmail) {
                 if (!$this->sendVerificationEmail($data['email'], $data['name'], $result['token'])) {
                     $this->userRepository->markEmailVerifiedById($result['id']);
@@ -140,7 +484,8 @@ class AuthController {
             }
             Response::json($payload, 201, null, 'Usuario registrado exitosamente. Por favor, revisa tu correo para confirmar tu cuenta.');
         } catch (\Exception $e) {
-            Response::error('No se pudo registrar el usuario: ' . $e->getMessage(), 500, 'AUTH_REGISTER_FAILED');
+            error_log('[AUTH_REGISTER_FAILED] ' . $e->getMessage());
+            Response::error('No se pudo registrar el usuario', 500, 'AUTH_REGISTER_FAILED');
         }
     }
 
@@ -209,7 +554,10 @@ class AuthController {
             return;
         }
 
-        Response::json(['sent' => true], 200, null, 'Código de verificación enviado.');
+        Response::json([
+            'sent' => true,
+            'delivery' => 'email',
+        ], 200, null, 'Código de verificación enviado.');
     }
 
     public function verifyOtp() {

@@ -178,6 +178,23 @@ class UserController {
         }
     }
 
+    public function unlock($id) {
+        Auth::requireAdmin();
+
+        $existingUser = $this->userRepository->getAdminUserById($id);
+        if (!$existingUser) {
+            Response::error('Usuario no encontrado', 404, 'USER_NOT_FOUND');
+            return;
+        }
+
+        try {
+            $updated = $this->userRepository->unlockManagedUser($id);
+            Response::json($updated, 200, null, 'Usuario desbloqueado correctamente.');
+        } catch (\Exception $e) {
+            Response::error($e->getMessage(), 500, 'USER_UNLOCK_FAILED');
+        }
+    }
+
     public function getAddresses() {
         $user = $this->authenticate();
         try {

@@ -100,6 +100,14 @@ class PosRepository {
         ];
     }
 
+    private function sanitizeCustomerEmail(?string $email): ?string {
+        $normalized = trim((string)$email);
+        if ($normalized === '' || str_ends_with(strtolower($normalized), '@local-pos.invalid')) {
+            return null;
+        }
+        return $normalized;
+    }
+
     private function getAddressFromSavedUserAddresses($rawAddresses): array {
         $addresses = $this->decodeJsonField($rawAddresses);
         if (!is_array($addresses) || count($addresses) === 0) {
@@ -655,7 +663,7 @@ class PosRepository {
                     'lastName' => $lastName,
                     'name' => trim($firstName . ' ' . $lastName),
                     'phone' => $phone !== '' ? $phone : null,
-                    'email' => $email !== '' ? $email : null,
+                    'email' => $this->sanitizeCustomerEmail($email),
                     'address' => $customerAddress,
                     'documentType' => $documentType !== '' ? strtolower($documentType) : null,
                     'documentNumber' => $documentNumber !== '' ? $documentNumber : $document,
@@ -696,7 +704,7 @@ class PosRepository {
                 'lastName' => $lastName,
                 'name' => trim($firstName . ' ' . $lastName),
                 'phone' => !empty($profile['phone']) ? trim((string)$profile['phone']) : null,
-                'email' => !empty($userRow['email']) ? trim((string)$userRow['email']) : null,
+                'email' => $this->sanitizeCustomerEmail(!empty($userRow['email']) ? trim((string)$userRow['email']) : null),
                 'address' => $customerAddress,
                 'documentType' => !empty($userRow['document_type']) ? strtolower(trim((string)$userRow['document_type'])) : null,
                 'documentNumber' => !empty($userRow['document_number']) ? trim((string)$userRow['document_number']) : $document,

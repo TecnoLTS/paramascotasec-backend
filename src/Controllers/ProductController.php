@@ -48,20 +48,7 @@ class ProductController {
             return false;
         }
 
-        $user = Auth::optionalUser();
-        if (!$user) {
-            Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
-            exit;
-        }
-
-        $role = strtolower((string)($user['role'] ?? 'customer'));
-        $subject = strtolower((string)($user['sub'] ?? ''));
-        $isAdmin = $role === 'admin' || ($subject === 'service' && in_array($role, ['admin', 'service'], true));
-        if (!$isAdmin) {
-            Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
-            exit;
-        }
-
+        Auth::requireAdmin();
         return true;
     }
 
@@ -326,6 +313,7 @@ class ProductController {
     }
 
     public function store() {
+        Auth::requireAdmin();
         try {
             $data = json_decode(file_get_contents('php://input'), true) ?: [];
             $this->normalizePublishedField($data);
@@ -425,6 +413,7 @@ class ProductController {
     }
 
     public function update($id) {
+        Auth::requireAdmin();
         try {
             $data = json_decode(file_get_contents('php://input'), true) ?: [];
             $this->normalizePublishedField($data);
@@ -567,6 +556,7 @@ class ProductController {
     }
 
     public function destroy($id) {
+        Auth::requireAdmin();
         try {
             $this->productRepository->delete($id);
             Response::json(['deleted' => true], 200, null, 'Producto eliminado');

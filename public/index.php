@@ -9,6 +9,82 @@ use App\Core\TenantContext;
 use App\Core\TenantResolver;
 use App\Core\Auth;
 
+ini_set('display_errors', '0');
+ini_set('html_errors', '0');
+ini_set('log_errors', '1');
+error_reporting(E_ALL);
+
+if (!function_exists('respond_with_json_error')) {
+    function respond_with_json_error(string $message, int $status, string $code): void
+    {
+        if (!headers_sent()) {
+            http_response_code($status);
+            header('Content-Type: application/json');
+        }
+
+        echo json_encode([
+            'ok' => false,
+            'error' => [
+                'message' => $message,
+                'code' => $code,
+            ],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+}
+
+set_exception_handler(static function (\Throwable $e): void {
+    error_log(sprintf(
+        '[UNCAUGHT_EXCEPTION] %s in %s:%d',
+        $e->getMessage(),
+        $e->getFile(),
+        $e->getLine()
+    ));
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    respond_with_json_error('Error interno del servidor', 500, 'INTERNAL_SERVER_ERROR');
+});
+
+set_error_handler(static function (
+    int $severity,
+    string $message,
+    string $file,
+    int $line
+): bool {
+    if (!(error_reporting() & $severity)) {
+        return false;
+    }
+
+    throw new \ErrorException($message, 0, $severity, $file, $line);
+});
+
+register_shutdown_function(static function (): void {
+    $error = error_get_last();
+    if (!$error) {
+        return;
+    }
+
+    $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR];
+    if (!in_array($error['type'] ?? 0, $fatalTypes, true)) {
+        return;
+    }
+
+    error_log(sprintf(
+        '[FATAL_ERROR] %s in %s:%d',
+        $error['message'] ?? 'Unknown fatal error',
+        $error['file'] ?? 'unknown',
+        $error['line'] ?? 0
+    ));
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    respond_with_json_error('Error interno del servidor', 500, 'INTERNAL_SERVER_ERROR');
+});
+
 // Load .env
 if (file_exists(__DIR__ . '/../.env')) {
     $dotenv = Dotenv::createImmutable(__DIR__ . '/..');
@@ -21,12 +97,22 @@ $tenants = require __DIR__ . '/../config/tenants.php';
 $host = null;
 $rawHttpHost = $_SERVER['HTTP_HOST'] ?? null;
 $normalizedHttpHost = is_string($rawHttpHost) ? preg_replace('/:\d+$/', '', strtolower(trim($rawHttpHost))) : null;
-$isInternalBackendHost = is_string($normalizedHttpHost) && (
-    $normalizedHttpHost === 'backend-web'
-    || str_ends_with($normalizedHttpHost, '-backend-web')
-);
+$expectedInternalProxyToken = trim((string)($_ENV['INTERNAL_PROXY_TOKEN'] ?? ''));
+$previousInternalProxyToken = trim((string)($_ENV['INTERNAL_PROXY_TOKEN_PREVIOUS'] ?? ''));
+$providedInternalProxyToken = trim((string)($_SERVER['HTTP_X_INTERNAL_PROXY_TOKEN'] ?? ''));
+$trustedInternalProxyTokens = array_values(array_filter([$expectedInternalProxyToken, $previousInternalProxyToken], static fn($value) => $value !== ''));
+$hasTrustedInternalProxyToken = false;
+if ($providedInternalProxyToken !== '') {
+    foreach ($trustedInternalProxyTokens as $trustedToken) {
+        if (hash_equals($trustedToken, $providedInternalProxyToken)) {
+            $hasTrustedInternalProxyToken = true;
+            break;
+        }
+    }
+}
 $trustProxyHeaders = in_array(strtolower((string)($_ENV['TRUST_PROXY_HEADERS'] ?? 'false')), ['1', 'true', 'yes', 'on'], true)
-    || $isInternalBackendHost;
+    || $hasTrustedInternalProxyToken;
+$GLOBALS['trust_proxy_headers'] = $trustProxyHeaders;
 $hostCandidates = [$rawHttpHost];
 if ($trustProxyHeaders) {
     array_unshift(
@@ -84,6 +170,7 @@ if ($origin) {
 header('Content-Type: application/json');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Tenant');
+header('Access-Control-Max-Age: 600');
 header('Vary: Origin');
 if ($origin && TenantContext::isOriginAllowed($origin)) {
     header('Access-Control-Allow-Origin: ' . $origin);
@@ -98,6 +185,113 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
         Response::error('Origen no permitido', 403, 'CORS_FORBIDDEN');
     }
     exit;
+}
+
+if (!function_exists('client_ip_matches_allowlist')) {
+    function normalize_ip_access_mode(string $mode): string
+    {
+        $mode = strtolower(trim($mode));
+        if (in_array($mode, ['private', 'private-lan', 'lan'], true)) {
+            return 'private';
+        }
+        if ($mode === 'custom') {
+            return 'custom';
+        }
+        return 'off';
+    }
+
+    function private_ip_rules(): array
+    {
+        return [
+            '127.0.0.1/32',
+            '::1/128',
+            '10.0.0.0/8',
+            '172.16.0.0/12',
+            '192.168.0.0/16',
+            'fc00::/7',
+        ];
+    }
+
+    function ip_in_cidr(string $ip, string $cidr): bool
+    {
+        if (!str_contains($cidr, '/')) {
+            return $ip === $cidr;
+        }
+
+        [$subnet, $prefixLength] = explode('/', $cidr, 2);
+        $ipBin = @inet_pton($ip);
+        $subnetBin = @inet_pton($subnet);
+        $prefix = (int)$prefixLength;
+        if ($ipBin === false || $subnetBin === false || strlen($ipBin) !== strlen($subnetBin)) {
+            return false;
+        }
+
+        $bytes = intdiv($prefix, 8);
+        $bits = $prefix % 8;
+        if ($bytes > 0 && substr($ipBin, 0, $bytes) !== substr($subnetBin, 0, $bytes)) {
+            return false;
+        }
+        if ($bits === 0) {
+            return true;
+        }
+
+        $mask = (~(0xff >> $bits)) & 0xff;
+        return (ord($ipBin[$bytes]) & $mask) === (ord($subnetBin[$bytes]) & $mask);
+    }
+
+    function get_client_ip(): string
+    {
+        $trustProxyHeaders = (bool)($GLOBALS['trust_proxy_headers'] ?? false);
+        $candidates = [];
+
+        if ($trustProxyHeaders) {
+            $candidates[] = $_SERVER['HTTP_X_REAL_IP'] ?? null;
+            $candidates[] = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? null;
+        }
+
+        $candidates[] = $_SERVER['REMOTE_ADDR'] ?? null;
+
+        foreach ($candidates as $candidate) {
+            if (!is_string($candidate)) {
+                continue;
+            }
+            $candidate = trim(explode(',', $candidate)[0] ?? '');
+            if ($candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        return '0.0.0.0';
+    }
+
+    function ip_allowlist_rules(string $mode, string $allowlist): array
+    {
+        $rules = array_values(array_filter(array_map('trim', explode(',', $allowlist))));
+        $normalizedMode = normalize_ip_access_mode($mode);
+        if ($normalizedMode === 'private') {
+            return array_values(array_unique(array_merge(private_ip_rules(), $rules)));
+        }
+        if ($normalizedMode === 'custom') {
+            return $rules;
+        }
+        return [];
+    }
+
+    function client_ip_matches_allowlist(string $ip, string $allowlist, string $mode = 'off'): bool
+    {
+        $rules = ip_allowlist_rules($mode, $allowlist);
+        if ($rules === []) {
+            return true;
+        }
+
+        foreach ($rules as $rule) {
+            if (ip_in_cidr($ip, $rule)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
 
 $method = $_SERVER['REQUEST_METHOD'];
@@ -116,16 +310,19 @@ $router->add('DELETE', '/api/products/{id}', 'ProductController@destroy');
 $router->add('GET', '/api/users', 'UserController@index');
 $router->add('POST', '/api/users', 'UserController@store');
 $router->add('PUT', '/api/users/{id}', 'UserController@update');
+$router->add('POST', '/api/users/{id}/unlock', 'UserController@unlock');
 $router->add('GET', '/api/user/addresses', 'UserController@getAddresses');
 $router->add('PUT', '/api/user/addresses', 'UserController@updateAddresses');
 $router->add('GET', '/api/user/profile', 'UserController@getProfile');
 $router->add('PUT', '/api/user/profile', 'UserController@updateProfile');
 $router->add('PUT', '/api/user/password', 'UserController@updatePassword');
 $router->add('POST', '/api/auth/login', 'AuthController@login');
+$router->add('POST', '/api/auth/logout', 'AuthController@logout');
 $router->add('POST', '/api/auth/register', 'AuthController@register');
 $router->add('POST', '/api/auth/request-otp', 'AuthController@requestOtp');
 $router->add('POST', '/api/auth/verify-otp', 'AuthController@verifyOtp');
 $router->add('GET', '/api/auth/verify', 'AuthController@verify');
+$router->add('GET', '/api/auth/session', 'AuthController@session');
 
 // Order Routes
 $router->add('GET', '/api/orders', 'OrderController@index');
@@ -178,23 +375,101 @@ $router->add('GET', '/api/reports/recent-orders', 'ReportController@recentOrders
 
 // Health Route
 $router->add('GET', '/api/health', 'HealthController@status');
+$router->add('POST', '/api/security/csp-report', 'SecurityController@cspReport');
+
+function is_public_api_request(string $uri, string $method): bool {
+    $normalizedMethod = strtoupper($method);
+
+    if ($normalizedMethod === 'GET' || $normalizedMethod === 'HEAD') {
+        if (in_array($uri, [
+            '/api/auth/verify',
+            '/api/auth/session',
+            '/api/settings/shipping',
+            '/api/settings/store-status',
+            '/api/health',
+        ], true)) {
+            return true;
+        }
+
+        if ($uri === '/api/products' || str_starts_with($uri, '/api/products/')) {
+            return true;
+        }
+    }
+
+    if ($normalizedMethod === 'POST') {
+        if (in_array($uri, [
+            '/api/auth/login',
+            '/api/auth/register',
+            '/api/auth/request-otp',
+            '/api/auth/verify-otp',
+            '/api/orders/quote',
+            '/api/security/csp-report',
+        ], true)) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 // Global auth: all API requests require a valid token (except auth endpoints).
-$publicPaths = [
+$isPublic = is_public_api_request($uri, $method);
+$authCookieName = trim((string)($_ENV['AUTH_COOKIE_NAME'] ?? 'pm_auth')) ?: 'pm_auth';
+$csrfCookieName = trim((string)($_ENV['AUTH_CSRF_COOKIE_NAME'] ?? 'pm_csrf')) ?: 'pm_csrf';
+$csrfExemptPaths = [
     '/api/auth/login',
     '/api/auth/register',
     '/api/auth/request-otp',
     '/api/auth/verify-otp',
     '/api/auth/verify',
-    '/api/products',
-    '/api/products/',
-    '/api/settings/shipping',
-    '/api/settings/store-status',
     '/api/orders/quote',
-    '/api/health'
+    '/api/security/csp-report',
+    '/api/health',
 ];
+$isMutatingApiRequest = str_starts_with($uri, '/api') && in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true);
+$hasAuthCookie = trim((string)($_COOKIE[$authCookieName] ?? '')) !== '';
+$hasBearerAuth = preg_match('/Bearer\s+\S+/', (string)($_SERVER['HTTP_AUTHORIZATION'] ?? '')) === 1;
+$shouldEnforceCsrf = $isMutatingApiRequest
+    && !in_array($uri, $csrfExemptPaths, true)
+    && ($hasAuthCookie || $uri === '/api/auth/logout');
 
-$isPublic = in_array($uri, $publicPaths, true) || str_starts_with($uri, '/api/products/');
+if ($shouldEnforceCsrf) {
+    $secFetchSite = strtolower(trim((string)($_SERVER['HTTP_SEC_FETCH_SITE'] ?? '')));
+    if ($secFetchSite !== '' && !in_array($secFetchSite, ['same-origin', 'same-site', 'none'], true)) {
+        Response::error('Solicitud bloqueada por política CSRF', 403, 'CSRF_FETCH_SITE_FORBIDDEN');
+        exit;
+    }
+
+    $originToCheck = trim((string)($_SERVER['HTTP_ORIGIN'] ?? ''));
+    if ($originToCheck === '') {
+        $referer = trim((string)($_SERVER['HTTP_REFERER'] ?? ''));
+        if ($referer !== '') {
+            $refererParts = parse_url($referer);
+            if (($refererParts['scheme'] ?? null) && ($refererParts['host'] ?? null)) {
+                $originToCheck = $refererParts['scheme'] . '://' . $refererParts['host'] . (isset($refererParts['port']) ? ':' . $refererParts['port'] : '');
+            }
+        }
+    }
+
+    if ($originToCheck !== '') {
+        $originHost = parse_url($originToCheck, PHP_URL_HOST);
+        $normalizedOriginHost = is_string($originHost) ? strtolower($originHost) : null;
+        $originAllowed = TenantContext::isOriginAllowed($originToCheck)
+            || ($normalizedOriginHost && (in_array($normalizedOriginHost, ['localhost', '127.0.0.1'], true) || (bool)filter_var($normalizedOriginHost, FILTER_VALIDATE_IP)) && ($isDev || $isLocalHostRequest));
+        if (!$originAllowed) {
+            Response::error('Origen no permitido para esta operación', 403, 'CSRF_ORIGIN_FORBIDDEN');
+            exit;
+        }
+    }
+
+    $csrfCookie = trim((string)($_COOKIE[$csrfCookieName] ?? ''));
+    $csrfHeader = trim((string)($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ''));
+    if ($csrfCookie === '' || $csrfHeader === '' || !hash_equals($csrfCookie, $csrfHeader)) {
+        Response::error('Token CSRF inválido o ausente', 403, 'CSRF_TOKEN_INVALID');
+        exit;
+    }
+}
+
 $requiresAuth = str_starts_with($uri, '/api') && !$isPublic;
 if ($requiresAuth) {
     Auth::validateRequestOrFail();
@@ -204,6 +479,15 @@ if ($requiresAuth) {
         || str_starts_with($uri, '/api/users/')
         || $uri === '/api/shipments';
     if ($adminOnly) {
+        $adminIpMode = trim((string)($_ENV['ADMIN_IP_MODE'] ?? 'off'));
+        $adminIpAllowlist = trim((string)($_ENV['ADMIN_IP_ALLOWLIST'] ?? ''));
+        if (normalize_ip_access_mode($adminIpMode) !== 'off' || $adminIpAllowlist !== '') {
+            $clientIp = get_client_ip();
+            if (!client_ip_matches_allowlist($clientIp, $adminIpAllowlist, $adminIpMode)) {
+                Response::error('Acceso administrativo restringido desde esta IP', 403, 'ADMIN_IP_FORBIDDEN');
+                exit;
+            }
+        }
         Auth::requireAdmin();
     }
 }

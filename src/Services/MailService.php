@@ -6,6 +6,23 @@ use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
 class MailService {
+    private static function normalizedSmtpPassword(?string $host, string $password): string
+    {
+        $password = trim($password);
+        if ($password === '' || !$host) {
+            return $password;
+        }
+
+        $normalizedHost = strtolower(trim($host));
+        $collapsed = preg_replace('/\s+/', '', $password) ?? $password;
+
+        if ($collapsed !== $password && str_contains($normalizedHost, 'gmail')) {
+            return $collapsed;
+        }
+
+        return $password;
+    }
+
     public static function send(string $to, string $subject, string $message): bool {
         $fromAddress = $_ENV['MAIL_FROM_ADDRESS'] ?? 'no-reply@paramascotasec.com';
         $fromName = $_ENV['MAIL_FROM_NAME'] ?? 'Para Mascotas EC';
@@ -20,7 +37,7 @@ class MailService {
                 $mail->Port = (int)($_ENV['SMTP_PORT'] ?? 587);
                 $mail->SMTPAuth = true;
                 $mail->Username = $_ENV['SMTP_USER'] ?? '';
-                $mail->Password = $_ENV['SMTP_PASS'] ?? '';
+                $mail->Password = self::normalizedSmtpPassword($smtpHost, (string)($_ENV['SMTP_PASS'] ?? ''));
                 $secure = strtolower((string)($_ENV['SMTP_SECURE'] ?? 'tls'));
                 $mail->SMTPSecure = $secure === 'ssl' ? PHPMailer::ENCRYPTION_SMTPS : PHPMailer::ENCRYPTION_STARTTLS;
                 $mail->setFrom($fromAddress, $fromName);

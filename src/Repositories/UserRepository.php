@@ -27,6 +27,9 @@ class UserRepository {
                 u.addresses,
                 u.created_at,
                 u.updated_at,
+                u.failed_login_attempts,
+                u.login_locked_until,
+                u.last_login_at,
                 COALESCE(stats.orders_total, 0)::int AS orders_total,
                 COALESCE(stats.orders_active, 0)::int AS orders_active,
                 COALESCE(stats.orders_completed, 0)::int AS orders_completed,
@@ -75,7 +78,7 @@ class UserRepository {
     }
 
     public function getByEmail($email) {
-        $stmt = $this->db->prepare('SELECT id, name, email, password, email_verified, role FROM "User" WHERE email = :email AND tenant_id = :tenant_id');
+        $stmt = $this->db->prepare('SELECT id, name, email, password, email_verified, role, document_type, document_number, business_name, profile, addresses, failed_login_attempts, login_locked_until FROM "User" WHERE email = :email AND tenant_id = :tenant_id');
         $stmt->execute([
             'email' => $email,
             'tenant_id' => $this->getTenantId()
@@ -84,7 +87,7 @@ class UserRepository {
     }
 
     public function getByEmailWithOtp($email) {
-        $stmt = $this->db->prepare('SELECT id, name, email, password, email_verified, role, otp_code, otp_expires_at, otp_attempts FROM "User" WHERE email = :email AND tenant_id = :tenant_id');
+        $stmt = $this->db->prepare('SELECT id, name, email, password, email_verified, role, document_type, document_number, business_name, profile, addresses, otp_code, otp_expires_at, otp_attempts, failed_login_attempts, login_locked_until FROM "User" WHERE email = :email AND tenant_id = :tenant_id');
         $stmt->execute([
             'email' => $email,
             'tenant_id' => $this->getTenantId()
@@ -115,13 +118,50 @@ class UserRepository {
                 profile,
                 addresses,
                 created_at,
-                updated_at
+                updated_at,
+                failed_login_attempts,
+                login_locked_until,
+                last_login_at
             FROM "User"
             WHERE id = :id AND tenant_id = :tenant_id
             LIMIT 1
         ');
         $stmt->execute([
             'id' => $id,
+            'tenant_id' => $this->getTenantId()
+        ]);
+        return $stmt->fetch();
+    }
+
+    public function getByDocumentNumber(string $documentNumber) {
+        $normalized = trim($documentNumber);
+        if ($normalized === '') {
+            return null;
+        }
+
+        $stmt = $this->db->prepare('
+            SELECT
+                id,
+                name,
+                email,
+                password,
+                email_verified,
+                role,
+                document_type,
+                document_number,
+                business_name,
+                profile,
+                addresses,
+                failed_login_attempts,
+                login_locked_until
+            FROM "User"
+            WHERE document_number = :document_number
+              AND tenant_id = :tenant_id
+            ORDER BY created_at DESC
+            LIMIT 1
+        ');
+        $stmt->execute([
+            'document_number' => $normalized,
             'tenant_id' => $this->getTenantId()
         ]);
         return $stmt->fetch();
@@ -161,15 +201,20 @@ class UserRepository {
             'tenant_id' => $this->getTenantId()
         ]);
         $row = $stmt->fetch();
-        return $row ? $row['addresses'] : null;
+        if (!$row) {
+            return null;
+        }
+
+        return json_encode($this->normalizeAddressesPayload($row['addresses']));
     }
 
     public function updateAddresses($userId, $addresses) {
+        $normalizedAddresses = $this->normalizeAddressesPayload($addresses);
         $stmt = $this->db->prepare('UPDATE "User" SET addresses = :addresses, updated_at = NOW() WHERE id = :id AND tenant_id = :tenant_id');
         $stmt->execute([
             'id' => $userId,
             'tenant_id' => $this->getTenantId(),
-            'addresses' => json_encode($addresses)
+            'addresses' => json_encode($normalizedAddresses)
         ]);
         return $this->getAddresses($userId);
     }
@@ -247,12 +292,70 @@ class UserRepository {
         ]);
     }
 
+    public function setLoginFailureState(string $userId, int $attempts, ?string $lockedUntil): void {
+        $stmt = $this->db->prepare('
+            UPDATE "User"
+            SET failed_login_attempts = :attempts,
+                login_locked_until = :locked_until,
+                updated_at = NOW()
+            WHERE id = :id AND tenant_id = :tenant_id
+        ');
+        $stmt->execute([
+            'id' => $userId,
+            'tenant_id' => $this->getTenantId(),
+            'attempts' => max(0, $attempts),
+            'locked_until' => $lockedUntil
+        ]);
+    }
+
+    public function clearLoginFailures(string $userId): void {
+        $stmt = $this->db->prepare('
+            UPDATE "User"
+            SET failed_login_attempts = 0,
+                login_locked_until = NULL,
+                updated_at = NOW()
+            WHERE id = :id AND tenant_id = :tenant_id
+        ');
+        $stmt->execute([
+            'id' => $userId,
+            'tenant_id' => $this->getTenantId()
+        ]);
+    }
+
+    public function unlockManagedUser(string $userId) {
+        $this->clearLoginFailures($userId);
+        return $this->getAdminUserById($userId);
+    }
+
+    public function markSuccessfulLogin(string $userId): void {
+        $stmt = $this->db->prepare('
+            UPDATE "User"
+            SET failed_login_attempts = 0,
+                login_locked_until = NULL,
+                last_login_at = NOW(),
+                updated_at = NOW()
+            WHERE id = :id AND tenant_id = :tenant_id
+        ');
+        $stmt->execute([
+            'id' => $userId,
+            'tenant_id' => $this->getTenantId()
+        ]);
+    }
+
     public function setActiveTokenId($userId, $tokenId) {
         $stmt = $this->db->prepare('UPDATE "User" SET active_token_id = :tokenId, updated_at = NOW() WHERE id = :id AND tenant_id = :tenant_id');
         $stmt->execute([
             'id' => $userId,
             'tenant_id' => $this->getTenantId(),
             'tokenId' => $tokenId
+        ]);
+    }
+
+    public function clearActiveTokenId($userId) {
+        $stmt = $this->db->prepare('UPDATE "User" SET active_token_id = NULL, updated_at = NOW() WHERE id = :id AND tenant_id = :tenant_id');
+        $stmt->execute([
+            'id' => $userId,
+            'tenant_id' => $this->getTenantId(),
         ]);
     }
 
@@ -268,7 +371,9 @@ class UserRepository {
 
     public function create($data, $options = []) {
         $skipToken = (bool)($options['skip_verification_token'] ?? false);
-        $sql = 'INSERT INTO "User" (id, tenant_id, name, email, password, updated_at, verification_token, document_type, document_number, business_name) VALUES (:id, :tenant_id, :name, :email, :password, NOW(), :token, :document_type, :document_number, :business_name)';
+        $profile = $this->buildRegistrationProfile($data);
+        $addresses = $this->normalizeAddressesPayload($data['addresses'] ?? null);
+        $sql = 'INSERT INTO "User" (id, tenant_id, name, email, password, role, email_verified, updated_at, verification_token, document_type, document_number, business_name, profile, addresses) VALUES (:id, :tenant_id, :name, :email, :password, :role, :email_verified, NOW(), :token, :document_type, :document_number, :business_name, :profile, :addresses)';
         $stmt = $this->db->prepare($sql);
         $id = bin2hex(random_bytes(10));
         $token = $skipToken ? null : bin2hex(random_bytes(32));
@@ -278,12 +383,77 @@ class UserRepository {
             'name' => $data['name'],
             'email' => $data['email'],
             'password' => password_hash($data['password'], PASSWORD_DEFAULT),
+            'role' => $data['role'] ?? 'customer',
+            'email_verified' => !empty($options['email_verified']) ? 1 : 0,
             'token' => $token,
             'document_type' => $data['document_type'] ?? null,
             'document_number' => $data['document_number'] ?? null,
-            'business_name' => $data['business_name'] ?? null
+            'business_name' => $data['business_name'] ?? null,
+            'profile' => !empty($profile) ? json_encode($profile) : null,
+            'addresses' => !empty($addresses) ? json_encode($addresses) : null,
         ]);
         return ['id' => $id, 'token' => $token];
+    }
+
+    public function replaceRegistrationData(string $id, array $data, array $options = []) {
+        $skipToken = (bool)($options['skip_verification_token'] ?? false);
+        $existing = $this->getAdminUserById($id) ?: [];
+        $existingProfile = $this->decodeJsonObject($existing['profile'] ?? null);
+        $existingAddresses = $this->normalizeAddressesPayload($existing['addresses'] ?? null);
+        $profile = $this->buildRegistrationProfile($data, $existingProfile);
+        unset($profile['syntheticEmail']);
+        $profile['origin'] = 'website_registration';
+        $addresses = $this->normalizeAddressesPayload($data['addresses'] ?? null, $existingAddresses);
+        $token = $skipToken ? null : bin2hex(random_bytes(32));
+
+        $stmt = $this->db->prepare('
+            UPDATE "User"
+            SET
+                name = :name,
+                email = :email,
+                password = :password,
+                role = :role,
+                email_verified = :email_verified,
+                verification_token = :token,
+                document_type = :document_type,
+                document_number = :document_number,
+                business_name = :business_name,
+                profile = :profile,
+                addresses = :addresses,
+                otp_code = NULL,
+                otp_expires_at = NULL,
+                otp_attempts = 0,
+                failed_login_attempts = 0,
+                login_locked_until = NULL,
+                active_token_id = NULL,
+                updated_at = NOW()
+            WHERE id = :id AND tenant_id = :tenant_id
+        ');
+        $stmt->execute([
+            'id' => $id,
+            'tenant_id' => $this->getTenantId(),
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'password' => password_hash($data['password'], PASSWORD_DEFAULT),
+            'role' => $data['role'] ?? 'customer',
+            'email_verified' => !empty($options['email_verified']) ? 1 : 0,
+            'token' => $token,
+            'document_type' => $data['document_type'] ?? null,
+            'document_number' => $data['document_number'] ?? null,
+            'business_name' => $data['business_name'] ?? null,
+            'profile' => !empty($profile) ? json_encode($profile) : null,
+            'addresses' => !empty($addresses) ? json_encode($addresses) : null,
+        ]);
+
+        return ['id' => $id, 'token' => $token];
+    }
+
+    public function deleteById(string $id): void {
+        $stmt = $this->db->prepare('DELETE FROM "User" WHERE id = :id AND tenant_id = :tenant_id');
+        $stmt->execute([
+            'id' => $id,
+            'tenant_id' => $this->getTenantId()
+        ]);
     }
 
     public function createManaged(array $data) {
@@ -326,7 +496,7 @@ class UserRepository {
             'email' => $data['email'],
             'password' => password_hash($data['password'], PASSWORD_DEFAULT),
             'role' => $data['role'],
-            'email_verified' => !empty($data['email_verified']),
+            'email_verified' => !empty($data['email_verified']) ? 1 : 0,
             'document_type' => $data['document_type'] ?? null,
             'document_number' => $data['document_number'] ?? null,
             'business_name' => $data['business_name'] ?? null,
@@ -334,6 +504,110 @@ class UserRepository {
         ]);
 
         return $this->getAdminUserById($id);
+    }
+
+    public function upsertLocalSaleCustomer(array $customer): ?array {
+        $name = trim((string)($customer['name'] ?? ''));
+        $email = strtolower(trim((string)($customer['email'] ?? '')));
+        $validEmail = filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null;
+        $documentType = trim((string)($customer['document_type'] ?? $customer['documentType'] ?? ''));
+        $documentNumber = trim((string)($customer['document_number'] ?? $customer['documentNumber'] ?? ''));
+
+        if ($name === '') {
+            return null;
+        }
+
+        $existing = null;
+        if ($documentType !== '' && strtolower($documentType) !== 'consumidor_final' && $documentNumber !== '') {
+            $existing = $this->getByDocumentNumber($documentNumber);
+        }
+
+        if (!$existing && $validEmail) {
+            $existing = $this->getByEmail($validEmail);
+        }
+
+        $address = $this->buildLocalSaleAddress($customer);
+        $addresses = $address ? [$address] : [];
+
+        if ($existing) {
+            $existingProfile = $this->decodeJsonObject($existing['profile'] ?? null);
+            $existingAddresses = $this->normalizeAddressesPayload($existing['addresses'] ?? null);
+            $profile = $this->buildRegistrationProfile([
+                'phone' => $customer['phone'] ?? null,
+                'business_name' => $customer['business_name'] ?? null,
+                'profile' => array_filter([
+                    'firstName' => $customer['first_name'] ?? null,
+                    'lastName' => $customer['last_name'] ?? null,
+                    'origin' => 'local_pos',
+                    'syntheticEmail' => $this->isLocalPosSyntheticEmail((string)($existing['email'] ?? '')) && !$validEmail,
+                ], static fn ($value) => $value !== null && $value !== ''),
+            ], $existingProfile);
+
+            $emailToPersist = $validEmail ?: (string)($existing['email'] ?? '');
+            if ($emailToPersist === '') {
+                $emailToPersist = $this->buildSyntheticLocalPosEmail($documentNumber);
+            }
+
+            $stmt = $this->db->prepare('
+                UPDATE "User"
+                SET
+                    name = :name,
+                    email = :email,
+                    document_type = :document_type,
+                    document_number = :document_number,
+                    business_name = :business_name,
+                    profile = :profile,
+                    addresses = :addresses,
+                    updated_at = NOW()
+                WHERE id = :id AND tenant_id = :tenant_id
+            ');
+            $stmt->execute([
+                'id' => $existing['id'],
+                'tenant_id' => $this->getTenantId(),
+                'name' => $name,
+                'email' => $emailToPersist,
+                'document_type' => $documentType !== '' ? $documentType : ($existing['document_type'] ?? null),
+                'document_number' => $documentNumber !== '' ? $documentNumber : ($existing['document_number'] ?? null),
+                'business_name' => $customer['business_name'] ?? ($existing['business_name'] ?? null),
+                'profile' => !empty($profile) ? json_encode($profile) : null,
+                'addresses' => !empty($addresses) ? json_encode($addresses) : (!empty($existingAddresses) ? json_encode($existingAddresses) : null),
+            ]);
+
+            return $this->getAdminUserById((string)$existing['id']);
+        }
+
+        if ($validEmail === null && $documentNumber === '') {
+            return null;
+        }
+
+        $profile = $this->buildRegistrationProfile([
+            'phone' => $customer['phone'] ?? null,
+            'business_name' => $customer['business_name'] ?? null,
+            'profile' => array_filter([
+                'firstName' => $customer['first_name'] ?? null,
+                'lastName' => $customer['last_name'] ?? null,
+                'origin' => 'local_pos',
+                'syntheticEmail' => $validEmail === null,
+            ], static fn ($value) => $value !== null && $value !== ''),
+        ]);
+
+        $created = $this->create([
+            'name' => $name,
+            'email' => $validEmail ?: $this->buildSyntheticLocalPosEmail($documentNumber),
+            'password' => bin2hex(random_bytes(24)),
+            'role' => 'customer',
+            'document_type' => $documentType !== '' ? $documentType : null,
+            'document_number' => $documentNumber !== '' ? $documentNumber : null,
+            'business_name' => $customer['business_name'] ?? null,
+            'profile' => $profile,
+            'addresses' => $addresses,
+            'phone' => $customer['phone'] ?? null,
+        ], [
+            'skip_verification_token' => true,
+            'email_verified' => false,
+        ]);
+
+        return $this->getAdminUserById($created['id']);
     }
 
     public function updateManaged(string $id, array $data) {
@@ -356,7 +630,7 @@ class UserRepository {
             'name' => $data['name'],
             'email' => $data['email'],
             'role' => $data['role'],
-            'email_verified' => !empty($data['email_verified']),
+            'email_verified' => !empty($data['email_verified']) ? 1 : 0,
             'document_type' => $data['document_type'] ?? null,
             'document_number' => $data['document_number'] ?? null,
             'business_name' => $data['business_name'] ?? null,
@@ -425,5 +699,184 @@ class UserRepository {
 
     private function getTenantId() {
         return TenantContext::id() ?? ($_ENV['DEFAULT_TENANT'] ?? 'paramascotasec');
+    }
+
+    private function decodeJsonObject($value): array {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($value, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function normalizeAddressFields($value, array $fallback = []): array {
+        $source = is_array($value) ? $value : $this->decodeJsonObject($value);
+        if (!is_array($source)) {
+            $source = [];
+        }
+
+        return [
+            'firstName' => trim((string)($source['firstName'] ?? $source['first_name'] ?? ($fallback['firstName'] ?? ''))),
+            'lastName' => trim((string)($source['lastName'] ?? $source['last_name'] ?? ($fallback['lastName'] ?? ''))),
+            'company' => trim((string)($source['company'] ?? $source['businessName'] ?? $source['business_name'] ?? ($fallback['company'] ?? ''))),
+            'country' => trim((string)($source['country'] ?? ($fallback['country'] ?? ''))),
+            'street' => trim((string)($source['street'] ?? $source['address'] ?? $source['line1'] ?? $source['address1'] ?? ($fallback['street'] ?? ''))),
+            'city' => trim((string)($source['city'] ?? ($fallback['city'] ?? ''))),
+            'state' => trim((string)($source['state'] ?? $source['province'] ?? ($fallback['state'] ?? ''))),
+            'zip' => trim((string)($source['zip'] ?? $source['postalCode'] ?? $source['postal_code'] ?? ($fallback['zip'] ?? ''))),
+            'phone' => trim((string)($source['phone'] ?? $source['mobile'] ?? ($fallback['phone'] ?? ''))),
+            'email' => trim((string)($source['email'] ?? ($fallback['email'] ?? ''))),
+        ];
+    }
+
+    private function hasAddressData(array $address): bool {
+        foreach ($address as $value) {
+            if (trim((string)$value) !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function normalizeAddressesPayload($value, array $fallback = []): array {
+        $addresses = is_array($value) ? $value : $this->decodeJsonObject($value);
+        if (!is_array($addresses) || $addresses === []) {
+            return $fallback;
+        }
+
+        $normalized = [];
+        foreach ($addresses as $index => $address) {
+            if (!is_array($address) || $address === []) {
+                continue;
+            }
+
+            $flatAddress = $this->normalizeAddressFields($address);
+            $shippingAddress = $this->normalizeAddressFields($address['shipping'] ?? null);
+            $billingAddress = $this->normalizeAddressFields($address['billing'] ?? null);
+
+            if (!$this->hasAddressData($shippingAddress)) {
+                $shippingAddress = $this->hasAddressData($flatAddress) ? $flatAddress : $billingAddress;
+            }
+
+            if (!$this->hasAddressData($billingAddress)) {
+                $billingAddress = $this->hasAddressData($flatAddress) ? $flatAddress : $shippingAddress;
+            }
+
+            if (!$this->hasAddressData($shippingAddress) && !$this->hasAddressData($billingAddress)) {
+                continue;
+            }
+
+            $explicitIsSame = $address['isSame'] ?? null;
+            $isSame = is_bool($explicitIsSame)
+                ? $explicitIsSame
+                : (!$this->hasAddressData($billingAddress) || $shippingAddress === $billingAddress);
+
+            if ($isSame) {
+                $billingAddress = $shippingAddress;
+            }
+
+            $normalized[] = [
+                'id' => $address['id'] ?? round(microtime(true) * 1000) + $index,
+                'title' => trim((string)($address['title'] ?? '')) ?: ($index === 0 ? 'Dirección principal' : sprintf('Dirección %d', $index + 1)),
+                'shipping' => $shippingAddress,
+                'billing' => $billingAddress,
+                'isSame' => $isSame,
+            ];
+        }
+
+        return $normalized === [] ? $fallback : $normalized;
+    }
+
+    private function buildRegistrationProfile(array $data, array $existing = []): array {
+        $profile = $existing;
+
+        if (!empty($data['profile']) && is_array($data['profile'])) {
+            $profile = array_replace_recursive($profile, $data['profile']);
+        }
+
+        $phone = trim((string)($data['phone'] ?? ($profile['phone'] ?? '')));
+        if ($phone !== '') {
+            $profile['phone'] = $phone;
+        }
+
+        $businessName = trim((string)($data['business_name'] ?? ($data['businessName'] ?? ($profile['businessName'] ?? ''))));
+        if ($businessName !== '') {
+            $profile['businessName'] = $businessName;
+        }
+
+        $documentType = trim((string)($data['document_type'] ?? ($data['documentType'] ?? ($profile['documentType'] ?? ''))));
+        if ($documentType !== '') {
+            $profile['documentType'] = $documentType;
+        }
+
+        $documentNumber = trim((string)($data['document_number'] ?? ($data['documentNumber'] ?? ($profile['documentNumber'] ?? ''))));
+        if ($documentNumber !== '') {
+            $profile['documentNumber'] = $documentNumber;
+        }
+
+        return $profile;
+    }
+
+    private function isLocalPosSyntheticEmail(string $email): bool {
+        $normalized = strtolower(trim($email));
+        return $normalized !== '' && str_ends_with($normalized, '@local-pos.invalid');
+    }
+
+    private function buildSyntheticLocalPosEmail(string $documentNumber = ''): string {
+        $base = preg_replace('/[^a-z0-9]+/i', '', strtolower($documentNumber));
+        $base = is_string($base) ? $base : '';
+        if ($base === '') {
+            $base = bin2hex(random_bytes(6));
+        }
+
+        $candidate = sprintf('local-pos+%s@local-pos.invalid', $base);
+        while ($this->emailExists($candidate)) {
+            $candidate = sprintf('local-pos+%s-%s@local-pos.invalid', $base, strtolower(bin2hex(random_bytes(2))));
+        }
+
+        return $candidate;
+    }
+
+    private function buildLocalSaleAddress(array $customer): ?array {
+        $firstName = trim((string)($customer['first_name'] ?? ''));
+        $lastName = trim((string)($customer['last_name'] ?? ''));
+        $email = trim((string)($customer['email'] ?? ''));
+        $phone = trim((string)($customer['phone'] ?? ''));
+        $street = trim((string)($customer['street'] ?? ''));
+        $city = trim((string)($customer['city'] ?? ''));
+        $documentType = trim((string)($customer['document_type'] ?? $customer['documentType'] ?? ''));
+        $documentNumber = trim((string)($customer['document_number'] ?? $customer['documentNumber'] ?? ''));
+
+        if ($street === '' && $city === '' && $phone === '' && $email === '') {
+            return null;
+        }
+
+        $base = [
+            'firstName' => $firstName,
+            'lastName' => $lastName,
+            'email' => $email !== '' ? $email : null,
+            'phone' => $phone !== '' ? $phone : null,
+            'street' => $street !== '' ? $street : null,
+            'city' => $city !== '' ? $city : null,
+            'state' => null,
+            'country' => 'EC',
+            'zip' => null,
+            'documentType' => $documentType !== '' ? $documentType : null,
+            'documentNumber' => $documentNumber !== '' ? $documentNumber : null,
+        ];
+
+        return [
+            'id' => (string) round(microtime(true) * 1000),
+            'title' => 'Dirección principal',
+            'billing' => $base,
+            'shipping' => $base,
+            'isSame' => true,
+        ];
     }
 }
