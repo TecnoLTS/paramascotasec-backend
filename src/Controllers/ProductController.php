@@ -286,6 +286,7 @@ class ProductController {
             $products = $this->productRepository->getAll([
                 'includeUnpublished' => $includeUnpublished,
                 'includeProcurement' => $includeUnpublished,
+                'includeOutOfStock' => $includeUnpublished,
             ]);
             Response::json($products);
         } catch (\Exception $e) {
@@ -301,6 +302,7 @@ class ProductController {
                 'includeUnpublished' => $includeUnpublished,
                 'includeProcurement' => $includeUnpublished,
                 'includeProcurementDetail' => $includeProcurementDetail,
+                'includeOutOfStock' => $includeUnpublished,
             ]);
             if (!$product) {
                 Response::error('Producto no encontrado', 404, 'PRODUCT_NOT_FOUND');

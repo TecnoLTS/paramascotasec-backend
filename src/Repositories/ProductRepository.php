@@ -162,8 +162,12 @@ class ProductRepository {
     public function getAll(array $options = []) {
         $includeUnpublished = (bool)($options['includeUnpublished'] ?? false);
         $includeProcurement = (bool)($options['includeProcurement'] ?? false);
+        $includeOutOfStock = array_key_exists('includeOutOfStock', $options)
+            ? (bool)$options['includeOutOfStock']
+            : $includeUnpublished;
         $visibilityFilter = $includeUnpublished ? '' : ' AND COALESCE(p.is_published, true) = true';
-        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id' . $visibilityFilter . ' ORDER BY p.created_at DESC';
+        $stockFilter = $includeOutOfStock ? '' : ' AND COALESCE(p.quantity, 0) > 0';
+        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id' . $visibilityFilter . $stockFilter . ' ORDER BY p.created_at DESC';
         $stmt = $this->db->prepare($sql);
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $rows = $stmt->fetchAll();
@@ -174,8 +178,12 @@ class ProductRepository {
         $includeUnpublished = (bool)($options['includeUnpublished'] ?? false);
         $includeProcurement = (bool)($options['includeProcurement'] ?? false);
         $includeProcurementDetail = (bool)($options['includeProcurementDetail'] ?? false);
+        $includeOutOfStock = array_key_exists('includeOutOfStock', $options)
+            ? (bool)$options['includeOutOfStock']
+            : $includeUnpublished;
         $visibilityFilter = $includeUnpublished ? '' : ' AND COALESCE(p.is_published, true) = true';
-        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id AND (p.id = :id OR p.legacy_id = :id OR p.slug = :id)' . $visibilityFilter . ' LIMIT 1';
+        $stockFilter = $includeOutOfStock ? '' : ' AND COALESCE(p.quantity, 0) > 0';
+        $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id AND (p.id = :id OR p.legacy_id = :id OR p.slug = :id)' . $visibilityFilter . $stockFilter . ' LIMIT 1';
         $stmt = $this->db->prepare($sql);
         $stmt->execute([
             'id' => $idOrLegacyOrSlug,
