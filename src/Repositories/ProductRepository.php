@@ -1079,6 +1079,10 @@ class ProductRepository {
 
         try {
             $price = isset($data['price']) && is_numeric($data['price']) ? round((float)$data['price'], 2) : 0.0;
+            $cost = isset($data['cost']) && is_numeric($data['cost']) ? round((float)$data['cost'], 2) : 0.0;
+            if ($cost > 0 && $price < $cost) {
+                throw new \Exception('El precio base no puede ser menor al costo del producto.');
+            }
             $originalPrice = (isset($data['originPrice']) && is_numeric($data['originPrice']))
                 ? max(round((float)$data['originPrice'], 2), $price)
                 : $price;
@@ -1123,7 +1127,7 @@ class ProductRepository {
                     : (array_key_exists('isPublished', $data) ? ($data['isPublished'] ? 'true' : 'false') : 'true'),
                 'price' => $price,
                 'original_price' => $originalPrice,
-                'cost' => $data['cost'] ?? 0,
+                'cost' => $cost,
                 'brand' => $data['brand'] ?? 'Generico',
                 'sold' => $data['sold'] ?? 0,
                 'quantity' => $data['quantity'] ?? 0,
@@ -1258,6 +1262,17 @@ class ProductRepository {
 
                 $data['originPrice'] = $normalizedOriginPrice;
                 $data['sale'] = $requestedSale && $normalizedOriginPrice > $effectivePrice;
+            }
+
+            $effectiveNextCost = (array_key_exists('cost', $data) && is_numeric($data['cost']))
+                ? round((float)$data['cost'], 2)
+                : round((float)($current['cost'] ?? 0), 2);
+            $effectiveNextPrice = (array_key_exists('price', $data) && is_numeric($data['price']))
+                ? round((float)$data['price'], 2)
+                : round((float)($current['price'] ?? 0), 2);
+
+            if ($effectiveNextCost > 0 && $effectiveNextPrice < $effectiveNextCost) {
+                throw new \Exception('El precio base no puede ser menor al costo del producto.');
             }
 
             $fields = [];

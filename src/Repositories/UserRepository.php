@@ -30,6 +30,10 @@ class UserRepository {
                 u.failed_login_attempts,
                 u.login_locked_until,
                 u.last_login_at,
+                security_block.event_type AS security_block_event_type,
+                security_block.status AS security_block_status,
+                security_block.created_at AS security_blocked_at,
+                security_block.metadata AS security_block_metadata,
                 COALESCE(stats.orders_total, 0)::int AS orders_total,
                 COALESCE(stats.orders_active, 0)::int AS orders_active,
                 COALESCE(stats.orders_completed, 0)::int AS orders_completed,
@@ -65,6 +69,19 @@ class UserRepository {
             LEFT JOIN "Order" o_last
                 ON o_last.id = stats.last_order_id
                 AND o_last.tenant_id = :tenant_id_orders_latest
+            LEFT JOIN LATERAL (
+                SELECT
+                    ase.event_type,
+                    ase.status,
+                    ase.created_at,
+                    ase.metadata
+                FROM "AuthSecurityEvent" ase
+                WHERE ase.user_id = u.id
+                  AND ase.tenant_id = :tenant_id_security
+                  AND LOWER(COALESCE(ase.status, \'info\')) = \'blocked\'
+                ORDER BY ase.created_at DESC
+                LIMIT 1
+            ) security_block ON TRUE
             WHERE u.tenant_id = :tenant_id_users
             ORDER BY u.created_at DESC, u.name ASC
         ');
@@ -72,6 +89,7 @@ class UserRepository {
         $stmt->execute([
             'tenant_id_orders' => $tenantId,
             'tenant_id_orders_latest' => $tenantId,
+            'tenant_id_security' => $tenantId,
             'tenant_id_users' => $tenantId
         ]);
         return $stmt->fetchAll();
@@ -121,13 +139,31 @@ class UserRepository {
                 updated_at,
                 failed_login_attempts,
                 login_locked_until,
-                last_login_at
+                last_login_at,
+                security_block.event_type AS security_block_event_type,
+                security_block.status AS security_block_status,
+                security_block.created_at AS security_blocked_at,
+                security_block.metadata AS security_block_metadata
             FROM "User"
+            LEFT JOIN LATERAL (
+                SELECT
+                    ase.event_type,
+                    ase.status,
+                    ase.created_at,
+                    ase.metadata
+                FROM "AuthSecurityEvent" ase
+                WHERE ase.user_id = "User".id
+                  AND ase.tenant_id = :tenant_id_security
+                  AND LOWER(COALESCE(ase.status, \'info\')) = \'blocked\'
+                ORDER BY ase.created_at DESC
+                LIMIT 1
+            ) security_block ON TRUE
             WHERE id = :id AND tenant_id = :tenant_id
             LIMIT 1
         ');
         $stmt->execute([
             'id' => $id,
+            'tenant_id_security' => $this->getTenantId(),
             'tenant_id' => $this->getTenantId()
         ]);
         return $stmt->fetch();
@@ -220,7 +256,7 @@ class UserRepository {
     }
 
     public function getProfile($userId) {
-        $stmt = $this->db->prepare('SELECT name, profile, document_type, document_number, business_name FROM "User" WHERE id = :id AND tenant_id = :tenant_id');
+        $stmt = $this->db->prepare('SELECT name, email, profile, document_type, document_number, business_name FROM "User" WHERE id = :id AND tenant_id = :tenant_id');
         $stmt->execute([
             'id' => $userId,
             'tenant_id' => $this->getTenantId()

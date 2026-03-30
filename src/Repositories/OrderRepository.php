@@ -738,7 +738,7 @@ class OrderRepository {
             );
             $orderStatus = strtolower(trim((string)($data['status'] ?? 'pending')));
             
-            $stmt = $this->db->prepare('INSERT INTO "Order" ("id", "tenant_id", "user_id", "total", "status", "created_at", "shipping_address", "billing_address", "payment_method", "payment_details", "items_subtotal", "vat_subtotal", "vat_rate", "vat_amount", "shipping", "shipping_base", "shipping_tax_rate", "shipping_tax_amount", "discount_code", "discount_total", "discount_snapshot", "order_notes") VALUES (:id, :tenant_id, :user_id, :total, :status, NOW(), :shipping_address, :billing_address, :payment_method, :payment_details, :items_subtotal, :vat_subtotal, :vat_rate, :vat_amount, :shipping, :shipping_base, :shipping_tax_rate, :shipping_tax_amount, :discount_code, :discount_total, :discount_snapshot, :order_notes)');
+            $stmt = $this->db->prepare('INSERT INTO "Order" ("id", "tenant_id", "user_id", "total", "status", "created_at", "shipping_address", "billing_address", "payment_method", "delivery_method", "payment_details", "items_subtotal", "vat_subtotal", "vat_rate", "vat_amount", "shipping", "shipping_base", "shipping_tax_rate", "shipping_tax_amount", "discount_code", "discount_total", "discount_snapshot", "order_notes") VALUES (:id, :tenant_id, :user_id, :total, :status, NOW(), :shipping_address, :billing_address, :payment_method, :delivery_method, :payment_details, :items_subtotal, :vat_subtotal, :vat_rate, :vat_amount, :shipping, :shipping_base, :shipping_tax_rate, :shipping_tax_amount, :discount_code, :discount_total, :discount_snapshot, :order_notes)');
             
             $stmt->execute([
                 'id' => $data['id'],
@@ -749,6 +749,7 @@ class OrderRepository {
                 'shipping_address' => json_encode($data['shipping_address'] ?? null),
                 'billing_address' => json_encode($data['billing_address'] ?? null),
                 'payment_method' => $data['payment_method'] ?? null,
+                'delivery_method' => $deliveryMethod,
                 'payment_details' => isset($data['payment_details']) ? json_encode($data['payment_details']) : null,
                 'items_subtotal' => $quote['subtotal'],
                 'vat_subtotal' => $quote['vat_subtotal'],
@@ -931,11 +932,11 @@ class OrderRepository {
     // Stats methods for Dashboard
     public function getTotalSales() {
         $netExpr = $this->netSalesSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $stmt = $this->db->prepare("
             SELECT SUM($netExpr) as total
             FROM \"Order\" o
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus
         ");
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $result = $stmt->fetch();
@@ -944,12 +945,12 @@ class OrderRepository {
 
     public function getSalesProgress() {
         $netExpr = $this->netSalesSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $stmtThis = $this->db->prepare("
             SELECT SUM($netExpr)
             FROM \"Order\" o
             WHERE o.tenant_id = :tenant_id
-              AND $activeStatus
+              AND $realizedStatus
               AND o.created_at >= DATE_TRUNC('month', NOW())
         ");
         $stmtThis->execute(['tenant_id' => $this->getTenantId()]);
@@ -959,7 +960,7 @@ class OrderRepository {
             SELECT SUM($netExpr)
             FROM \"Order\" o
             WHERE o.tenant_id = :tenant_id
-              AND $activeStatus
+              AND $realizedStatus
               AND o.created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
               AND o.created_at < DATE_TRUNC('month', NOW())
         ");
@@ -1006,12 +1007,12 @@ class OrderRepository {
 
     public function getMonthlyPerformance() {
         $netExpr = $this->netSalesSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $stmt = $this->db->prepare("
             SELECT TO_CHAR(d, 'Dy') as day, COALESCE(SUM($netExpr), 0) as total
             FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, '1 day') d
             LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d)
-                AND $activeStatus
+                AND $realizedStatus
                 AND o.tenant_id = :tenant_id
             GROUP BY d
             ORDER BY d ASC
@@ -1022,12 +1023,12 @@ class OrderRepository {
 
     public function getSalesTrend30Days() {
         $netExpr = $this->netSalesSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $stmt = $this->db->prepare("
             SELECT TO_CHAR(d, 'DD Mon') as day, COALESCE(SUM($netExpr), 0) as total
             FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, '1 day') d
             LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d)
-                AND $activeStatus
+                AND $realizedStatus
                 AND o.tenant_id = :tenant_id
             GROUP BY d
             ORDER BY d ASC
@@ -1039,7 +1040,7 @@ class OrderRepository {
     public function getSalesSummary() {
         $netExpr = $this->netSalesSql('o');
         $vatExpr = $this->vatAmountSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $stmt = $this->db->prepare("
             SELECT
                 SUM(COALESCE(o.total, 0)) as gross,
@@ -1047,7 +1048,7 @@ class OrderRepository {
                 SUM($vatExpr) as vat,
                 SUM(COALESCE(o.shipping, 0)) as shipping
             FROM \"Order\" o
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus
         ");
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $row = $stmt->fetch();
@@ -1062,7 +1063,7 @@ class OrderRepository {
     public function getKpiTraceability($orderLimit = 12, $productLimit = 8) {
         $safeOrderLimit = max(1, min(50, (int)$orderLimit));
         $safeProductLimit = max(1, min(30, (int)$productLimit));
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $netExpr = $this->netSalesSql('o');
         $vatExpr = $this->vatAmountSql('o');
         $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
@@ -1080,7 +1081,7 @@ class OrderRepository {
                 COALESCE(o.shipping, 0) as shipping
             FROM \"Order\" o
             LEFT JOIN \"User\" u ON o.user_id = u.id AND u.tenant_id = o.tenant_id
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus
             ORDER BY o.created_at DESC
             LIMIT $safeOrderLimit
         ");
@@ -1112,7 +1113,7 @@ class OrderRepository {
                 FROM \"OrderItem\" oi
                 JOIN \"Order\" o ON oi.order_id = o.id
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
-                WHERE o.tenant_id = :tenant_id AND $activeStatus
+                WHERE o.tenant_id = :tenant_id AND $realizedStatus
             ),
             distributed_lines AS (
                 SELECT
@@ -1179,7 +1180,7 @@ class OrderRepository {
                 FROM \"OrderItem\" oi
                 JOIN \"Order\" o ON oi.order_id = o.id
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
-                WHERE o.tenant_id = :tenant_id AND $activeStatus
+                WHERE o.tenant_id = :tenant_id AND $realizedStatus
             ),
             distributed_lines AS (
                 SELECT
@@ -1233,7 +1234,7 @@ class OrderRepository {
     }
 
     public function getTopProducts() {
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
         $stmt = $this->db->prepare("
             SELECT oi.product_name as name,
@@ -1241,7 +1242,7 @@ class OrderRepository {
                    SUM($itemNetExpr) as revenue
             FROM \"OrderItem\" oi
             JOIN \"Order\" o ON oi.order_id = o.id
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus
             GROUP BY oi.product_name
             ORDER BY sold DESC
             LIMIT 5
@@ -1572,7 +1573,7 @@ class OrderRepository {
     }
 
     public function getSalesByCategory() {
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
         $stmt = $this->db->prepare("
             SELECT COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') as category,
@@ -1580,7 +1581,7 @@ class OrderRepository {
             FROM \"OrderItem\" oi
             LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
             JOIN \"Order\" o ON oi.order_id = o.id
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus
             GROUP BY COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría')
             ORDER BY total DESC
         ");
@@ -1590,11 +1591,11 @@ class OrderRepository {
 
     public function getAverageOrderValue() {
         $netExpr = $this->netSalesSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $stmt = $this->db->prepare("
             SELECT AVG($netExpr) as avg
             FROM \"Order\" o
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus
         ");
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return round((float)($stmt->fetchColumn() ?: 0), 2);
@@ -1602,12 +1603,12 @@ class OrderRepository {
 
     public function getSalesDeepDive() {
         $netExpr = $this->netSalesSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $stmtCurrent = $this->db->prepare("
             SELECT EXTRACT(DAY FROM d) as day, COALESCE(SUM($netExpr), 0) as total
             FROM generate_series(DATE_TRUNC('month', NOW()), CURRENT_DATE, '1 day') d
             LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d)
-                AND $activeStatus
+                AND $realizedStatus
                 AND o.tenant_id = :tenant_id
             GROUP BY day ORDER BY day ASC
         ");
@@ -1622,7 +1623,7 @@ class OrderRepository {
                 '1 day'
             ) d
             LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d)
-                AND $activeStatus
+                AND $realizedStatus
                 AND o.tenant_id = :tenant_id
             GROUP BY day ORDER BY day ASC
         ");
@@ -1638,7 +1639,7 @@ class OrderRepository {
                 FROM \"OrderItem\" oi
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
                 JOIN \"Order\" o ON oi.order_id = o.id
-                WHERE $activeStatus
+                WHERE $realizedStatus
                   AND o.tenant_id = :tenant_id
                   AND o.created_at >= DATE_TRUNC('month', NOW())
                 GROUP BY COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría')
@@ -1650,7 +1651,7 @@ class OrderRepository {
                 FROM \"OrderItem\" oi
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
                 JOIN \"Order\" o ON oi.order_id = o.id
-                WHERE $activeStatus
+                WHERE $realizedStatus
                   AND o.tenant_id = :tenant_id
                   AND o.created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
                   AND o.created_at < DATE_TRUNC('month', NOW())
@@ -1685,13 +1686,13 @@ class OrderRepository {
 
     public function getProfitStats() {
         $netExpr = $this->netSalesSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $salesStmt = $this->db->prepare("
             SELECT
                 SUM($netExpr) as revenue,
                 SUM(COALESCE(o.shipping_base, o.shipping, 0)) as shipping_cost
             FROM \"Order\" o
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus
         ");
         $salesStmt->execute(['tenant_id' => $this->getTenantId()]);
         $salesRow = $salesStmt->fetch();
@@ -1704,7 +1705,7 @@ class OrderRepository {
             FROM \"OrderItem\" oi
             JOIN \"Order\" o ON oi.order_id = o.id
             LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
-            WHERE o.tenant_id = :tenant_id AND $activeStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus
         ");
         $costStmt->execute(['tenant_id' => $this->getTenantId()]);
         $costRow = $costStmt->fetch();
@@ -2174,7 +2175,7 @@ class OrderRepository {
     public function getRecentOrders($limit = 5) {
         $netExpr = $this->netSalesSql('o');
         $vatExpr = $this->vatAmountSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $safeLimit = max(1, min(50, (int)$limit));
         $stmt = $this->db->prepare("
             SELECT o.id,
@@ -2190,7 +2191,7 @@ class OrderRepository {
             FROM \"Order\" o
             LEFT JOIN \"User\" u ON o.user_id = u.id AND u.tenant_id = o.tenant_id
             WHERE o.tenant_id = :tenant_id
-              AND $activeStatus
+              AND $realizedStatus
             ORDER BY o.created_at DESC
             LIMIT $safeLimit
         ");
@@ -2359,12 +2360,12 @@ class OrderRepository {
 
     public function getAOVDeepDive() {
         $netExpr = $this->netSalesSql('o');
-        $activeStatus = $this->activeOrdersCondition('o');
+        $realizedStatus = $this->realizedSalesCondition('o');
         $distributionStmt = $this->db->prepare("
             WITH orders AS (
                 SELECT $netExpr as net_total
                 FROM \"Order\" o
-                WHERE o.tenant_id = :tenant_id AND $activeStatus
+                WHERE o.tenant_id = :tenant_id AND $realizedStatus
             )
             SELECT
                 CASE 

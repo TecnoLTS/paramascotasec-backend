@@ -186,9 +186,9 @@ class BusinessIntelligenceService {
                 $pendingOps += (int)($row['count'] ?? 0);
             }
         }
-        if ($pendingOps >= 10) {
+        if ($pendingOps > 0) {
             $alerts[] = [
-                'type' => 'warning',
+                'type' => $pendingOps >= 10 ? 'warning' : 'info',
                 'message' => "Hay {$pendingOps} pedidos pendientes/en proceso. Revisa operación y despacho.",
                 'action' => 'Ver pedidos'
             ];

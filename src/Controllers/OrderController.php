@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Repositories\OrderRepository;
+use App\Repositories\AuthSecurityRepository;
 use App\Repositories\SettingsRepository;
 use App\Repositories\UserRepository;
 use App\Core\Response;
@@ -15,6 +16,7 @@ use Dompdf\Options;
 class OrderController {
     private $orderRepository;
     private $userRepository;
+    private $authSecurityRepository;
     private $forbiddenDiscountPayloadKeys = [
         'discount',
         'discounts',
@@ -24,10 +26,42 @@ class OrderController {
         'promotion',
         'promotions'
     ];
+    private $forbiddenMoneyPayloadKeys = [
+        'total',
+        'subtotal',
+        'items_subtotal',
+        'vat_subtotal',
+        'vat_amount',
+        'vat_rate',
+        'shipping',
+        'shipping_base',
+        'shipping_tax_rate',
+        'shipping_tax_amount',
+        'discount_total',
+        'discount_amount',
+        'discount_value',
+        'net_total',
+        'grand_total',
+        'amount'
+    ];
+    private $forbiddenItemPricingKeys = [
+        'price',
+        'unit_price',
+        'subtotal',
+        'total',
+        'discount_total',
+        'discount_amount',
+        'net_total',
+        'tax_amount',
+        'tax_rate',
+        'unit_cost',
+        'cost_total'
+    ];
 
     public function __construct() {
         $this->orderRepository = new OrderRepository();
         $this->userRepository = new UserRepository();
+        $this->authSecurityRepository = new AuthSecurityRepository();
     }
 
     private function authenticate() {
@@ -542,6 +576,149 @@ class OrderController {
         return true;
     }
 
+    private function hasMeaningfulMoneyValue($value): bool
+    {
+        if ($value === null || $value === '') {
+            return false;
+        }
+        if (is_numeric($value)) {
+            return abs((float)$value) > 0.00001;
+        }
+        if (is_array($value)) {
+            return count($value) > 0;
+        }
+        return trim((string)$value) !== '';
+    }
+
+    private function pricingTamperLockMinutes(): int
+    {
+        $configured = (int)($_ENV['AUTH_PRICING_TAMPER_LOCK_MINUTES'] ?? 0);
+        if ($configured > 0) {
+            return max(15, $configured);
+        }
+
+        $baseLoginLock = (int)($_ENV['AUTH_LOGIN_LOCK_MINUTES'] ?? 15);
+        return max(60, $baseLoginLock * 4);
+    }
+
+    private function getClientIpAddress(): ?string
+    {
+        if (function_exists('get_client_ip')) {
+            return \get_client_ip();
+        }
+
+        $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? null;
+        if (!is_string($ip) || trim($ip) === '') {
+            return null;
+        }
+
+        $first = explode(',', $ip)[0] ?? null;
+        return $first ? trim($first) : null;
+    }
+
+    private function blockUserForPricingTamper(?array $user, string $reasonCode, array $unexpectedFields): bool
+    {
+        $userId = trim((string)($user['sub'] ?? ''));
+        if ($userId === '') {
+            return false;
+        }
+
+        $lockedUntil = date('Y-m-d H:i:s', time() + ($this->pricingTamperLockMinutes() * 60));
+        $this->userRepository->setLoginFailureState($userId, 999, $lockedUntil);
+        $this->userRepository->clearActiveTokenId($userId);
+
+        try {
+            $this->authSecurityRepository->recordEvent(
+                'order_pricing_tamper',
+                'blocked',
+                $userId,
+                isset($user['email']) ? (string)$user['email'] : null,
+                $this->getClientIpAddress(),
+                $_SERVER['HTTP_USER_AGENT'] ?? null,
+                [
+                    'reason_code' => $reasonCode,
+                    'blocked_until' => $lockedUntil,
+                    'fields' => array_values($unexpectedFields),
+                    'path' => $_SERVER['REQUEST_URI'] ?? null,
+                ]
+            );
+        } catch (\Throwable $eventError) {
+            error_log('[ORDER_PRICING_TAMPER_EVENT_FAILED] ' . $eventError->getMessage());
+        }
+
+        return true;
+    }
+
+    private function respondToPricingTamper(?array $user, array $unexpectedFields, string $message, string $code): bool
+    {
+        $blocked = $this->blockUserForPricingTamper($user, $code, $unexpectedFields);
+        $finalMessage = $message;
+        if ($blocked) {
+            $finalMessage .= ' Detectamos manipulación del pedido y bloqueamos temporalmente tu cuenta por seguridad.';
+        }
+
+        Response::error($finalMessage, 403, $code);
+        return true;
+    }
+
+    private function rejectUnexpectedMoneyFields(array $data, ?array $user = null): bool
+    {
+        $unexpected = [];
+        foreach ($this->forbiddenMoneyPayloadKeys as $key) {
+            if (!array_key_exists($key, $data)) {
+                continue;
+            }
+            if ($this->hasMeaningfulMoneyValue($data[$key])) {
+                $unexpected[] = $key;
+            }
+        }
+
+        if (count($unexpected) === 0) {
+            return false;
+        }
+
+        return $this->respondToPricingTamper(
+            $user,
+            $unexpected,
+            'Montos rechazados. El servidor calcula precios, IVA, envío y descuentos. Campos no permitidos: ' . implode(', ', $unexpected),
+            'ORDER_PRICING_FIELDS_FORBIDDEN'
+        );
+    }
+
+    private function rejectUnexpectedItemPricingFields(array $data, ?array $user = null): bool
+    {
+        $items = $data['items'] ?? null;
+        if (!is_array($items)) {
+            return false;
+        }
+
+        $unexpected = [];
+        foreach ($items as $index => $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            foreach ($this->forbiddenItemPricingKeys as $key) {
+                if (!array_key_exists($key, $item)) {
+                    continue;
+                }
+                if ($this->hasMeaningfulMoneyValue($item[$key])) {
+                    $unexpected[] = "items[$index].$key";
+                }
+            }
+        }
+
+        if (count($unexpected) === 0) {
+            return false;
+        }
+
+        return $this->respondToPricingTamper(
+            $user,
+            $unexpected,
+            'Líneas de pedido rechazadas. El cliente no puede definir montos por producto. Campos no permitidos: ' . implode(', ', $unexpected),
+            'ORDER_ITEM_PRICING_FIELDS_FORBIDDEN'
+        );
+    }
+
     private function normalizeDiscountCodeValue($value) {
         if ($value === null) return null;
         $normalized = strtoupper(trim((string)$value));
@@ -590,8 +767,12 @@ class OrderController {
 
     public function quote() {
         try {
+            $user = $this->authenticateOptional();
             $data = json_decode(file_get_contents('php://input'), true) ?: [];
             if ($this->rejectUnexpectedDiscountFields($data)) {
+                return;
+            }
+            if ($this->rejectUnexpectedMoneyFields($data, $user) || $this->rejectUnexpectedItemPricingFields($data, $user)) {
                 return;
             }
             if (!$this->enforceSalesEnabled()) {
@@ -626,6 +807,9 @@ class OrderController {
             if ($this->rejectUnexpectedDiscountFields($data)) {
                 return;
             }
+            if ($this->rejectUnexpectedMoneyFields($data, $user) || $this->rejectUnexpectedItemPricingFields($data, $user)) {
+                return;
+            }
             if (!$this->enforceSalesEnabled()) {
                 return;
             }
@@ -640,6 +824,7 @@ class OrderController {
                 return;
             }
             $data['user_id'] = $this->resolveCustomerUserId($data, $user);
+            $data['status'] = 'pending';
 
             // Always generate a server-side order id to avoid collisions/tampering.
             $data['id'] = 'ORD-' . date('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(4)));

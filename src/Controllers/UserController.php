@@ -228,10 +228,16 @@ class UserController {
             $profileData = $this->userRepository->getProfile($user['sub']);
             $profile = [];
             $name = null;
+            $email = null;
+            $phone = null;
             if ($profileData) {
                 $name = $profileData['name'] ?? null;
+                $email = $profileData['email'] ?? null;
                 if (!empty($profileData['profile'])) {
                     $profile = json_decode($profileData['profile'], true) ?: [];
+                }
+                if (!empty($profile['phone'])) {
+                    $phone = trim((string)$profile['phone']);
                 }
                 if (!empty($profileData['document_type'])) {
                     $profile['documentType'] = $profileData['document_type'];
@@ -243,7 +249,12 @@ class UserController {
                     $profile['businessName'] = $profileData['business_name'];
                 }
             }
-            Response::json(['name' => $name, 'profile' => $profile]);
+            Response::json([
+                'name' => $name,
+                'email' => $email,
+                'phone' => $phone,
+                'profile' => $profile,
+            ]);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 500, 'USER_PROFILE_FETCH_FAILED');
         }

@@ -258,6 +258,7 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS document_type text',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS document_number text',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS business_name text',
+        'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS delivery_method text',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS otp_code text',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS otp_expires_at timestamp',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS otp_attempts integer',

@@ -352,6 +352,10 @@ class ProductController {
                 Response::error('Costo inválido', 400, 'PRODUCT_COST_INVALID');
                 return;
             }
+            if (isset($data['cost']) && is_numeric($data['cost']) && floatval($data['cost']) > 0 && floatval($data['price']) < floatval($data['cost'])) {
+                Response::error('El precio base no puede ser menor al costo del producto.', 400, 'PRODUCT_PRICE_BELOW_COST');
+                return;
+            }
             $quantity = isset($data['quantity']) && is_numeric($data['quantity']) ? intval($data['quantity']) : 0;
             $this->validatePurchaseInvoice($data['purchaseInvoice'] ?? null, $quantity > 0);
             if (!isset($data['description']) || trim((string)$data['description']) === '') {
@@ -448,6 +452,23 @@ class ProductController {
                         Response::error('Valor inválido', 400, $errorCode, ['field' => $field]);
                         return;
                     }
+                }
+            }
+            if (array_key_exists('price', $data) || array_key_exists('cost', $data)) {
+                $currentProduct = $this->productRepository->getById($id, ['includeUnpublished' => true]);
+                if (!$currentProduct) {
+                    Response::error('Producto no encontrado', 404, 'PRODUCT_NOT_FOUND');
+                    return;
+                }
+                $effectivePrice = array_key_exists('price', $data) && is_numeric($data['price'])
+                    ? floatval($data['price'])
+                    : floatval($currentProduct['price'] ?? 0);
+                $effectiveCost = array_key_exists('cost', $data) && is_numeric($data['cost'])
+                    ? floatval($data['cost'])
+                    : floatval($currentProduct['cost'] ?? 0);
+                if ($effectiveCost > 0 && $effectivePrice < $effectiveCost && array_key_exists('price', $data)) {
+                    Response::error('El precio base no puede ser menor al costo del producto.', 400, 'PRODUCT_PRICE_BELOW_COST');
+                    return;
                 }
             }
             $requiredFields = ['name', 'category', 'brand', 'description'];
