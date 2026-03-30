@@ -237,6 +237,22 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
             metadata jsonb DEFAULT \'{}\'::jsonb,
             created_at timestamp without time zone DEFAULT NOW() NOT NULL
         )',
+        'CREATE TABLE IF NOT EXISTS "ContactMessage" (
+            id text PRIMARY KEY,
+            tenant_id text NOT NULL,
+            name text NOT NULL,
+            email text NOT NULL,
+            phone text,
+            subject text NOT NULL,
+            message text NOT NULL,
+            source text DEFAULT \'web\' NOT NULL,
+            status text DEFAULT \'new\' NOT NULL,
+            ip_address text,
+            user_agent text,
+            metadata jsonb DEFAULT \'{}\'::jsonb,
+            created_at timestamp without time zone DEFAULT NOW() NOT NULL,
+            updated_at timestamp without time zone DEFAULT NOW() NOT NULL
+        )',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS addresses jsonb',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS profile jsonb',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS document_type text',
@@ -382,6 +398,8 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'CREATE INDEX IF NOT EXISTS "AuthSecurityEvent_tenant_event_idx" ON "AuthSecurityEvent" (tenant_id, event_type, created_at DESC)',
         'CREATE INDEX IF NOT EXISTS "AuthSecurityEvent_tenant_user_idx" ON "AuthSecurityEvent" (tenant_id, user_id, created_at DESC)',
         'CREATE INDEX IF NOT EXISTS "AuthSecurityEvent_tenant_email_idx" ON "AuthSecurityEvent" (tenant_id, email, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "ContactMessage_tenant_created_idx" ON "ContactMessage" (tenant_id, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "ContactMessage_tenant_status_idx" ON "ContactMessage" (tenant_id, status)',
     ];
 
     foreach ($statements as $sql) {

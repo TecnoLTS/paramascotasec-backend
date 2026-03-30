@@ -1016,12 +1016,35 @@ class ProductRepository {
 
     private function requirePurchaseInvoicePayload(array $data): array {
         $purchaseInvoice = $data['purchaseInvoice'] ?? null;
-        if (!is_array($purchaseInvoice) || count(array_filter($purchaseInvoice, static function ($value) {
-            return trim((string)$value) !== '';
-        })) === 0) {
+        if (!is_array($purchaseInvoice) || !$this->payloadHasMeaningfulValue($purchaseInvoice)) {
             throw new \InvalidArgumentException('Debes registrar la factura de compra para ingresar stock.');
         }
         return $purchaseInvoice;
+    }
+
+    private function payloadHasMeaningfulValue(mixed $value): bool {
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                if ($this->payloadHasMeaningfulValue($item)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        if ($value === null) {
+            return false;
+        }
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_scalar($value)) {
+            return trim((string)$value) !== '';
+        }
+
+        return false;
     }
 
     private function recordPurchaseInvoiceStockEntry(string $productId, string $productName, int $quantity, float $unitCost, array $data, string $reason, ?array $fallbackAttributes = null): array {

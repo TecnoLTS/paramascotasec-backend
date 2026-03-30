@@ -321,6 +321,7 @@ $router->add('POST', '/api/auth/logout', 'AuthController@logout');
 $router->add('POST', '/api/auth/register', 'AuthController@register');
 $router->add('POST', '/api/auth/request-otp', 'AuthController@requestOtp');
 $router->add('POST', '/api/auth/verify-otp', 'AuthController@verifyOtp');
+$router->add('POST', '/api/contact', 'ContactController@store');
 $router->add('GET', '/api/auth/verify', 'AuthController@verify');
 $router->add('GET', '/api/auth/session', 'AuthController@session');
 
@@ -403,6 +404,7 @@ function is_public_api_request(string $uri, string $method): bool {
             '/api/auth/request-otp',
             '/api/auth/verify-otp',
             '/api/orders/quote',
+            '/api/contact',
             '/api/security/csp-report',
         ], true)) {
             return true;
@@ -423,6 +425,7 @@ $csrfExemptPaths = [
     '/api/auth/verify-otp',
     '/api/auth/verify',
     '/api/orders/quote',
+    '/api/contact',
     '/api/security/csp-report',
     '/api/health',
 ];
