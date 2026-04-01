@@ -18,12 +18,17 @@ cd /home/admincenter/contenedores/paramascotasec-backend
 ./scripts/deploy-production.sh
 ```
 
-Si necesitas bootstrap:
+Si necesitas preparar base de datos e instalar dependencias:
 
 ```bash
-RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 ./scripts/deploy-development.sh
-RUN_COMPOSER_INSTALL=1 RUN_DB_BOOTSTRAP=1 ./scripts/deploy-production.sh
+RUN_COMPOSER_INSTALL=1 RUN_DB_SETUP=1 ./scripts/deploy-development.sh
+RUN_COMPOSER_INSTALL=1 RUN_DB_SETUP=1 ./scripts/deploy-production.sh
 ```
+
+Nota:
+
+- `RUN_DB_SETUP` es el nombre recomendado porque describe mejor que se prepara la base de datos.
+- `RUN_DB_BOOTSTRAP` sigue funcionando por compatibilidad, pero ya no es el nombre preferido.
 
 ## Puntos claros para editar
 
@@ -52,3 +57,48 @@ docker compose logs -f app
 docker compose logs -f web
 php -l config/tenants.php
 ```
+
+
+---------------------------------------------------------------------------------------------------------------------------
+Lista nueva de despliegues
+
+Workspace completo
+
+cd /home/admincenter/contenedores
+./scripts/deploy-workspace.sh development
+./scripts/deploy-workspace.sh production
+paramascotasec
+
+cd /home/admincenter/contenedores/paramascotasec
+./scripts/deploy-development.sh
+./scripts/deploy-production.sh
+paramascotasec-backend
+
+cd /home/admincenter/contenedores/paramascotasec-backend
+./scripts/deploy-development.sh
+./scripts/deploy-production.sh
+Si necesitas instalar dependencias PHP y preparar base de datos:
+
+cd /home/admincenter/contenedores/paramascotasec-backend
+RUN_COMPOSER_INSTALL=1 RUN_DB_SETUP=1 ./scripts/deploy-development.sh
+RUN_COMPOSER_INSTALL=1 RUN_DB_SETUP=1 ./scripts/deploy-production.sh
+paramascostas-DB
+
+cd /home/admincenter/contenedores/paramascostas-DB
+./scripts/deploy.sh development
+./scripts/deploy.sh production
+tecnolts
+
+cd /home/admincenter/contenedores/tecnolts
+./scripts/deploy-development.sh
+./scripts/deploy-production.sh
+gateway
+
+cd /home/admincenter/contenedores/gateway
+./scripts/setup-ssl-local.sh
+./scripts/deploy-gateway-production.sh
+./scripts/renew-letsencrypt.sh
+Facturador
+
+cd /home/admincenter/contenedores/Facturador
+./scripts/deploy.sh

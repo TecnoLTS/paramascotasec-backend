@@ -120,6 +120,7 @@ assert_backend_mode() {
 deploy_backend() {
   local mode="${1:-development}"
   local env_file
+  local run_db_setup="${RUN_DB_SETUP:-${RUN_DB_BOOTSTRAP:-1}}"
 
   ensure_docker_ready
   env_file="$(resolve_env_file "${mode}")"
@@ -127,7 +128,7 @@ deploy_backend() {
   echo "Levantando backend Paramascotasec en ${mode} usando ${env_file}..."
   (
     cd "${APP_DIR}"
-    APP_ENV="${mode}" RUN_DB_BOOTSTRAP=1 docker compose --env-file "${env_file}" up -d --build --force-recreate --remove-orphans app web
+    APP_ENV="${mode}" RUN_DB_SETUP="${run_db_setup}" RUN_DB_BOOTSTRAP="${run_db_setup}" docker compose --env-file "${env_file}" up -d --build --force-recreate --remove-orphans app web
   )
   assert_backend_mode "${mode}"
   compose_cmd "${env_file}" ps

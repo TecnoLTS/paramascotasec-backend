@@ -836,18 +836,20 @@ class OrderRepository {
                 }
             }
 
-            $invoiceData = $this->buildInvoiceData($data, $quote);
-            $invoiceNumber = $this->buildInvoiceNumber($data['id']);
-            $invoiceHtml = $this->renderInvoiceHtml($invoiceNumber, $data, $quote, $invoiceData, $baseUrl);
+            if ($this->realizedSalesConditionForStatus($orderStatus)) {
+                $invoiceData = $this->buildInvoiceData($data, $quote);
+                $invoiceNumber = $this->buildInvoiceNumber($data['id']);
+                $invoiceHtml = $this->renderInvoiceHtml($invoiceNumber, $data, $quote, $invoiceData, $baseUrl);
 
-            $stmtInvoice = $this->db->prepare('UPDATE "Order" SET invoice_number = :invoice_number, invoice_html = :invoice_html, invoice_created_at = NOW(), invoice_data = :invoice_data WHERE id = :id AND tenant_id = :tenant_id');
-            $stmtInvoice->execute([
-                'id' => $data['id'],
-                'tenant_id' => $this->getTenantId(),
-                'invoice_number' => $invoiceNumber,
-                'invoice_html' => $invoiceHtml,
-                'invoice_data' => json_encode($invoiceData)
-            ]);
+                $stmtInvoice = $this->db->prepare('UPDATE "Order" SET invoice_number = :invoice_number, invoice_html = :invoice_html, invoice_created_at = NOW(), invoice_data = :invoice_data WHERE id = :id AND tenant_id = :tenant_id');
+                $stmtInvoice->execute([
+                    'id' => $data['id'],
+                    'tenant_id' => $this->getTenantId(),
+                    'invoice_number' => $invoiceNumber,
+                    'invoice_html' => $invoiceHtml,
+                    'invoice_data' => json_encode($invoiceData)
+                ]);
+            }
 
             $this->db->commit();
             return $this->getById($data['id']);
@@ -864,6 +866,11 @@ class OrderRepository {
 
     private function realizedSalesCondition($alias = 'o') {
         return "LOWER(COALESCE({$alias}.status, 'pending')) IN ('delivered', 'completed')";
+    }
+
+    private function realizedSalesConditionForStatus($status) {
+        $normalized = strtolower(trim((string)$status));
+        return in_array($normalized, ['delivered', 'completed'], true);
     }
 
     private function orderAffectsInventory($status) {

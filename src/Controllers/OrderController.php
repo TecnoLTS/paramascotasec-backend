@@ -72,6 +72,44 @@ class OrderController {
         return Auth::optionalUser();
     }
 
+    private function shouldEmitFacturadorInvoiceForStatus(?string $status): bool
+    {
+        $normalized = strtolower(trim((string)$status));
+        return in_array($normalized, ['completed', 'delivered'], true);
+    }
+
+    private function dispatchFacturadorInvoiceAfterResponse(array $order): void
+    {
+        if (!$order || empty($order['id']) || !$this->shouldEmitFacturadorInvoiceForStatus($order['status'] ?? null)) {
+            return;
+        }
+
+        ignore_user_abort(true);
+        if (function_exists('fastcgi_finish_request')) {
+            @fastcgi_finish_request();
+        }
+
+        try {
+            $this->emitInvoiceWithFacturador($order);
+        } catch (\Throwable $e) {
+            error_log(sprintf(
+                '[FACTURADOR_DEFERRED_DISPATCH_FAILED] orden=%s error=%s',
+                (string)($order['id'] ?? 'N/A'),
+                $e->getMessage()
+            ));
+        }
+    }
+
+    private function customerCanCancelOrder(array $order, array $user): bool
+    {
+        if (empty($user['sub']) || empty($order['user_id']) || (string)$order['user_id'] !== (string)$user['sub']) {
+            return false;
+        }
+
+        $status = strtolower(trim((string)($order['status'] ?? 'pending')));
+        return in_array($status, ['pending', 'processing'], true);
+    }
+
     public function index() {
         $user = $this->authenticate();
         try {
@@ -135,7 +173,7 @@ class OrderController {
             return;
         }
 
-        $allowedStatuses = ['pending', 'processing', 'shipped', 'delivered', 'canceled'];
+        $allowedStatuses = ['pending', 'processing', 'shipped', 'delivered', 'completed', 'canceled'];
         $newStatus = strtolower(trim((string)$data['status']));
         if (!in_array($newStatus, $allowedStatuses, true)) {
             Response::error('Estado inválido', 400, 'ORDER_STATUS_INVALID');
@@ -150,12 +188,16 @@ class OrderController {
             }
             $isAdmin = (($user['role'] ?? 'customer') === 'admin');
             if (!$isAdmin) {
-                Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
-                return;
+                $isCustomerCancel = $newStatus === 'canceled' && $this->customerCanCancelOrder($order, $user);
+                if (!$isCustomerCancel) {
+                    Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
+                    return;
+                }
             }
 
             $updated = $this->orderRepository->updateStatus($id, $newStatus);
             Response::json($updated);
+            $this->dispatchFacturadorInvoiceAfterResponse($updated ?: []);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 500, 'ORDER_STATUS_UPDATE_FAILED');
         }
@@ -837,15 +879,8 @@ class OrderController {
             }
             $order = $this->orderRepository->create($data, $baseUrl);
 
-            if ($order && $order['id']) {
-                $this->emitInvoiceWithFacturador($order);
-                $reloadedOrder = $this->orderRepository->getById($order['id']);
-                if ($reloadedOrder) {
-                    $order = $reloadedOrder;
-                }
-            }
-            
             Response::json($order, 201);
+            $this->dispatchFacturadorInvoiceAfterResponse($order ?: []);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 400, 'ORDER_CREATE_FAILED');
         }
