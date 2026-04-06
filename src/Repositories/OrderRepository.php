@@ -19,7 +19,7 @@ class OrderRepository {
     }
 
     public function getAll() {
-        // Lightweight list for admin table (full detail is fetched via getById).
+        // Lean but operationally useful list for admin table.
         $stmt = $this->db->prepare('
             SELECT
                 o.id,
@@ -27,11 +27,31 @@ class OrderRepository {
                 o.total,
                 o.status,
                 o.created_at,
+                o.delivery_method,
+                o.payment_method,
+                o.order_notes,
+                o.shipping_address,
+                o.billing_address,
                 u.name as user_name,
-                u.email as user_email
+                u.email as user_email,
+                COUNT(oi.id) AS items_count
             FROM "Order" o 
             LEFT JOIN "User" u ON o.user_id = u.id AND u.tenant_id = o.tenant_id
+            LEFT JOIN "OrderItem" oi ON oi.order_id = o.id
             WHERE o.tenant_id = :tenant_id
+            GROUP BY
+                o.id,
+                o.user_id,
+                o.total,
+                o.status,
+                o.created_at,
+                o.delivery_method,
+                o.payment_method,
+                o.order_notes,
+                o.shipping_address,
+                o.billing_address,
+                u.name,
+                u.email
             ORDER BY o.created_at DESC
         ');
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
