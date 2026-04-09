@@ -14,10 +14,12 @@ use Dompdf\Options;
 class QuotationController {
     private $quotationRepository;
     private $orderRepository;
+    private $quotationPdfLogoPath;
 
     public function __construct() {
         $this->quotationRepository = new QuotationRepository();
         $this->orderRepository = new OrderRepository();
+        $this->quotationPdfLogoPath = null;
     }
 
     private function getAdminUser(): array {
@@ -94,9 +96,17 @@ class QuotationController {
             $frontendBase = str_replace('://api.', '://', $frontendBase);
         }
         $logoUrl = rtrim($frontendBase, '/') . '/images/brand/LogoVerde150.png';
-        $logoPath = __DIR__ . '/../../public/images/brand/LogoVerde150.png';
-        if (file_exists($logoPath)) {
-            $logoUrl = 'data:image/png;base64,' . base64_encode((string)file_get_contents($logoPath));
+        $logoCandidates = [
+            __DIR__ . '/../../public/images/brand/LogoVerde150.png',
+            dirname(__DIR__, 4) . '/paramascotasec/app/public/images/brand/LogoVerde150.png',
+        ];
+        foreach ($logoCandidates as $logoPath) {
+            if (is_string($logoPath) && file_exists($logoPath)) {
+                $resolved = realpath($logoPath) ?: $logoPath;
+                $this->quotationPdfLogoPath = $resolved;
+                $logoUrl = 'file://' . $resolved;
+                break;
+            }
         }
 
         $rows = '';
@@ -128,95 +138,116 @@ class QuotationController {
             <meta charset="utf-8" />
             <title>Cotización ' . htmlspecialchars((string)$quotation['id']) . '</title>
             <style>
-                @page { margin: 28px 34px; }
-                body { font-family: DejaVu Sans, Arial, sans-serif; color: #0f172a; margin: 0; font-size: 13px; line-height: 1.45; background: #ffffff; }
+                @page { margin: 30px 34px 34px 34px; }
+                body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; background: #ffffff; font-size: 12px; line-height: 1.45; }
                 .sheet { width: 100%; }
-                .header-table, .info-table, .items-table, .totals-table { width: 100%; border-collapse: collapse; }
-                .brand-logo { height: 46px; }
-                .brand-name { font-size: 22px; font-weight: 800; color: #0b8ca8; line-height: 1; margin: 0 0 4px 0; }
-                .brand-subtitle { color:#64748b; font-size: 13px; }
-                .quote-code { font-size: 24px; font-weight: 800; color:#0f172a; line-height:1.2; margin-bottom:6px; }
-                .muted { color:#64748b; font-size: 12px; line-height: 1.5; }
-                .section-card { border:1px solid #dbe3ee; border-radius: 14px; padding: 16px 18px; background:#fff; }
-                .section-title { font-size:11px; text-transform:uppercase; font-weight:700; color:#64748b; letter-spacing:0.04em; margin-bottom:8px; }
-                .customer-name { font-size:18px; font-weight:700; color:#1e293b; margin:0 0 6px 0; }
-                .items-wrap { border:1px solid #dbe3ee; border-radius: 14px; padding: 14px 16px 16px 16px; }
-                .items-table th { text-align:left; font-size:11px; text-transform:uppercase; color:#64748b; letter-spacing:0.04em; padding:10px 14px; border-bottom:1px solid #cbd5e1; }
-                .summary-box { width: 310px; margin-left:auto; margin-top: 18px; }
-                .totals-table td { padding: 8px 0; border-bottom:1px solid #e2e8f0; font-size:14px; }
-                .totals-table td:last-child { text-align:right; font-weight:700; }
-                .totals-table .grand td { font-size:20px; font-weight:800; color:#0f172a; padding-top: 12px; }
-                .footer { margin-top:24px; font-size:12px; color:#64748b; }
+                .full { width: 100%; border-collapse: collapse; }
+                .header { margin-bottom: 26px; }
+                .brand-logo { height: 54px; display:block; }
+                .doc-kicker { font-size: 10px; color: #64748b; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
+                .doc-code { font-size: 28px; line-height: 1.1; font-weight: 800; color: #0f172a; margin: 6px 0 8px 0; }
+                .meta-line { font-size: 12px; color: #64748b; line-height: 1.5; }
+                .subtitle { font-size: 13px; color: #64748b; margin-top: 8px; }
+                .card-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+                .card-cell { width: 50%; vertical-align: top; }
+                .card-wrap { border: 1px solid #d9e2ec; border-radius: 14px; padding: 16px 18px; }
+                .gap-left { padding-right: 8px; }
+                .gap-right { padding-left: 8px; }
+                .section-label { font-size: 11px; color: #64748b; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; }
+                .customer-name { font-size: 17px; line-height: 1.3; font-weight: 800; color: #1e293b; margin-bottom: 8px; }
+                .detail-line { font-size: 12px; color: #5b708b; line-height: 1.55; }
+                .items-box { border: 1px solid #d9e2ec; border-radius: 14px; padding: 14px 16px 16px 16px; margin-top: 20px; }
+                .items-title { font-size: 11px; color: #64748b; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; }
+                .items-table { width: 100%; border-collapse: collapse; }
+                .items-table th { font-size: 11px; color: #64748b; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700; text-align: left; padding: 10px 14px; border-bottom: 1px solid #cfd8e3; }
+                .items-table td { font-size: 12px; color: #1e293b; padding: 12px 14px; border-bottom: 1px solid #e6edf5; vertical-align: top; }
+                .items-table .number { text-align: right; }
+                .items-table .center { text-align: center; }
+                .product-name { font-size: 14px; line-height: 1.35; font-weight: 700; color: #0f172a; }
+                .summary-table { width: 320px; margin-left: auto; margin-top: 20px; border-collapse: collapse; }
+                .summary-table td { padding: 9px 0; border-bottom: 1px solid #e6edf5; font-size: 14px; color: #1e293b; }
+                .summary-table td:last-child { text-align: right; font-weight: 700; }
+                .summary-table .total-row td { padding-top: 12px; font-size: 22px; font-weight: 800; color: #0f172a; }
+                .notes-box { margin-top: 18px; padding: 16px 18px; border: 1px solid #d9e2ec; border-radius: 14px; background: #f8fbff; }
+                .notes-text { font-size: 12px; color: #334155; line-height: 1.6; white-space: pre-wrap; }
+                .footer { margin-top: 28px; font-size: 12px; color: #64748b; }
             </style>
         </head>
         <body>
             <div class="sheet">
-                <table class="header-table" style="margin-bottom:24px;">
+                <table class="full header">
                     <tr>
-                        <td style="width:55%; vertical-align:top;">
-                            <table style="border-collapse:collapse;">
-                                <tr>
-                                    <td style="vertical-align:top; padding-right:12px;">
-                                        <img class="brand-logo" src="' . htmlspecialchars($logoUrl) . '" alt="ParaMascotas" />
-                                    </td>
-                                    <td style="vertical-align:top;">
-                                        <div class="brand-name">ParaMascotas</div>
-                                        <div class="brand-subtitle">Cotización comercial de productos</div>
-                                    </td>
-                                </tr>
-                            </table>
+                        <td style="width:50%; vertical-align:top;">
+                            <img class="brand-logo" src="' . htmlspecialchars($logoUrl) . '" alt="ParaMascotas" />
+                            <div class="subtitle">Cotización comercial de productos</div>
                         </td>
-                        <td style="width:45%; text-align:right; vertical-align:top;">
-                            <div class="quote-code">' . htmlspecialchars((string)$quotation['id']) . '</div>
-                            <div class="muted">Emitida: ' . htmlspecialchars($this->formatQuotationDate((string)($quotation['created_at'] ?? ''), true)) . '</div>
-                            <div class="muted">Válida hasta: ' . htmlspecialchars($this->formatQuotationDate((string)($quotation['valid_until'] ?? ''), false)) . '</div>
+                        <td style="width:50%; vertical-align:top; text-align:right;">
+                            <div class="doc-kicker">Cotización comercial</div>
+                            <div class="doc-code">' . htmlspecialchars((string)$quotation['id']) . '</div>
+                            <div class="meta-line">Emitida: ' . htmlspecialchars($this->formatQuotationDate((string)($quotation['created_at'] ?? ''), true)) . '</div>
+                            <div class="meta-line">Válida hasta: ' . htmlspecialchars($this->formatQuotationDate((string)($quotation['valid_until'] ?? ''), false)) . '</div>
                         </td>
                     </tr>
                 </table>
-                <table class="info-table" style="margin-bottom:20px;">
+
+                <table class="card-table">
                     <tr>
-                        <td style="width:52%; vertical-align:top; padding-right:8px;">
-                            <div class="section-card">
-                                <div class="section-title">Cliente</div>
+                        <td class="card-cell gap-left">
+                            <div class="card-wrap">
+                                <div class="section-label">Cliente</div>
                                 <div class="customer-name">' . htmlspecialchars((string)($quotation['customer_name'] ?? 'Cliente')) . '</div>
-                                <div class="muted">Documento: ' . htmlspecialchars((string)($quotation['customer_document_number'] ?? 'No indicado')) . '</div>
-                                <div class="muted">Teléfono: ' . htmlspecialchars((string)($quotation['customer_phone'] ?? 'No indicado')) . '</div>
-                                <div class="muted">Correo: ' . htmlspecialchars((string)($quotation['customer_email'] ?? 'No indicado')) . '</div>
+                                <div class="detail-line">Documento: ' . htmlspecialchars((string)($quotation['customer_document_number'] ?? 'No indicado')) . '</div>
+                                <div class="detail-line">Teléfono: ' . htmlspecialchars((string)($quotation['customer_phone'] ?? 'No indicado')) . '</div>
+                                <div class="detail-line">Correo: ' . htmlspecialchars((string)($quotation['customer_email'] ?? 'No indicado')) . '</div>
                             </div>
                         </td>
-                        <td style="width:48%; vertical-align:top; padding-left:8px;">
-                            <div class="section-card">
-                                <div class="section-title">Entrega y condiciones</div>
-                                <div class="muted">Modalidad: Retiro en tienda</div>
-                                <div class="muted">Dirección: ' . htmlspecialchars((string)($address['street'] ?? 'No indicada')) . '</div>
-                                <div class="muted">Ciudad: ' . htmlspecialchars((string)($address['city'] ?? 'No indicada')) . '</div>
-                                <div class="muted">Descuento: ' . htmlspecialchars((string)($quotation['discount_code'] ?? 'Sin código')) . '</div>
+                        <td class="card-cell gap-right">
+                            <div class="card-wrap">
+                                <div class="section-label">Entrega y condiciones</div>
+                                <div class="detail-line">Modalidad: Retiro en tienda</div>
+                                <div class="detail-line">Dirección: ' . htmlspecialchars((string)($address['street'] ?? 'No indicada')) . '</div>
+                                <div class="detail-line">Ciudad: ' . htmlspecialchars((string)($address['city'] ?? 'No indicada')) . '</div>
+                                <div class="detail-line">Descuento: ' . htmlspecialchars((string)($quotation['discount_code'] ?? 'Sin código')) . '</div>
                             </div>
                         </td>
                     </tr>
                 </table>
-                <div class="items-wrap">
-                    <div class="section-title" style="margin-bottom:10px;">Detalle cotizado</div>
+
+                <div class="items-box">
+                    <div class="items-title">Detalle cotizado</div>
                     <table class="items-table">
                         <thead>
                             <tr>
                                 <th style="width:52%;">Producto</th>
-                                <th style="width:12%; text-align:center;">Cant.</th>
-                                <th style="width:18%; text-align:right;">PVP</th>
-                                <th style="width:18%; text-align:right;">Total</th>
+                                <th class="center" style="width:12%;">Cant.</th>
+                                <th class="number" style="width:18%;">PVP</th>
+                                <th class="number" style="width:18%;">Total</th>
                             </tr>
                         </thead>
                         <tbody>' . $rows . '</tbody>
                     </table>
                 </div>
-                <div class="summary-box">
-                    <table class="totals-table">
-                        <tr><td>Subtotal</td><td>$' . number_format((float)($snapshot['vat_subtotal'] ?? 0), 2, ',', '.') . '</td></tr>
-                        <tr><td>IVA</td><td>$' . number_format((float)($snapshot['vat_amount'] ?? 0), 2, ',', '.') . '</td></tr>
-                        <tr class="grand"><td>Total</td><td>$' . number_format((float)($snapshot['total'] ?? 0), 2, ',', '.') . '</td></tr>
-                    </table>
-                </div>
-                ' . $notesHtml . '
+
+                <table class="summary-table">
+                    <tr><td>Subtotal</td><td>$' . number_format((float)($snapshot['vat_subtotal'] ?? 0), 2, ',', '.') . '</td></tr>
+                    <tr><td>IVA</td><td>$' . number_format((float)($snapshot['vat_amount'] ?? 0), 2, ',', '.') . '</td></tr>
+                    <tr class="total-row"><td>Total</td><td>$' . number_format((float)($snapshot['total'] ?? 0), 2, ',', '.') . '</td></tr>
+                </table>
+
+                ' . ($notesHtml !== '' ? str_replace(
+                    [
+                        'margin-top:18px;padding:16px 18px;border:1px solid #dbe3ee;border-radius:14px;background:#f8fbff;',
+                        'font-size:11px;text-transform:uppercase;font-weight:700;color:#64748b;letter-spacing:0.04em;margin-bottom:8px;',
+                        'font-size:13px;color:#0f172a;white-space:pre-wrap;line-height:1.55;'
+                    ],
+                    [
+                        'margin-top:18px;padding:16px 18px;border:1px solid #d9e2ec;border-radius:14px;background:#f8fbff;',
+                        'font-size:11px;color:#64748b;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;margin-bottom:8px;',
+                        'font-size:12px;color:#334155;white-space:pre-wrap;line-height:1.6;'
+                    ],
+                    $notesHtml
+                ) : '') . '
+
                 <div class="footer">
                     Esta cotización es informativa y no descuenta inventario ni genera pedido hasta confirmar la venta.
                 </div>
@@ -229,6 +260,9 @@ class QuotationController {
         $options = new Options();
         $options->set('isRemoteEnabled', true);
         $options->set('isHtml5ParserEnabled', true);
+        if ($this->quotationPdfLogoPath) {
+            $options->setChroot(dirname($this->quotationPdfLogoPath));
+        }
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($this->buildQuotationPdfHtml($quotation), 'UTF-8');
         $dompdf->setPaper('A4');
