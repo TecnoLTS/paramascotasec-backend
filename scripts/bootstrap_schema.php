@@ -121,6 +121,29 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
             product_name text,
             product_image text
         )',
+        'CREATE TABLE IF NOT EXISTS "Quotation" (
+            id text PRIMARY KEY,
+            tenant_id text NOT NULL,
+            status text DEFAULT \'quoted\' NOT NULL,
+            customer_name text NOT NULL,
+            customer_document_type text,
+            customer_document_number text,
+            customer_email text,
+            customer_phone text,
+            customer_address jsonb,
+            delivery_method text DEFAULT \'pickup\' NOT NULL,
+            payment_method text,
+            discount_code text,
+            notes text,
+            items jsonb DEFAULT \'[]\'::jsonb NOT NULL,
+            quote_snapshot jsonb DEFAULT \'{}\'::jsonb NOT NULL,
+            created_by_user_id text,
+            converted_order_id text,
+            valid_until timestamp without time zone,
+            converted_at timestamp without time zone,
+            created_at timestamp without time zone DEFAULT NOW() NOT NULL,
+            updated_at timestamp without time zone DEFAULT NOW() NOT NULL
+        )',
         'CREATE TABLE IF NOT EXISTS "InventoryLot" (
             id text PRIMARY KEY,
             tenant_id text NOT NULL,
@@ -292,6 +315,26 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS discount_code text',
         'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS discount_total numeric(12,2) DEFAULT 0',
         'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS discount_snapshot jsonb',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS tenant_id text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS status text DEFAULT \'quoted\'',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS customer_name text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS customer_document_type text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS customer_document_number text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS customer_email text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS customer_phone text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS customer_address jsonb',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS delivery_method text DEFAULT \'pickup\'',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS payment_method text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS discount_code text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS notes text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS items jsonb DEFAULT \'[]\'::jsonb',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS quote_snapshot jsonb DEFAULT \'{}\'::jsonb',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS created_by_user_id text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS converted_order_id text',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS valid_until timestamp without time zone',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS converted_at timestamp without time zone',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS created_at timestamp without time zone DEFAULT NOW()',
+        'ALTER TABLE "Quotation" ADD COLUMN IF NOT EXISTS updated_at timestamp without time zone DEFAULT NOW()',
         'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS unit_cost numeric(12,4)',
         'ALTER TABLE "OrderItem" ALTER COLUMN unit_cost TYPE numeric(12,4) USING COALESCE(unit_cost, 0)::numeric(12,4)',
         'ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS cost_total numeric(12,4)',
@@ -371,6 +414,9 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'CREATE INDEX IF NOT EXISTS "Order_tenant_id_idx" ON "Order" (tenant_id)',
         'CREATE INDEX IF NOT EXISTS "Order_tenant_created_idx" ON "Order" (tenant_id, created_at)',
         'CREATE INDEX IF NOT EXISTS "Order_tenant_user_idx" ON "Order" (tenant_id, user_id)',
+        'CREATE INDEX IF NOT EXISTS "Quotation_tenant_created_idx" ON "Quotation" (tenant_id, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "Quotation_tenant_status_idx" ON "Quotation" (tenant_id, status, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "Quotation_tenant_converted_order_idx" ON "Quotation" (tenant_id, converted_order_id)',
         'CREATE INDEX IF NOT EXISTS "OrderItem_order_id_idx" ON "OrderItem" (order_id)',
         'CREATE INDEX IF NOT EXISTS "OrderItem_product_id_idx" ON "OrderItem" (product_id)',
         'CREATE INDEX IF NOT EXISTS "InventoryLot_tenant_product_received_idx" ON "InventoryLot" (tenant_id, product_id, received_at, created_at)',
@@ -454,6 +500,9 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
 
     $stmtOrder = $pdo->prepare('UPDATE "Order" SET tenant_id = COALESCE(tenant_id, :tenant)');
     $stmtOrder->execute(['tenant' => $defaultTenant]);
+
+    $stmtQuotation = $pdo->prepare('UPDATE "Quotation" SET tenant_id = COALESCE(tenant_id, :tenant)');
+    $stmtQuotation->execute(['tenant' => $defaultTenant]);
 
     $stmtSettingTenant = $pdo->prepare('UPDATE "Setting" SET tenant_id = COALESCE(tenant_id, :tenant) WHERE tenant_id IS NULL');
     $stmtSettingTenant->execute(['tenant' => $defaultTenant]);

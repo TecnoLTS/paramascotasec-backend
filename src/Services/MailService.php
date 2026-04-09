@@ -6,6 +6,45 @@ use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
 class MailService {
+    private static function buildMailer(
+        string $to,
+        string $subject,
+        string $message,
+        ?string $replyTo = null,
+        ?string $replyToName = null,
+        bool $isHtml = false
+    ): ?PHPMailer {
+        $fromAddress = $_ENV['MAIL_FROM_ADDRESS'] ?? 'no-reply@paramascotasec.com';
+        $fromName = $_ENV['MAIL_FROM_NAME'] ?? 'Para Mascotas EC';
+        $smtpHost = $_ENV['SMTP_HOST'] ?? null;
+
+        if (!$smtpHost || !class_exists(PHPMailer::class)) {
+            return null;
+        }
+
+        $mail = new PHPMailer(true);
+        $mail->SMTPDebug = 0;
+        $mail->isSMTP();
+        $mail->Host = $smtpHost;
+        $mail->Port = (int)($_ENV['SMTP_PORT'] ?? 587);
+        $mail->SMTPAuth = true;
+        $mail->Username = $_ENV['SMTP_USER'] ?? '';
+        $mail->Password = self::normalizedSmtpPassword($smtpHost, (string)($_ENV['SMTP_PASS'] ?? ''));
+        $mail->SMTPSecure = self::resolveSmtpEncryption($_ENV['SMTP_SECURE'] ?? 'tls', $mail->Port);
+        $mail->Timeout = max(3, (int)($_ENV['SMTP_TIMEOUT'] ?? 10));
+        $mail->setFrom($fromAddress, $fromName);
+        if ($replyTo && filter_var($replyTo, FILTER_VALIDATE_EMAIL)) {
+            $mail->addReplyTo($replyTo, $replyToName ?: $replyTo);
+        }
+        $mail->addAddress($to);
+        $mail->Subject = $subject;
+        $mail->Body = $message;
+        $mail->isHTML($isHtml);
+        $mail->CharSet = 'UTF-8';
+
+        return $mail;
+    }
+
     private static function resolveSmtpEncryption(?string $secure, int $port): string
     {
         $normalized = strtolower(trim((string)$secure));
@@ -51,31 +90,14 @@ class MailService {
         ?string $replyTo = null,
         ?string $replyToName = null
     ): bool {
-        $fromAddress = $_ENV['MAIL_FROM_ADDRESS'] ?? 'no-reply@paramascotasec.com';
-        $fromName = $_ENV['MAIL_FROM_NAME'] ?? 'Para Mascotas EC';
         $smtpHost = $_ENV['SMTP_HOST'] ?? null;
 
         if ($smtpHost && class_exists(PHPMailer::class)) {
             try {
-                $mail = new PHPMailer(true);
-                $mail->SMTPDebug = 0;
-                $mail->isSMTP();
-                $mail->Host = $smtpHost;
-                $mail->Port = (int)($_ENV['SMTP_PORT'] ?? 587);
-                $mail->SMTPAuth = true;
-                $mail->Username = $_ENV['SMTP_USER'] ?? '';
-                $mail->Password = self::normalizedSmtpPassword($smtpHost, (string)($_ENV['SMTP_PASS'] ?? ''));
-                $mail->SMTPSecure = self::resolveSmtpEncryption($_ENV['SMTP_SECURE'] ?? 'tls', $mail->Port);
-                $mail->Timeout = max(3, (int)($_ENV['SMTP_TIMEOUT'] ?? 10));
-                $mail->setFrom($fromAddress, $fromName);
-                if ($replyTo && filter_var($replyTo, FILTER_VALIDATE_EMAIL)) {
-                    $mail->addReplyTo($replyTo, $replyToName ?: $replyTo);
+                $mail = self::buildMailer($to, $subject, $message, $replyTo, $replyToName, false);
+                if (!$mail) {
+                    return false;
                 }
-                $mail->addAddress($to);
-                $mail->Subject = $subject;
-                $mail->Body = $message;
-                $mail->isHTML(false);
-                $mail->CharSet = 'UTF-8';
                 $mail->send();
                 return true;
             } catch (Exception $e) {
@@ -83,6 +105,9 @@ class MailService {
                 return false;
             }
         }
+
+        $fromAddress = $_ENV['MAIL_FROM_ADDRESS'] ?? 'no-reply@paramascotasec.com';
+        $fromName = $_ENV['MAIL_FROM_NAME'] ?? 'Para Mascotas EC';
 
         $replyToHeader = $fromAddress;
         if ($replyTo && filter_var($replyTo, FILTER_VALIDATE_EMAIL)) {
@@ -100,5 +125,35 @@ class MailService {
             error_log('Mail() failed for: ' . $to);
         }
         return $result;
+    }
+
+    public static function sendWithAttachment(
+        string $to,
+        string $subject,
+        string $message,
+        string $attachmentName,
+        string $attachmentContent,
+        string $mimeType = 'application/pdf',
+        ?string $replyTo = null,
+        ?string $replyToName = null
+    ): bool {
+        $smtpHost = $_ENV['SMTP_HOST'] ?? null;
+        if (!$smtpHost || !class_exists(PHPMailer::class)) {
+            error_log('Attachment email requires configured SMTP/PHPMailer.');
+            return false;
+        }
+
+        try {
+            $mail = self::buildMailer($to, $subject, $message, $replyTo, $replyToName, false);
+            if (!$mail) {
+                return false;
+            }
+            $mail->addStringAttachment($attachmentContent, $attachmentName, PHPMailer::ENCODING_BASE64, $mimeType);
+            $mail->send();
+            return true;
+        } catch (Exception $e) {
+            error_log('SMTP attachment send failed: ' . $e->getMessage());
+            return false;
+        }
     }
 }

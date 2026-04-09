@@ -632,6 +632,36 @@ class OrderController {
         return trim((string)$value) !== '';
     }
 
+    private function getRequestChannel(array $data): string
+    {
+        $paymentDetails = $data['payment_details'] ?? null;
+        if (is_string($paymentDetails)) {
+            $decoded = json_decode($paymentDetails, true);
+            $paymentDetails = is_array($decoded) ? $decoded : null;
+        }
+
+        return strtolower(trim((string)($paymentDetails['channel'] ?? '')));
+    }
+
+    private function isTrustedLocalPosRequest(array $data, ?array $user = null): bool
+    {
+        $role = strtolower(trim((string)($user['role'] ?? '')));
+        if ($role !== 'admin') {
+            return false;
+        }
+
+        return $this->getRequestChannel($data) === 'local_pos';
+    }
+
+    private function resolveInitialOrderStatus(array $data, ?array $user = null): string
+    {
+        if ($this->isTrustedLocalPosRequest($data, $user)) {
+            return 'completed';
+        }
+
+        return 'pending';
+    }
+
     private function pricingTamperLockMinutes(): int
     {
         $configured = (int)($_ENV['AUTH_PRICING_TAMPER_LOCK_MINUTES'] ?? 0);
@@ -705,6 +735,10 @@ class OrderController {
 
     private function rejectUnexpectedMoneyFields(array $data, ?array $user = null): bool
     {
+        if ($this->isTrustedLocalPosRequest($data, $user)) {
+            return false;
+        }
+
         $unexpected = [];
         foreach ($this->forbiddenMoneyPayloadKeys as $key) {
             if (!array_key_exists($key, $data)) {
@@ -729,6 +763,10 @@ class OrderController {
 
     private function rejectUnexpectedItemPricingFields(array $data, ?array $user = null): bool
     {
+        if ($this->isTrustedLocalPosRequest($data, $user)) {
+            return false;
+        }
+
         $items = $data['items'] ?? null;
         if (!is_array($items)) {
             return false;
@@ -810,6 +848,7 @@ class OrderController {
     public function quote() {
         try {
             $user = $this->authenticateOptional();
+            $isAdmin = (($user['role'] ?? 'customer') === 'admin');
             $data = json_decode(file_get_contents('php://input'), true) ?: [];
             if ($this->rejectUnexpectedDiscountFields($data)) {
                 return;
@@ -817,7 +856,7 @@ class OrderController {
             if ($this->rejectUnexpectedMoneyFields($data, $user) || $this->rejectUnexpectedItemPricingFields($data, $user)) {
                 return;
             }
-            if (!$this->enforceSalesEnabled()) {
+            if (!$isAdmin && !$this->enforceSalesEnabled()) {
                 return;
             }
             $hasDiscountCodeError = false;
@@ -866,7 +905,7 @@ class OrderController {
                 return;
             }
             $data['user_id'] = $this->resolveCustomerUserId($data, $user);
-            $data['status'] = 'pending';
+            $data['status'] = $this->resolveInitialOrderStatus($data, $user);
 
             // Always generate a server-side order id to avoid collisions/tampering.
             $data['id'] = 'ORD-' . date('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(4)));

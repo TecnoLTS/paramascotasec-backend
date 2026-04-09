@@ -125,21 +125,21 @@ class UserRepository {
     public function getAdminUserById($id) {
         $stmt = $this->db->prepare('
             SELECT
-                id,
-                name,
-                email,
-                role,
-                email_verified,
-                document_type,
-                document_number,
-                business_name,
-                profile,
-                addresses,
-                created_at,
-                updated_at,
-                failed_login_attempts,
-                login_locked_until,
-                last_login_at,
+                "User".id,
+                "User".name,
+                "User".email,
+                "User".role,
+                "User".email_verified,
+                "User".document_type,
+                "User".document_number,
+                "User".business_name,
+                "User".profile,
+                "User".addresses,
+                "User".created_at,
+                "User".updated_at,
+                "User".failed_login_attempts,
+                "User".login_locked_until,
+                "User".last_login_at,
                 security_block.event_type AS security_block_event_type,
                 security_block.status AS security_block_status,
                 security_block.created_at AS security_blocked_at,
@@ -158,7 +158,7 @@ class UserRepository {
                 ORDER BY ase.created_at DESC
                 LIMIT 1
             ) security_block ON TRUE
-            WHERE id = :id AND tenant_id = :tenant_id
+            WHERE "User".id = :id AND "User".tenant_id = :tenant_id
             LIMIT 1
         ');
         $stmt->execute([
