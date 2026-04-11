@@ -42,7 +42,7 @@ class FacturadorApiService {
             ],
         ]);
 
-        $responseBody = @file_get_contents($this->baseUrl . '/api/v1/invoices', false, $context);
+        $responseBody = @file_get_contents($this->baseUrl . '/api/test/v1/invoices', false, $context);
         $responseHeaders = $http_response_header ?? [];
         $statusCode = $this->extractStatusCode($responseHeaders);
 

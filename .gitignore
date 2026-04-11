@@ -3,6 +3,7 @@
 !.env.example
 
 vendor/
+vendor.bak-20260410023258/
 node_modules/
 
 logs/
