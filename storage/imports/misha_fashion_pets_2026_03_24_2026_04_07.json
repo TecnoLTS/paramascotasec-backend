@@ -1,0 +1,252 @@
+{
+  "supplier": {
+    "name": "Misha Fashion Pets",
+    "document": "1308054509001",
+    "contactName": "José Luis Reyna",
+    "phone": "+593 978737915",
+    "address": "Gerardo Chiriboga N52-29 y De los Algarrobo - Kennedy, Quito",
+    "notes": "Reyes Lucas Zoila Esperanza. Categoria: Ropa. Forma de pago: Transferencia."
+  },
+  "saleTaxRate": 15,
+  "purchaseTaxRate": 0,
+  "storageLocation": "Principal",
+  "species": "Perro",
+  "products": [
+    {
+      "legacyId": "misha-fashion-pets-camiseta-polo-love-rosa-s",
+      "name": "Camiseta Polo Love Rosa",
+      "description": "Camiseta polo en tono rosa con diseño adorable, perfecta para que tu mascota luzca tierna y cómoda en cada paseo.",
+      "styleGender": "Hembra",
+      "size": "S",
+      "color": "Rosa",
+      "priceNet": 6.34,
+      "priceGross": 7.29,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 3.96 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-polo-love-rosa-m",
+      "name": "Camiseta Polo Love Rosa",
+      "description": "Camiseta polo en tono rosa con diseño adorable, perfecta para que tu mascota luzca tierna y cómoda en cada paseo.",
+      "styleGender": "Hembra",
+      "size": "M",
+      "color": "Rosa",
+      "priceNet": 7.84,
+      "priceGross": 9.02,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 4.90 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-polo-love-rosa-l",
+      "name": "Camiseta Polo Love Rosa",
+      "description": "Camiseta polo en tono rosa con diseño adorable, perfecta para que tu mascota luzca tierna y cómoda en cada paseo.",
+      "styleGender": "Hembra",
+      "size": "L",
+      "color": "Rosa",
+      "priceNet": 9.33,
+      "priceGross": 10.73,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 5.83 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-polo-kisses-rosa-s",
+      "name": "Camiseta Polo Kisses Rosa",
+      "description": "Polo rosada con estampado delicado y encantador, ideal para paseos con mucho estilo.",
+      "styleGender": "Hembra",
+      "size": "S",
+      "color": "Rosa",
+      "priceNet": 6.34,
+      "priceGross": 7.29,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 3.96 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-polo-azul-s",
+      "name": "Camiseta Polo Azul",
+      "description": "Polo en tono azul con estilo moderno, ideal para paseos y aventuras diarias.",
+      "styleGender": "Unisex",
+      "size": "S",
+      "color": "Azul",
+      "priceNet": 6.34,
+      "priceGross": 7.29,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 3.96 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-polo-azul-l",
+      "name": "Camiseta Polo Azul",
+      "description": "Polo en tono azul con estilo moderno, ideal para paseos y aventuras diarias.",
+      "styleGender": "Unisex",
+      "size": "L",
+      "color": "Azul",
+      "priceNet": 9.33,
+      "priceGross": 10.73,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 5.83 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-polo-verde-militar-s",
+      "name": "Camiseta Polo Verde Militar",
+      "description": "Polo en tono verde militar con estilo moderno, ideal para paseos y aventuras diarias.",
+      "styleGender": "Unisex",
+      "size": "S",
+      "color": "Verde Militar",
+      "priceNet": 6.34,
+      "priceGross": 7.29,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 3.96 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-polo-corazon-morada-m",
+      "name": "Camiseta Polo Corazón Morada",
+      "description": "Camiseta cómoda en tono morado con detalle de corazones, perfecta para un look adorable.",
+      "styleGender": "Hembra",
+      "size": "M",
+      "color": "Morado",
+      "priceNet": 7.84,
+      "priceGross": 9.02,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 4.90 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-amarilla-xs",
+      "name": "Camiseta selección amarilla",
+      "description": "Camiseta deportiva estilo selección, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti, viva cada gol y sienta la pasión, el orgullo y la emoción de apoyar a La Tri.",
+      "styleGender": "Unisex",
+      "size": "XS",
+      "color": "Amarillo",
+      "priceNet": 9.70,
+      "priceGross": 11.15,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 2, "unitCost": 6.06 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-amarilla-s",
+      "name": "Camiseta selección amarilla",
+      "description": "Camiseta deportiva estilo selección, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti, viva cada gol y sienta la pasión, el orgullo y la emoción de apoyar a La Tri.",
+      "styleGender": "Unisex",
+      "size": "S",
+      "color": "Amarillo",
+      "priceNet": 10.45,
+      "priceGross": 12.02,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 2, "unitCost": 6.53 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-amarilla-m",
+      "name": "Camiseta selección amarilla",
+      "description": "Camiseta deportiva estilo selección, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti, viva cada gol y sienta la pasión, el orgullo y la emoción de apoyar a La Tri.",
+      "styleGender": "Unisex",
+      "size": "M",
+      "color": "Amarillo",
+      "priceNet": 11.94,
+      "priceGross": 13.73,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 2, "unitCost": 7.46 },
+        { "invoiceNumber": "481", "issuedAt": "2026-04-07", "quantity": 2, "unitCost": 8.00 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-amarilla-l",
+      "name": "Camiseta selección amarilla",
+      "description": "Camiseta deportiva estilo selección, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti, viva cada gol y sienta la pasión, el orgullo y la emoción de apoyar a La Tri.",
+      "styleGender": "Unisex",
+      "size": "L",
+      "color": "Amarillo",
+      "priceNet": 13.44,
+      "priceGross": 15.46,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 2, "unitCost": 8.40 },
+        { "invoiceNumber": "481", "issuedAt": "2026-04-07", "quantity": 1, "unitCost": 9.00 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-azul-s",
+      "name": "Camiseta selección azul",
+      "description": "Camiseta deportiva estilo selección en tono azul, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti con estilo y energía.",
+      "styleGender": "Unisex",
+      "size": "S",
+      "color": "Azul",
+      "priceNet": 10.45,
+      "priceGross": 12.02,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 6.53 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-azul-m",
+      "name": "Camiseta selección azul",
+      "description": "Camiseta deportiva estilo selección en tono azul, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti con estilo y energía.",
+      "styleGender": "Unisex",
+      "size": "M",
+      "color": "Azul",
+      "priceNet": 11.94,
+      "priceGross": 13.73,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 7.46 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-azul-l",
+      "name": "Camiseta selección azul",
+      "description": "Camiseta deportiva estilo selección en tono azul, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti con estilo y energía.",
+      "styleGender": "Unisex",
+      "size": "L",
+      "color": "Azul",
+      "priceNet": 13.44,
+      "priceGross": 15.46,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 8.40 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-blanca-s",
+      "name": "Camiseta selección blanca",
+      "description": "Camiseta deportiva estilo selección en tono blanco, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti con un look fresco y elegante.",
+      "styleGender": "Unisex",
+      "size": "S",
+      "color": "Blanco",
+      "priceNet": 10.45,
+      "priceGross": 12.02,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 6.53 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-blanca-m",
+      "name": "Camiseta selección blanca",
+      "description": "Camiseta deportiva estilo selección en tono blanco, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti con un look fresco y elegante.",
+      "styleGender": "Unisex",
+      "size": "M",
+      "color": "Blanco",
+      "priceNet": 11.94,
+      "priceGross": 13.73,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 7.46 }
+      ]
+    },
+    {
+      "legacyId": "misha-fashion-pets-camiseta-seleccion-blanca-l",
+      "name": "Camiseta selección blanca",
+      "description": "Camiseta deportiva estilo selección en tono blanco, cómoda y ligera, para que tu mejor amigo disfrute cada partido junto a ti con un look fresco y elegante.",
+      "styleGender": "Unisex",
+      "size": "L",
+      "color": "Blanco",
+      "priceNet": 13.44,
+      "priceGross": 15.46,
+      "purchaseLines": [
+        { "invoiceNumber": "470", "issuedAt": "2026-03-24", "quantity": 1, "unitCost": 8.40 }
+      ]
+    }
+  ]
+}

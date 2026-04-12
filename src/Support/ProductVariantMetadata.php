@@ -15,6 +15,7 @@ final class ProductVariantMetadata
         'dosage',
         'volume',
         'range',
+        'color',
     ];
 
     private const NAMED_SIZE_VALUES = [
@@ -113,7 +114,10 @@ final class ProductVariantMetadata
             $escaped = $candidate === $label
                 ? preg_quote($candidate, '/')
                 : $candidate;
-            $base = preg_replace('/(?:\s+|-)?' . $escaped . '$/iu', '', $base) ?? $base;
+            $separator = self::requiresSeparatedSuffix($candidate)
+                ? '(?:\s+|-)'
+                : '(?:\s+|-)?';
+            $base = preg_replace('/' . $separator . $escaped . '$/iu', '', $base) ?? $base;
             $base = self::cleanWhitespace($base);
         }
 
@@ -215,6 +219,11 @@ final class ProductVariantMetadata
             'OZ' => ['dimension' => 'weight', 'value' => $value * 28.3495],
             default => ['dimension' => 'unknown', 'value' => $value],
         };
+    }
+
+    private static function requiresSeparatedSuffix(string $label): bool
+    {
+        return preg_match('/^(XXS|XS|S|M|L|XL|XXL|STANDARD)$/', self::normalizeLabel($label)) === 1;
     }
 
     private static function isMeasurementLikeLabel(string $label): bool

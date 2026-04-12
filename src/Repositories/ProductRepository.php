@@ -851,6 +851,67 @@ class ProductRepository {
         return $this->getTaxRate();
     }
 
+    private function parseTaxRateValue($value): ?float {
+        if ($value === null) {
+            return null;
+        }
+
+        $text = is_string($value) ? trim(str_replace(',', '.', $value)) : $value;
+        if ($text === '') {
+            return null;
+        }
+        if (!is_numeric($text)) {
+            return null;
+        }
+
+        return max(0.0, min(100.0, round((float)$text, 2)));
+    }
+
+    private function resolveOptionalBooleanValue(array $values): ?bool {
+        foreach ($values as $value) {
+            if ($value === null) {
+                continue;
+            }
+            if (is_string($value) && trim($value) === '') {
+                continue;
+            }
+            return $this->normalizeBooleanAttribute($value, false);
+        }
+
+        return null;
+    }
+
+    private function getPurchaseTaxRateForPayload(array $purchaseInvoice, array $attributes): float {
+        $metadata = is_array($purchaseInvoice['metadata'] ?? null) ? $purchaseInvoice['metadata'] : [];
+        $taxExempt = $this->resolveOptionalBooleanValue([
+            $purchaseInvoice['purchaseTaxExempt'] ?? null,
+            $metadata['purchase_tax_exempt'] ?? null,
+            $metadata['purchaseTaxExempt'] ?? null,
+            $metadata['tax_exempt'] ?? null,
+        ]);
+
+        if ($taxExempt === true) {
+            return 0.0;
+        }
+
+        $candidates = [
+            $purchaseInvoice['purchaseTaxRate'] ?? null,
+            $metadata['purchase_tax_rate'] ?? null,
+            $metadata['purchaseTaxRate'] ?? null,
+            $metadata['tax_rate'] ?? null,
+            is_array($attributes) ? ($attributes['purchaseTaxRate'] ?? ($attributes['purchase_tax_rate'] ?? null)) : null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $taxRate = $this->parseTaxRateValue($candidate);
+            if ($taxRate !== null) {
+                return $taxRate;
+            }
+        }
+
+        return $this->getProductTaxRateForAttributes($attributes);
+    }
+
     private function getProductTaxMultiplierForAttributes($attributes): float {
         return 1 + ($this->getProductTaxRateForAttributes($attributes) / 100);
     }
@@ -1049,6 +1110,7 @@ class ProductRepository {
 
     private function recordPurchaseInvoiceStockEntry(string $productId, string $productName, int $quantity, float $unitCost, array $data, string $reason, ?array $fallbackAttributes = null): array {
         $purchaseInvoices = new PurchaseInvoiceRepository($this->db);
+        $purchaseInvoicePayload = $this->requirePurchaseInvoicePayload($data);
         $rawAttributes = is_array($data['attributes'] ?? null)
             ? $data['attributes']
             : (is_array($fallbackAttributes) ? $fallbackAttributes : []);
@@ -1056,17 +1118,19 @@ class ProductRepository {
         if (array_key_exists('taxExempt', $data) && !array_key_exists('taxExempt', $normalizedAttributes)) {
             $normalizedAttributes['taxExempt'] = $data['taxExempt'] ? 'true' : 'false';
         }
-        $taxRate = $this->getProductTaxRateForAttributes($normalizedAttributes);
+        $purchaseTaxRate = $this->getPurchaseTaxRateForPayload($purchaseInvoicePayload, $normalizedAttributes);
         return $purchaseInvoices->recordStockEntry(
-            $this->requirePurchaseInvoicePayload($data),
+            $purchaseInvoicePayload,
             $productId,
             $productName,
             $quantity,
             $unitCost,
             [
                 'reason' => $reason,
-                'tax_rate' => round($taxRate, 2),
-                'tax_exempt' => $taxRate <= 0,
+                'tax_rate' => round($purchaseTaxRate, 2),
+                'tax_exempt' => $purchaseTaxRate <= 0,
+                'purchase_tax_rate' => round($purchaseTaxRate, 2),
+                'purchase_tax_exempt' => $purchaseTaxRate <= 0,
             ]
         );
     }
@@ -1078,13 +1142,13 @@ class ProductRepository {
         }
 
         try {
-            $price = isset($data['price']) && is_numeric($data['price']) ? round((float)$data['price'], 2) : 0.0;
+            $price = isset($data['price']) && is_numeric($data['price']) ? round((float)$data['price'], 4) : 0.0;
             $cost = isset($data['cost']) && is_numeric($data['cost']) ? round((float)$data['cost'], 2) : 0.0;
             if ($cost > 0 && $price < $cost) {
                 throw new \Exception('El precio base no puede ser menor al costo del producto.');
             }
             $originalPrice = (isset($data['originPrice']) && is_numeric($data['originPrice']))
-                ? max(round((float)$data['originPrice'], 2), $price)
+                ? max(round((float)$data['originPrice'], 4), $price)
                 : $price;
             $isSale = (isset($data['sale']) ? (bool)$data['sale'] : ($originalPrice > $price))
                 && $originalPrice > $price;
@@ -1232,9 +1296,9 @@ class ProductRepository {
 
                 if (abs($incomingCost - $currentCost) > 0.00001) {
                     $suggestedPrice = $this->getSuggestedNetPriceForCost($incomingCost, $taxMultiplier);
-                    $currentPrice = round((float)($current['price'] ?? 0), 2);
+                    $currentPrice = round((float)($current['price'] ?? 0), 4);
                     $requestedPrice = (array_key_exists('price', $data) && is_numeric($data['price']))
-                        ? round((float)$data['price'], 2)
+                        ? round((float)$data['price'], 4)
                         : null;
                     $nextPrice = max(
                         $suggestedPrice,
@@ -1251,10 +1315,10 @@ class ProductRepository {
 
             if (array_key_exists('price', $data) || array_key_exists('originPrice', $data) || array_key_exists('sale', $data)) {
                 $effectivePrice = (array_key_exists('price', $data) && is_numeric($data['price']))
-                    ? round((float)$data['price'], 2)
-                    : round((float)($current['price'] ?? 0), 2);
+                    ? round((float)$data['price'], 4)
+                    : round((float)($current['price'] ?? 0), 4);
                 $normalizedOriginPrice = (array_key_exists('originPrice', $data) && is_numeric($data['originPrice']))
-                    ? max(round((float)$data['originPrice'], 2), $effectivePrice)
+                    ? max(round((float)$data['originPrice'], 4), $effectivePrice)
                     : $effectivePrice;
                 $requestedSale = array_key_exists('sale', $data)
                     ? (bool)$data['sale']
@@ -1268,8 +1332,8 @@ class ProductRepository {
                 ? round((float)$data['cost'], 2)
                 : round((float)($current['cost'] ?? 0), 2);
             $effectiveNextPrice = (array_key_exists('price', $data) && is_numeric($data['price']))
-                ? round((float)$data['price'], 2)
-                : round((float)($current['price'] ?? 0), 2);
+                ? round((float)$data['price'], 4)
+                : round((float)($current['price'] ?? 0), 4);
 
             if ($effectiveNextCost > 0 && $effectiveNextPrice < $effectiveNextCost) {
                 throw new \Exception('El precio base no puede ser menor al costo del producto.');

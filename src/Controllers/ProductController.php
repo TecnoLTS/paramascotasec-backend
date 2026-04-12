@@ -275,7 +275,7 @@ class ProductController {
 
         $variantLabel = ProductVariantMetadata::resolveVariantLabel($effectiveProduct, $effectiveAttributes);
         if ($variantLabel === '') {
-            Response::error('La variante necesita una talla, presentación o medida válida.', 400, 'PRODUCT_VARIANT_LABEL_REQUIRED');
+            Response::error('La variante necesita una talla, color, presentación o medida válida.', 400, 'PRODUCT_VARIANT_LABEL_REQUIRED');
             exit;
         }
     }

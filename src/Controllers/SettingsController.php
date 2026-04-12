@@ -82,6 +82,20 @@ class SettingsController {
         return substr($text, 0, $maxLength);
     }
 
+    private function sanitizePercentageValue($value, $max = 100): string {
+        if ($value === null) {
+            return '';
+        }
+
+        $text = trim(str_replace(',', '.', (string)$value));
+        if ($text === '' || !is_numeric($text)) {
+            return '';
+        }
+
+        $normalized = max(0, min((float)$max, round((float)$text, 2)));
+        return rtrim(rtrim(number_format($normalized, 2, '.', ''), '0'), '.');
+    }
+
     private function normalizeSupplierDocumentKey($value) {
         return preg_replace('/[^A-Z0-9]+/', '', strtoupper($this->sanitizeTextValue($value, 64)));
     }
@@ -126,6 +140,7 @@ class SettingsController {
             $contactName = $this->sanitizeTextValue($item['contactName'] ?? ($item['contact_name'] ?? ''), 160);
             $address = $this->sanitizeTextValue($item['address'] ?? '', 255);
             $notes = $this->sanitizeTextValue($item['notes'] ?? '', 255);
+            $purchaseTaxRate = $this->sanitizePercentageValue($item['purchaseTaxRate'] ?? ($item['purchase_tax_rate'] ?? null));
             $id = $this->sanitizeTextValue($item['id'] ?? '', 160);
 
             $nameKey = function_exists('mb_strtolower')
@@ -149,6 +164,7 @@ class SettingsController {
                 'id' => $id !== '' ? $id : $this->buildSupplierReferenceId($name, $document !== '' ? $document : (string)($index + 1)),
                 'name' => $name,
                 'document' => $document,
+                'purchaseTaxRate' => $purchaseTaxRate,
                 'email' => $email,
                 'phone' => $phone,
                 'contactName' => $contactName,

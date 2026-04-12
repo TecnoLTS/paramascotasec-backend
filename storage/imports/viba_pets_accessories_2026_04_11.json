@@ -1,0 +1,458 @@
+{
+  "supplier": {
+    "name": "Viba Pets",
+    "document": "195144540001",
+    "contactName": "José Arias",
+    "phone": "+593 983521085",
+    "address": "Ciudadela Caballo Campana y frente a Hostería Caballo Campana, Cuenca",
+    "notes": "Importadora y Comercializadora Viba S.A.S. Categoria: Accesorios. Forma de pago: Transferencia"
+  },
+  "brand": "ParaMascotas",
+  "category": "accesorios",
+  "productType": "accesorios",
+  "saleTaxRate": 15,
+  "purchaseTaxRate": 15,
+  "storageLocation": "Principal",
+  "defaultInvoiceNumber": "SIN-FACTURA-VIBA-2026-04-11",
+  "defaultIssuedAt": "2026-04-11",
+  "products": [
+    {
+      "legacyId": "VIBA-2026-04-11-001",
+      "name": "Rollo de fundas para desechos rojo",
+      "variantLabel": "Rojo",
+      "variantBaseName": "Rollo de fundas para desechos",
+      "color": "Rojo",
+      "species": "Perro y gato",
+      "description": "Rollo de fundas resistentes y prácticas, ideal para mantener cada paseo limpio mientras eliges una opción más amigable con el medio ambiente.",
+      "priceNet": 0.4347,
+      "purchaseLines": [
+        {
+          "quantity": 5,
+          "unitCost": 0.24
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-002",
+      "name": "Rollo de fundas para desechos azul",
+      "variantLabel": "Azul",
+      "variantBaseName": "Rollo de fundas para desechos",
+      "color": "Azul",
+      "species": "Perro y gato",
+      "description": "Rollo de fundas resistentes y prácticas, ideal para mantener cada paseo limpio mientras eliges una opción más amigable con el medio ambiente.",
+      "priceNet": 0.4347,
+      "purchaseLines": [
+        {
+          "quantity": 5,
+          "unitCost": 0.24
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-003",
+      "name": "Rollo de fundas para desechos verde",
+      "variantLabel": "Verde",
+      "variantBaseName": "Rollo de fundas para desechos",
+      "color": "Verde",
+      "species": "Perro y gato",
+      "description": "Rollo de fundas resistentes y prácticas, ideal para mantener cada paseo limpio mientras eliges una opción más amigable con el medio ambiente.",
+      "priceNet": 0.4347,
+      "purchaseLines": [
+        {
+          "quantity": 7,
+          "unitCost": 0.24
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-004",
+      "name": "Rollo de fundas para desechos amarillo",
+      "variantLabel": "Amarillo",
+      "variantBaseName": "Rollo de fundas para desechos",
+      "color": "Amarillo",
+      "species": "Perro y gato",
+      "description": "Rollo de fundas resistentes y prácticas, ideal para mantener cada paseo limpio mientras eliges una opción más amigable con el medio ambiente.",
+      "priceNet": 0.4347,
+      "purchaseLines": [
+        {
+          "quantity": 7,
+          "unitCost": 0.24
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-005",
+      "name": "Dispensador de fundas naranja",
+      "variantLabel": "Naranja",
+      "variantBaseName": "Dispensador de fundas",
+      "color": "Naranja",
+      "species": "Perro y gato",
+      "description": "Dispensador práctico y ligero para llevar las fundas siempre a mano en cada paseo.",
+      "priceNet": 0.52,
+      "purchaseLines": [
+        {
+          "quantity": 1,
+          "unitCost": 0.29
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-006",
+      "name": "Dispensador de fundas morado",
+      "variantLabel": "Morado",
+      "variantBaseName": "Dispensador de fundas",
+      "color": "Morado",
+      "species": "Perro y gato",
+      "description": "Dispensador práctico y ligero para llevar las fundas siempre a mano en cada paseo.",
+      "priceNet": 0.52,
+      "purchaseLines": [
+        {
+          "quantity": 1,
+          "unitCost": 0.29
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-007",
+      "name": "Dispensador de fundas azul",
+      "variantLabel": "Azul",
+      "variantBaseName": "Dispensador de fundas",
+      "color": "Azul",
+      "species": "Perro y gato",
+      "description": "Dispensador práctico y ligero para llevar las fundas siempre a mano en cada paseo.",
+      "priceNet": 0.52,
+      "purchaseLines": [
+        {
+          "quantity": 2,
+          "unitCost": 0.29
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-008",
+      "name": "Dispensador de fundas verde",
+      "variantLabel": "Verde",
+      "variantBaseName": "Dispensador de fundas",
+      "color": "Verde",
+      "species": "Perro y gato",
+      "description": "Dispensador práctico y ligero para llevar las fundas siempre a mano en cada paseo.",
+      "priceNet": 0.52,
+      "purchaseLines": [
+        {
+          "quantity": 1,
+          "unitCost": 0.29
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-009",
+      "name": "Dispensador de fundas blanco",
+      "variantLabel": "Blanco",
+      "variantBaseName": "Dispensador de fundas",
+      "color": "Blanco",
+      "species": "Perro y gato",
+      "description": "Dispensador práctico y ligero para llevar las fundas siempre a mano en cada paseo.",
+      "priceNet": 0.52,
+      "purchaseLines": [
+        {
+          "quantity": 1,
+          "unitCost": 0.29
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-010",
+      "name": "Dispensador de fundas verde fluorescente",
+      "variantLabel": "Verde fluorescente",
+      "variantBaseName": "Dispensador de fundas",
+      "color": "Verde fluorescente",
+      "species": "Perro y gato",
+      "description": "Dispensador práctico y ligero para llevar las fundas siempre a mano en cada paseo.",
+      "priceNet": 0.52,
+      "purchaseLines": [
+        {
+          "quantity": 1,
+          "unitCost": 0.29
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-011",
+      "name": "Set collar + correa Huellitas azul",
+      "variantLabel": "Azul",
+      "variantBaseName": "Set collar + correa Huellitas",
+      "color": "Azul",
+      "species": "Perro y gato",
+      "description": "Set cómodo y resistente con diseño de huellitas, perfecto para paseos seguros y con estilo.",
+      "priceNet": 1.8391,
+      "purchaseLines": [
+        {
+          "quantity": 2,
+          "unitCost": 1.02
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-012",
+      "name": "Set collar + correa Huellitas rosa",
+      "variantLabel": "Rosa",
+      "variantBaseName": "Set collar + correa Huellitas",
+      "color": "Rosa",
+      "species": "Perro y gato",
+      "description": "Set cómodo y resistente con diseño de huellitas, perfecto para paseos seguros y con estilo.",
+      "priceNet": 1.8391,
+      "purchaseLines": [
+        {
+          "quantity": 2,
+          "unitCost": 1.02
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-013",
+      "name": "Set collar + correa Huellitas naranja",
+      "variantLabel": "Naranja",
+      "variantBaseName": "Set collar + correa Huellitas",
+      "color": "Naranja",
+      "species": "Perro y gato",
+      "description": "Set cómodo y resistente con diseño de huellitas, perfecto para paseos seguros y con estilo.",
+      "priceNet": 1.8391,
+      "purchaseLines": [
+        {
+          "quantity": 2,
+          "unitCost": 1.02
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-014",
+      "name": "Collar con cascabel",
+      "species": "Perro y gato",
+      "description": "Collar ajustable con cascabel, ideal para que tu mascota luzca adorable y sea fácil de localizar.",
+      "priceNet": 0.87,
+      "purchaseLines": [
+        {
+          "quantity": 6,
+          "unitCost": 0.0
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-015",
+      "name": "Pelota pequeña verde",
+      "variantLabel": "Verde",
+      "variantBaseName": "Pelota pequeña",
+      "color": "Verde",
+      "species": "Perro y gato",
+      "description": "Pelota resistente y divertida, ideal para juegos diarios y momentos de entretenimiento.",
+      "priceNet": 1.569,
+      "purchaseLines": [
+        {
+          "quantity": 2,
+          "unitCost": 0.87
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-016",
+      "name": "Pelota pequeña turquesa",
+      "variantLabel": "Turquesa",
+      "variantBaseName": "Pelota pequeña",
+      "color": "Turquesa",
+      "species": "Perro y gato",
+      "description": "Pelota resistente y divertida, ideal para juegos diarios y momentos de entretenimiento.",
+      "priceNet": 1.569,
+      "purchaseLines": [
+        {
+          "quantity": 2,
+          "unitCost": 0.87
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-017",
+      "name": "Pelota pequeña amarilla",
+      "variantLabel": "Amarilla",
+      "variantBaseName": "Pelota pequeña",
+      "color": "Amarilla",
+      "species": "Perro y gato",
+      "description": "Pelota resistente y divertida, ideal para juegos diarios y momentos de entretenimiento.",
+      "priceNet": 1.569,
+      "purchaseLines": [
+        {
+          "quantity": 1,
+          "unitCost": 0.87
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-018",
+      "name": "Pelota pequeña roja",
+      "variantLabel": "Roja",
+      "variantBaseName": "Pelota pequeña",
+      "color": "Roja",
+      "species": "Perro y gato",
+      "description": "Pelota resistente y divertida, ideal para juegos diarios y momentos de entretenimiento.",
+      "priceNet": 1.569,
+      "purchaseLines": [
+        {
+          "quantity": 1,
+          "unitCost": 0.87
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-019",
+      "name": "Cepillo vaporizador Aqua Groom",
+      "species": "Perro y gato",
+      "description": "Cepillo con función vaporizadora que ayuda a desenredar y cuidar el pelaje, dejándolo suave y limpio.",
+      "priceNet": 5.47,
+      "purchaseLines": [
+        {
+          "quantity": 6,
+          "unitCost": 3.04
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-020",
+      "name": "Correa extensible 3 m verde",
+      "variantLabel": "Verde",
+      "variantBaseName": "Correa extensible 3 m",
+      "color": "Verde",
+      "species": "Perro y gato",
+      "description": "Correa retráctil de 3 metros que brinda mayor libertad de movimiento y control durante el paseo.",
+      "priceNet": 4.6999,
+      "purchaseLines": [
+        {
+          "quantity": 2,
+          "unitCost": 2.61
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-021",
+      "name": "Correa extensible 3 m roja",
+      "variantLabel": "Roja",
+      "variantBaseName": "Correa extensible 3 m",
+      "color": "Roja",
+      "species": "Perro y gato",
+      "description": "Correa retráctil de 3 metros que brinda mayor libertad de movimiento y control durante el paseo.",
+      "priceNet": 4.6999,
+      "purchaseLines": [
+        {
+          "quantity": 2,
+          "unitCost": 2.61
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-022",
+      "name": "Correa extensible 3 m azul",
+      "variantLabel": "Azul",
+      "variantBaseName": "Correa extensible 3 m",
+      "color": "Azul",
+      "species": "Perro y gato",
+      "description": "Correa retráctil de 3 metros que brinda mayor libertad de movimiento y control durante el paseo.",
+      "priceNet": 4.6999,
+      "purchaseLines": [
+        {
+          "quantity": 2,
+          "unitCost": 2.61
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-023",
+      "name": "Plato plegable pequeño azul",
+      "variantLabel": "Azul",
+      "variantBaseName": "Plato plegable pequeño",
+      "color": "Azul",
+      "species": "Perro y gato",
+      "description": "Plato portátil y plegable, ideal para agua o alimento en paseos, viajes y salidas.",
+      "priceNet": 2.34,
+      "purchaseLines": [
+        {
+          "quantity": 4,
+          "unitCost": 1.30
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-024",
+      "name": "Plato plegable pequeño rojo",
+      "variantLabel": "Rojo",
+      "variantBaseName": "Plato plegable pequeño",
+      "color": "Rojo",
+      "species": "Perro y gato",
+      "description": "Plato portátil y plegable, ideal para agua o alimento en paseos, viajes y salidas.",
+      "priceNet": 2.34,
+      "purchaseLines": [
+        {
+          "quantity": 4,
+          "unitCost": 1.30
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-025",
+      "name": "Kit de platos plegables gris 350 ml",
+      "color": "Gris",
+      "species": "Perro y gato",
+      "description": "Kit práctico y portátil, perfecto para mantener a tu mascota hidratada y alimentada fuera de casa.",
+      "priceNet": 13.2914,
+      "purchaseLines": [
+        {
+          "quantity": 6,
+          "unitCost": 7.82
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-026",
+      "name": "Juguete interactivo Cat Tower azul",
+      "variantLabel": "Azul",
+      "variantBaseName": "Juguete interactivo Cat Tower",
+      "color": "Azul",
+      "species": "Gato",
+      "description": "Juguete diseñado para estimular la curiosidad y mantener a tu gato activo y entretenido.",
+      "priceNet": 7.83,
+      "purchaseLines": [
+        {
+          "quantity": 3,
+          "unitCost": 4.35
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-027",
+      "name": "Juguete interactivo Cat Tower verde",
+      "variantLabel": "Verde",
+      "variantBaseName": "Juguete interactivo Cat Tower",
+      "color": "Verde",
+      "species": "Gato",
+      "description": "Juguete diseñado para estimular la curiosidad y mantener a tu gato activo y entretenido.",
+      "priceNet": 7.83,
+      "purchaseLines": [
+        {
+          "quantity": 6,
+          "unitCost": 4.35
+        }
+      ]
+    },
+    {
+      "legacyId": "VIBA-2026-04-11-028",
+      "name": "Arenero verde",
+      "color": "Verde",
+      "species": "Gato",
+      "description": "Arenero práctico y resistente, ideal para brindar comodidad y facilitar la limpieza diaria.",
+      "priceNet": 9.40,
+      "purchaseLines": [
+        {
+          "quantity": 6,
+          "unitCost": 5.22
+        }
+      ]
+    }
+  ]
+}
