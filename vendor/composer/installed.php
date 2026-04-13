@@ -3,7 +3,7 @@
         'name' => 'paramascotasec/backend',
         'pretty_version' => 'dev-main',
         'version' => 'dev-main',
-        'reference' => '253c69ec1d472ff87cd89ac292b0f40343dc35f7',
+        'reference' => '2cd334566b95a903482d5ca1cfe240ceb4b6228d',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -67,7 +67,7 @@
         'paramascotasec/backend' => array(
             'pretty_version' => 'dev-main',
             'version' => 'dev-main',
-            'reference' => '253c69ec1d472ff87cd89ac292b0f40343dc35f7',
+            'reference' => '2cd334566b95a903482d5ca1cfe240ceb4b6228d',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
