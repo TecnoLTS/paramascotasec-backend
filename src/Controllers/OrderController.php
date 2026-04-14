@@ -445,22 +445,32 @@ class OrderController {
                 }
             }
             $taxDivisor = 1 + ($itemTaxRate / 100);
-            $netUnitPrice = $taxDivisor > 0 ? ($discountedGrossLine / $quantity) / $taxDivisor : ($discountedGrossLine / $quantity);
+            $originalNetUnitPrice = $taxDivisor > 0 ? ($grossUnitPrice / $taxDivisor) : $grossUnitPrice;
+            $lineSubtotalNet = $taxDivisor > 0 ? ($discountedGrossLine / $taxDivisor) : $discountedGrossLine;
+            $discountNetAmount = max(0, round(($originalNetUnitPrice * $quantity) - $lineSubtotalNet, 6));
+            $taxAmount = max(0, round($discountedGrossLine - $lineSubtotalNet, 6));
 
             $items[] = [
                 'code' => (string)($item['product_id'] ?? ('ITEM-' . ($index + 1))),
                 'description' => (string)($item['product_name'] ?? 'Producto'),
                 'quantity' => $quantity,
-                'unit_price' => round($netUnitPrice, 6),
-                'discount' => 0,
+                'unit_price' => round($originalNetUnitPrice, 6),
+                'discount' => $discountNetAmount,
+                'line_subtotal_net' => round($lineSubtotalNet, 6),
+                'tax_rate' => round($itemTaxRate, 2),
+                'tax_code' => '2',
+                'tax_percentage_code' => $this->resolveSriVatPercentageCode($itemTaxRate),
+                'tax_amount' => $taxAmount,
             ];
         }
 
         $shipping = max(0, (float)($order['shipping'] ?? 0));
         if ($shipping > 0) {
+            $shippingTaxRate = $this->resolveShippingTaxRate($order);
             $shippingBase = isset($order['shipping_base']) && is_numeric($order['shipping_base'])
                 ? (float)$order['shipping_base']
-                : ($shipping / (1 + ($this->resolveShippingTaxRate($order) / 100)));
+                : ($shipping / (1 + ($shippingTaxRate / 100)));
+            $shippingTaxAmount = max(0, round($shipping - $shippingBase, 6));
 
             $items[] = [
                 'code' => 'ENVIO',
@@ -468,6 +478,11 @@ class OrderController {
                 'quantity' => 1,
                 'unit_price' => round($shippingBase, 6),
                 'discount' => 0,
+                'line_subtotal_net' => round($shippingBase, 6),
+                'tax_rate' => round($shippingTaxRate, 2),
+                'tax_code' => '2',
+                'tax_percentage_code' => $this->resolveSriVatPercentageCode($shippingTaxRate),
+                'tax_amount' => $shippingTaxAmount,
             ];
         }
 
@@ -495,6 +510,19 @@ class OrderController {
         return isset($order['shipping_tax_rate']) && is_numeric($order['shipping_tax_rate'])
             ? max(0, (float)$order['shipping_tax_rate'])
             : 0.0;
+    }
+
+    private function resolveSriVatPercentageCode(float $taxRate): string
+    {
+        if ($taxRate <= 0) {
+            return '0';
+        }
+
+        if (abs($taxRate - 15.0) < 0.0001) {
+            return '4';
+        }
+
+        return '4';
     }
 
     private function allocateOrderDiscountAcrossItems(array $items, float $discountTotal): array {
