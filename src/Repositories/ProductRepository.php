@@ -174,8 +174,8 @@ class ProductRepository {
         $includeOutOfStock = array_key_exists('includeOutOfStock', $options)
             ? (bool)$options['includeOutOfStock']
             : $includeUnpublished;
-        $visibilityFilter = $includeUnpublished ? '' : ' AND COALESCE(p.is_published, true) = true';
-        $stockFilter = $includeOutOfStock ? '' : ' AND COALESCE(p.quantity, 0) > 0';
+        $visibilityFilter = $includeUnpublished ? '' : ' AND p.is_published = true';
+        $stockFilter = $includeOutOfStock ? '' : ' AND p.quantity > 0';
         $archivedFilter = $this->getArchivedFilter($includeArchived);
         $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id' . $visibilityFilter . $stockFilter . $archivedFilter . ' ORDER BY p.created_at DESC';
         $stmt = $this->db->prepare($sql);
@@ -192,8 +192,8 @@ class ProductRepository {
         $includeOutOfStock = array_key_exists('includeOutOfStock', $options)
             ? (bool)$options['includeOutOfStock']
             : $includeUnpublished;
-        $visibilityFilter = $includeUnpublished ? '' : ' AND COALESCE(p.is_published, true) = true';
-        $stockFilter = $includeOutOfStock ? '' : ' AND COALESCE(p.quantity, 0) > 0';
+        $visibilityFilter = $includeUnpublished ? '' : ' AND p.is_published = true';
+        $stockFilter = $includeOutOfStock ? '' : ' AND p.quantity > 0';
         $archivedFilter = $this->getArchivedFilter($includeArchived);
         $sql = $this->getBaseQuery($includeProcurement) . ' WHERE p.tenant_id = :tenant_id AND (p.id = :id OR p.legacy_id = :id OR p.slug = :id)' . $visibilityFilter . $stockFilter . $archivedFilter . ' LIMIT 1';
         $stmt = $this->db->prepare($sql);
