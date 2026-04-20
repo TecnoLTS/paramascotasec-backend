@@ -53,6 +53,11 @@ final class ProductVariantMetadata
 
     public static function resolveVariantLabel(array $product, array $attributes): string
     {
+        $canonicalLabel = self::resolveCanonicalLabelByType($product, $attributes);
+        if ($canonicalLabel !== '') {
+            return $canonicalLabel;
+        }
+
         $explicit = trim((string)($product['variantLabel'] ?? ''));
         if ($explicit !== '') {
             return self::normalizeLabel($explicit);
@@ -83,6 +88,41 @@ final class ProductVariantMetadata
         }
 
         return '';
+    }
+
+    private static function resolveCanonicalLabelByType(array $product, array $attributes): string
+    {
+        $normalizedType = self::normalizeProductType(
+            (string)($product['productType'] ?? $product['product_type'] ?? ''),
+            (string)($product['category'] ?? '')
+        );
+
+        $size = self::normalizeLabel((string)($attributes['size'] ?? ''));
+        $weight = self::normalizeLabel((string)($attributes['weight'] ?? ''));
+        $presentation = self::normalizeLabel((string)($attributes['presentation'] ?? ''));
+        $color = self::cleanWhitespace((string)($attributes['color'] ?? ''));
+        $explicit = self::normalizeLabel((string)($attributes['variantLabel'] ?? $product['variantLabel'] ?? ''));
+
+        return match ($normalizedType) {
+            'ropa' => $size !== '' ? $size : ($color !== '' ? $color : $explicit),
+            'accesorios' => $color !== '' ? $color : ($size !== '' ? $size : ($presentation !== '' ? $presentation : $explicit)),
+            'cuidado' => $presentation !== '' ? $presentation : ($size !== '' ? $size : $explicit),
+            'alimento' => $weight !== '' ? $weight : ($size !== '' ? $size : ($presentation !== '' ? $presentation : $explicit)),
+            default => $explicit,
+        };
+    }
+
+    private static function normalizeProductType(string $type, string $category = ''): string
+    {
+        $value = strtolower(trim($type !== '' ? $type : $category));
+
+        return match ($value) {
+            'alimento', 'food' => 'alimento',
+            'ropa', 'apparel' => 'ropa',
+            'accesorios', 'accessories' => 'accesorios',
+            'cuidado', 'care' => 'cuidado',
+            default => $value,
+        };
     }
 
     public static function resolveVariantBaseName(array $product, array $attributes, ?string $label = null): string
