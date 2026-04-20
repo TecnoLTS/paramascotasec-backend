@@ -16,6 +16,9 @@ cd /home/admincenter/contenedores/paramascotasec-backend
 Habilita la depuración para el equipo de codificación y expone de forma dócil la base.
 
 ```bash
+cd /home/admincenter/contenedores/paramascostas-DB
+./scripts/deploy-development.sh
+
 cd /home/admincenter/contenedores/paramascotasec-backend
 ./scripts/deploy-development.sh
 ```
