@@ -66,6 +66,8 @@ resolve_env_file() {
 
     upsert_env_value "${env_file}" "APP_ENV" "development"
     upsert_env_value "${env_file}" "APP_URL" "http://localhost:8080"
+    upsert_env_value "${env_file}" "ADMIN_IP_MODE" "off"
+    upsert_env_value "${env_file}" "ADMIN_IP_ALLOWLIST" ""
 
     printf '%s\n' "${env_file}"
     return 0

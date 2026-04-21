@@ -1,0 +1,337 @@
+{
+    "tenant": "paramascotasec",
+    "dry_run": false,
+    "updated_count": 33,
+    "products": [
+        {
+            "id": "prod_46aaf62fe476b",
+            "name": "Arnés café",
+            "color": "Cafe",
+            "variant_label": "CAFE",
+            "group_before": "paramascotas-accesorios-dog-arnes-perro",
+            "group_after": "single:prod_46aaf62fe476b",
+            "base_before": "Arnés",
+            "base_after": "Arnés café"
+        },
+        {
+            "id": "prod_67dac0d95debd",
+            "name": "Arnés gris",
+            "color": "Gris",
+            "variant_label": "GRIS",
+            "group_before": "paramascotas-accesorios-dog-arnes-perro",
+            "group_after": "single:prod_67dac0d95debd",
+            "base_before": "Arnés",
+            "base_after": "Arnés gris"
+        },
+        {
+            "id": "prod_0b05e01b8fd59",
+            "name": "Arnés turquesa",
+            "color": "Turquesa",
+            "variant_label": "TURQUESA",
+            "group_before": "paramascotas-accesorios-dog-arnes-perro",
+            "group_after": "single:prod_0b05e01b8fd59",
+            "base_before": "Arnés",
+            "base_after": "Arnés turquesa"
+        },
+        {
+            "id": "prod_imp_69dac08138222",
+            "name": "Collar con cascabel Azul",
+            "color": "Azul",
+            "variant_label": "Azul",
+            "group_before": "paramascotas-accesorios-dog-collar-con-cascabel-perro",
+            "group_after": "single:prod_imp_69dac08138222",
+            "base_before": "Collar con cascabel",
+            "base_after": "Collar con cascabel Azul"
+        },
+        {
+            "id": "prod_69dd7805760fb",
+            "name": "Collar con cascabel Rojo",
+            "color": "Rojo",
+            "variant_label": "Rojo",
+            "group_before": "paramascotas-accesorios-dog-collar-con-cascabel-perro",
+            "group_after": "single:prod_69dd7805760fb",
+            "base_before": "Collar con cascabel",
+            "base_after": "Collar con cascabel Rojo"
+        },
+        {
+            "id": "prod_63bb9f3ebaa4b",
+            "name": "Collar con cascabel amarillo",
+            "color": "Amarillo",
+            "variant_label": "AMARILLO",
+            "group_before": "paramascotas-accesorios-dog-collar-con-cascabel-perro",
+            "group_after": "single:prod_63bb9f3ebaa4b",
+            "base_before": "Collar con cascabel",
+            "base_after": "Collar con cascabel amarillo"
+        },
+        {
+            "id": "prod_15d19620b14e9",
+            "name": "Collar con cascabel rosado",
+            "color": "Rosa",
+            "variant_label": "ROSA",
+            "group_before": "paramascotas-accesorios-dog-collar-con-cascabel-perro",
+            "group_after": "single:prod_15d19620b14e9",
+            "base_before": "Collar con cascabel",
+            "base_after": "Collar con cascabel rosado"
+        },
+        {
+            "id": "prod_31f9d29fcdbc8",
+            "name": "Collar con cascabel verde",
+            "color": "Verde",
+            "variant_label": "VERDE",
+            "group_before": "paramascotas-accesorios-dog-collar-con-cascabel-perro",
+            "group_after": "single:prod_31f9d29fcdbc8",
+            "base_before": "Collar con cascabel",
+            "base_after": "Collar con cascabel verde"
+        },
+        {
+            "id": "prod_4887d1f2988c6",
+            "name": "Collar con cascabel verde fluorescente",
+            "color": "Verde Fluorescente",
+            "variant_label": "VERDE FLUORESCENTE",
+            "group_before": "paramascotas-accesorios-dog-collar-con-cascabel-perro",
+            "group_after": "single:prod_4887d1f2988c6",
+            "base_before": "Collar con cascabel",
+            "base_after": "Collar con cascabel verde fluorescente"
+        },
+        {
+            "id": "prod_imp_69dac0813fb90",
+            "name": "Correa extensible de 3 metros",
+            "color": "Verde",
+            "variant_label": "VERDE",
+            "group_before": "paramascotas-accesorios-dog-correa-extensible-3-m-perro",
+            "group_after": "single:prod_imp_69dac0813fb90",
+            "base_before": "Correa extensible 3 m",
+            "base_after": "Correa extensible de 3 metros"
+        },
+        {
+            "id": "prod_imp_69dac08140f18",
+            "name": "Correa extensible de 3 metros",
+            "color": "Roja",
+            "variant_label": "ROJA",
+            "group_before": "paramascotas-accesorios-dog-correa-extensible-3-m-perro",
+            "group_after": "single:prod_imp_69dac08140f18",
+            "base_before": "Correa extensible 3 m",
+            "base_after": "Correa extensible de 3 metros"
+        },
+        {
+            "id": "prod_imp_69dac0814226c",
+            "name": "Correa extensible de 3 metros",
+            "color": "Azul",
+            "variant_label": "AZUL",
+            "group_before": "paramascotas-accesorios-dog-correa-extensible-3-m-perro",
+            "group_after": "single:prod_imp_69dac0814226c",
+            "base_before": "Correa extensible 3 m",
+            "base_after": "Correa extensible de 3 metros"
+        },
+        {
+            "id": "prod_imp_69dac0813c22e",
+            "name": "Pelota pequeña amarilla",
+            "color": "Amarilla",
+            "variant_label": "AMARILLA",
+            "group_before": "paramascotas-accesorios-dog-pelota-pequena-perro",
+            "group_after": "single:prod_imp_69dac0813c22e",
+            "base_before": "Pelota pequeña",
+            "base_after": "Pelota pequeña amarilla"
+        },
+        {
+            "id": "prod_imp_69dac0813d61e",
+            "name": "Pelota pequeña roja",
+            "color": "Roja",
+            "variant_label": "ROJA",
+            "group_before": "paramascotas-accesorios-dog-pelota-pequena-perro",
+            "group_after": "single:prod_imp_69dac0813d61e",
+            "base_before": "Pelota pequeña",
+            "base_after": "Pelota pequeña roja"
+        },
+        {
+            "id": "prod_imp_69dac0813ad61",
+            "name": "Pelota pequeña turquesa",
+            "color": "Turquesa",
+            "variant_label": "TURQUESA",
+            "group_before": "paramascotas-accesorios-dog-pelota-pequena-perro",
+            "group_after": "single:prod_imp_69dac0813ad61",
+            "base_before": "Pelota pequeña",
+            "base_after": "Pelota pequeña turquesa"
+        },
+        {
+            "id": "prod_imp_69dac0813976a",
+            "name": "Pelota pequeña verde",
+            "color": "Verde",
+            "variant_label": "VERDE",
+            "group_before": "paramascotas-accesorios-dog-pelota-pequena-perro",
+            "group_after": "single:prod_imp_69dac0813976a",
+            "base_before": "Pelota pequeña",
+            "base_after": "Pelota pequeña verde"
+        },
+        {
+            "id": "prod_imp_69dac081436fa",
+            "name": "Plato plegable pequeño",
+            "color": "Azul",
+            "variant_label": "AZUL",
+            "group_before": "paramascotas-accesorios-dog-plato-plegable-pequeno-perro",
+            "group_after": "single:prod_imp_69dac081436fa",
+            "base_before": "Plato plegable pequeño",
+            "base_after": "Plato plegable pequeño"
+        },
+        {
+            "id": "prod_imp_69dac08144b80",
+            "name": "Plato plegable pequeño",
+            "color": "Rojo",
+            "variant_label": "ROJO",
+            "group_before": "paramascotas-accesorios-dog-plato-plegable-pequeno-perro",
+            "group_after": "single:prod_imp_69dac08144b80",
+            "base_before": "Plato plegable pequeño",
+            "base_after": "Plato plegable pequeño"
+        },
+        {
+            "id": "prod_imp_69dac080a9777",
+            "name": "Rollo de fundas para desechos",
+            "color": "Rojo",
+            "variant_label": "ROJO",
+            "group_before": "paramascotas-accesorios-dog-rollo-de-fundas-para-desechos-perro",
+            "group_after": "single:prod_imp_69dac080a9777",
+            "base_before": "Rollo de fundas para desechos",
+            "base_after": "Rollo de fundas para desechos"
+        },
+        {
+            "id": "prod_imp_69dac080b8edb",
+            "name": "Rollo de fundas para desechos",
+            "color": "Azul",
+            "variant_label": "AZUL",
+            "group_before": "paramascotas-accesorios-dog-rollo-de-fundas-para-desechos-perro",
+            "group_after": "single:prod_imp_69dac080b8edb",
+            "base_before": "Rollo de fundas para desechos",
+            "base_after": "Rollo de fundas para desechos"
+        },
+        {
+            "id": "prod_imp_69dac080ce242",
+            "name": "Rollo de fundas para desechos",
+            "color": "Verde",
+            "variant_label": "VERDE",
+            "group_before": "paramascotas-accesorios-dog-rollo-de-fundas-para-desechos-perro",
+            "group_after": "single:prod_imp_69dac080ce242",
+            "base_before": "Rollo de fundas para desechos",
+            "base_after": "Rollo de fundas para desechos"
+        },
+        {
+            "id": "prod_imp_69dac080e7ad7",
+            "name": "Rollo de fundas para desechos",
+            "color": "Amarillo",
+            "variant_label": "AMARILLO",
+            "group_before": "paramascotas-accesorios-dog-rollo-de-fundas-para-desechos-perro",
+            "group_after": "single:prod_imp_69dac080e7ad7",
+            "base_before": "Rollo de fundas para desechos",
+            "base_after": "Rollo de fundas para desechos"
+        },
+        {
+            "id": "prod_imp_69dac081348b2",
+            "name": "Set collar + correa Huellitas azul",
+            "color": "Azul",
+            "variant_label": "AZUL",
+            "group_before": "paramascotas-accesorios-dog-set-collar-correa-huellitas-perro",
+            "group_after": "single:prod_imp_69dac081348b2",
+            "base_before": "Set collar + correa Huellitas",
+            "base_after": "Set collar + correa Huellitas azul"
+        },
+        {
+            "id": "prod_imp_69dac081370a9",
+            "name": "Set collar + correa Huellitas naranja",
+            "color": "Naranja",
+            "variant_label": "NARANJA",
+            "group_before": "paramascotas-accesorios-dog-set-collar-correa-huellitas-perro",
+            "group_after": "single:prod_imp_69dac081370a9",
+            "base_before": "Set collar + correa Huellitas",
+            "base_after": "Set collar + correa Huellitas naranja"
+        },
+        {
+            "id": "prod_imp_69dac08135c21",
+            "name": "Set collar + correa Huellitas rosa",
+            "color": "Rosa",
+            "variant_label": "ROSA",
+            "group_before": "paramascotas-accesorios-dog-set-collar-correa-huellitas-perro",
+            "group_after": "single:prod_imp_69dac08135c21",
+            "base_before": "Set collar + correa Huellitas",
+            "base_after": "Set collar + correa Huellitas rosa"
+        },
+        {
+            "id": "prod_imp_69dac08147290",
+            "name": "Juguete interactivo Cat Tower",
+            "color": "Azul",
+            "variant_label": "Azul",
+            "group_before": "viba-pets-accesorios-gato-juguete-interactivo-cat-tower",
+            "group_after": "single:prod_imp_69dac08147290",
+            "base_before": "Juguete interactivo Cat Tower",
+            "base_after": "Juguete interactivo Cat Tower"
+        },
+        {
+            "id": "prod_imp_69dac0814865e",
+            "name": "Juguete interactivo Cat Tower",
+            "color": "Verde",
+            "variant_label": "Verde",
+            "group_before": "viba-pets-accesorios-gato-juguete-interactivo-cat-tower",
+            "group_after": "single:prod_imp_69dac0814865e",
+            "base_before": "Juguete interactivo Cat Tower",
+            "base_after": "Juguete interactivo Cat Tower"
+        },
+        {
+            "id": "prod_imp_69dac08123bff",
+            "name": "Dispensador de fundas azul",
+            "color": "Azul",
+            "variant_label": "Azul",
+            "group_before": "viba-pets-accesorios-perro-y-gato-dispensador-de-fundas",
+            "group_after": "single:prod_imp_69dac08123bff",
+            "base_before": "Dispensador de fundas",
+            "base_after": "Dispensador de fundas azul"
+        },
+        {
+            "id": "prod_imp_69dac08131b2e",
+            "name": "Dispensador de fundas blanco",
+            "color": "Blanco",
+            "variant_label": "Blanco",
+            "group_before": "viba-pets-accesorios-perro-y-gato-dispensador-de-fundas",
+            "group_after": "single:prod_imp_69dac08131b2e",
+            "base_before": "Dispensador de fundas",
+            "base_after": "Dispensador de fundas blanco"
+        },
+        {
+            "id": "prod_imp_69dac0810e042",
+            "name": "Dispensador de fundas morado",
+            "color": "Morado",
+            "variant_label": "Morado",
+            "group_before": "viba-pets-accesorios-perro-y-gato-dispensador-de-fundas",
+            "group_after": "single:prod_imp_69dac0810e042",
+            "base_before": "Dispensador de fundas",
+            "base_after": "Dispensador de fundas morado"
+        },
+        {
+            "id": "prod_imp_69dac0810480c",
+            "name": "Dispensador de fundas naranja",
+            "color": "Naranja",
+            "variant_label": "Naranja",
+            "group_before": "viba-pets-accesorios-perro-y-gato-dispensador-de-fundas",
+            "group_after": "single:prod_imp_69dac0810480c",
+            "base_before": "Dispensador de fundas",
+            "base_after": "Dispensador de fundas naranja"
+        },
+        {
+            "id": "prod_imp_69dac081306cf",
+            "name": "Dispensador de fundas verde",
+            "color": "Verde",
+            "variant_label": "Verde",
+            "group_before": "viba-pets-accesorios-perro-y-gato-dispensador-de-fundas",
+            "group_after": "single:prod_imp_69dac081306cf",
+            "base_before": "Dispensador de fundas",
+            "base_after": "Dispensador de fundas verde"
+        },
+        {
+            "id": "prod_imp_69dac08133152",
+            "name": "Dispensador de fundas verde fluorescente",
+            "color": "Verde fluorescente",
+            "variant_label": "Verde fluorescente",
+            "group_before": "viba-pets-accesorios-perro-y-gato-dispensador-de-fundas",
+            "group_after": "single:prod_imp_69dac08133152",
+            "base_before": "Dispensador de fundas",
+            "base_after": "Dispensador de fundas verde fluorescente"
+        }
+    ]
+}
