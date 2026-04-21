@@ -48,24 +48,20 @@ resolve_env_file() {
 
   if [[ "${mode}" == "development" ]]; then
     local env_file="${APP_DIR}/.env.development"
-
-    if [[ -f "${env_file}" ]]; then
-      printf '%s\n' "${env_file}"
-      return 0
-    fi
-
-    if [[ -f "${APP_DIR}/.env.development.example" ]]; then
-      cp "${APP_DIR}/.env.development.example" "${env_file}"
-      echo "Se creo ${env_file} desde .env.development.example."
-    elif [[ -f "${APP_DIR}/.env" ]]; then
-      cp "${APP_DIR}/.env" "${env_file}"
-      echo "Se creo ${env_file} desde .env para separar desarrollo de produccion."
-    elif [[ -f "${APP_DIR}/.env.example" ]]; then
-      cp "${APP_DIR}/.env.example" "${env_file}"
-      echo "Se creo ${env_file} desde .env.example."
-    else
-      echo "No se encontro .env, .env.development.example ni .env.example" >&2
-      exit 1
+    if [[ ! -f "${env_file}" ]]; then
+      if [[ -f "${APP_DIR}/.env.development.example" ]]; then
+        cp "${APP_DIR}/.env.development.example" "${env_file}"
+        echo "Se creo ${env_file} desde .env.development.example."
+      elif [[ -f "${APP_DIR}/.env" ]]; then
+        cp "${APP_DIR}/.env" "${env_file}"
+        echo "Se creo ${env_file} desde .env para separar desarrollo de produccion."
+      elif [[ -f "${APP_DIR}/.env.example" ]]; then
+        cp "${APP_DIR}/.env.example" "${env_file}"
+        echo "Se creo ${env_file} desde .env.example."
+      else
+        echo "No se encontro .env, .env.development.example ni .env.example" >&2
+        exit 1
+      fi
     fi
 
     upsert_env_value "${env_file}" "APP_ENV" "development"
@@ -76,11 +72,13 @@ resolve_env_file() {
   fi
 
   if [[ "${mode}" == "production" && -f "${APP_DIR}/.env.production" ]]; then
+    upsert_env_value "${APP_DIR}/.env.production" "APP_ENV" "production"
     printf '%s\n' "${APP_DIR}/.env.production"
     return 0
   fi
 
   if [[ -f "${APP_DIR}/.env" ]]; then
+    upsert_env_value "${APP_DIR}/.env" "APP_ENV" "production"
     printf '%s\n' "${APP_DIR}/.env"
     return 0
   fi
@@ -88,6 +86,7 @@ resolve_env_file() {
   if [[ -f "${APP_DIR}/.env.example" ]]; then
     cp "${APP_DIR}/.env.example" "${APP_DIR}/.env"
     echo "Se creo ${APP_DIR}/.env desde .env.example. Ajusta secretos y DB si hace falta."
+    upsert_env_value "${APP_DIR}/.env" "APP_ENV" "production"
     printf '%s\n' "${APP_DIR}/.env"
     return 0
   fi
@@ -117,6 +116,33 @@ assert_backend_mode() {
   fi
 }
 
+wait_for_container_state() {
+  local container_name="$1"
+  local max_attempts="${2:-90}"
+  local attempt=1
+  local status
+
+  while (( attempt <= max_attempts )); do
+    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container_name}" 2>/dev/null || true)"
+    if [[ "${status}" == "healthy" || "${status}" == "running" ]]; then
+      return 0
+    fi
+
+    if [[ "${status}" == "unhealthy" || "${status}" == "exited" || "${status}" == "dead" ]]; then
+      echo "El contenedor ${container_name} quedo en estado ${status}" >&2
+      docker logs --tail 80 "${container_name}" >&2 || true
+      exit 1
+    fi
+
+    sleep 2
+    ((attempt++))
+  done
+
+  echo "El contenedor ${container_name} no quedo listo a tiempo" >&2
+  docker logs --tail 80 "${container_name}" >&2 || true
+  exit 1
+}
+
 deploy_backend() {
   local mode="${1:-development}"
   local env_file
@@ -130,6 +156,8 @@ deploy_backend() {
     cd "${APP_DIR}"
     APP_ENV="${mode}" RUN_DB_SETUP="${run_db_setup}" RUN_DB_BOOTSTRAP="${run_db_setup}" docker compose --env-file "${env_file}" up -d --build --force-recreate --remove-orphans app web
   )
+  wait_for_container_state paramascotasec-backend-app
+  wait_for_container_state paramascotasec-backend-web
   assert_backend_mode "${mode}"
   compose_cmd "${env_file}" ps
   echo "Backend Paramascotasec ${mode} listo"
