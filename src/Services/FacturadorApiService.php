@@ -4,6 +4,7 @@ namespace App\Services;
 
 class FacturadorApiService {
     private string $baseUrl;
+    private string $invoiceEndpoint;
     private int $timeoutSeconds;
     private string $apiKey;
 
@@ -14,6 +15,15 @@ class FacturadorApiService {
         }
 
         $this->baseUrl = $resolvedBaseUrl;
+        $configuredInvoicesPath = trim((string)($_ENV['FACTURADOR_API_INVOICES_PATH'] ?? getenv('FACTURADOR_API_INVOICES_PATH') ?: ''));
+        if (preg_match('#/invoices/?$#', $resolvedBaseUrl) === 1) {
+            $this->invoiceEndpoint = $resolvedBaseUrl;
+        } else {
+            $invoicesPath = $configuredInvoicesPath !== ''
+                ? $configuredInvoicesPath
+                : $this->defaultInvoicesPath();
+            $this->invoiceEndpoint = $resolvedBaseUrl . $this->normalizeInvoicesPath($invoicesPath);
+        }
         $this->timeoutSeconds = max(1, (int)($timeoutSeconds ?? ($_ENV['FACTURADOR_TIMEOUT'] ?? getenv('FACTURADOR_TIMEOUT') ?: 20)));
         $this->apiKey = trim((string)($_ENV['FACTURADOR_API_KEY'] ?? getenv('FACTURADOR_API_KEY') ?: ''));
         if ($this->apiKey === '') {
@@ -42,7 +52,7 @@ class FacturadorApiService {
             ],
         ]);
 
-        $responseBody = @file_get_contents($this->baseUrl . '/api/test/v1/invoices', false, $context);
+        $responseBody = @file_get_contents($this->invoiceEndpoint, false, $context);
         $responseHeaders = $http_response_header ?? [];
         $statusCode = $this->extractStatusCode($responseHeaders);
 
@@ -74,5 +84,21 @@ class FacturadorApiService {
         }
 
         return 0;
+    }
+
+    private function normalizeInvoicesPath(string $path): string
+    {
+        $normalized = '/' . ltrim(trim($path), '/');
+        return rtrim($normalized, '/');
+    }
+
+    private function defaultInvoicesPath(): string
+    {
+        $env = strtolower(trim((string)($_ENV['APP_ENV'] ?? getenv('APP_ENV') ?: 'production')));
+        if (in_array($env, ['development', 'dev', 'local'], true)) {
+            return '/api/test/v1/invoices';
+        }
+
+        return '/api/production/v1/invoices';
     }
 }

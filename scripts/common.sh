@@ -68,6 +68,7 @@ resolve_env_file() {
     upsert_env_value "${env_file}" "APP_URL" "http://localhost:8080"
     upsert_env_value "${env_file}" "ADMIN_IP_MODE" "off"
     upsert_env_value "${env_file}" "ADMIN_IP_ALLOWLIST" ""
+    upsert_env_value "${env_file}" "FACTURADOR_API_INVOICES_PATH" "/api/test/v1/invoices"
 
     printf '%s\n' "${env_file}"
     return 0
@@ -75,12 +76,14 @@ resolve_env_file() {
 
   if [[ "${mode}" == "production" && -f "${APP_DIR}/.env.production" ]]; then
     upsert_env_value "${APP_DIR}/.env.production" "APP_ENV" "production"
+    upsert_env_value "${APP_DIR}/.env.production" "FACTURADOR_API_INVOICES_PATH" "/api/production/v1/invoices"
     printf '%s\n' "${APP_DIR}/.env.production"
     return 0
   fi
 
   if [[ -f "${APP_DIR}/.env" ]]; then
     upsert_env_value "${APP_DIR}/.env" "APP_ENV" "production"
+    upsert_env_value "${APP_DIR}/.env" "FACTURADOR_API_INVOICES_PATH" "/api/production/v1/invoices"
     printf '%s\n' "${APP_DIR}/.env"
     return 0
   fi
@@ -89,6 +92,7 @@ resolve_env_file() {
     cp "${APP_DIR}/.env.example" "${APP_DIR}/.env"
     echo "Se creo ${APP_DIR}/.env desde .env.example. Ajusta secretos y DB si hace falta."
     upsert_env_value "${APP_DIR}/.env" "APP_ENV" "production"
+    upsert_env_value "${APP_DIR}/.env" "FACTURADOR_API_INVOICES_PATH" "/api/production/v1/invoices"
     printf '%s\n' "${APP_DIR}/.env"
     return 0
   fi
