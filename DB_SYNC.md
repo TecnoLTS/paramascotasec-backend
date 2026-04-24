@@ -29,7 +29,7 @@ export DB_USERNAME=postgres
 export DB_PASSWORD=change-this-to-a-strong-password
 ```
 
-Usa la misma clave definida en `paramascostas-DB/.env`. Si mantienes `POSTGRES_BIND_IP=127.0.0.1`, para acceso remoto usa tunel SSH.
+Usa la misma clave definida en `paramascotas-DB/.env`. Si mantienes `POSTGRES_BIND_IP=127.0.0.1`, para acceso remoto usa tunel SSH.
 
 ## 3) Dump manual (si quieres)
 
