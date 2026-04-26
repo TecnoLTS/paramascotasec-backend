@@ -225,6 +225,7 @@ class ProductRepository {
             FROM "Product"
             WHERE tenant_id = :tenant_id
               AND UPPER(COALESCE(attributes->>\'sku\', \'\')) = :sku
+              AND COALESCE(attributes->>\'archived\', \'false\') <> \'true\'
         ';
 
         $params = [

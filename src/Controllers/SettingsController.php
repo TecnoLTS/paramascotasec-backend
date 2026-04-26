@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Repositories\SettingsRepository;
 use App\Repositories\ProductReferenceCatalogRepository;
 use App\Repositories\UserRepository;
+use App\Support\ProductFieldValueNormalizer;
 use App\Core\Response;
 use App\Core\Auth;
 
@@ -40,7 +41,7 @@ class SettingsController {
         return is_numeric($value) ? floatval($value) : $default;
     }
 
-    private function sanitizeReferenceOptionList($value) {
+    private function sanitizeReferenceOptionList($value, ?string $catalogKey = null) {
         if (!is_array($value)) {
             return [];
         }
@@ -52,6 +53,13 @@ class SettingsController {
             $text = trim(preg_replace('/\s+/', ' ', (string)$item));
             if ($text === '') {
                 continue;
+            }
+
+            if (in_array($catalogKey, ['sizes', 'presentations'], true)) {
+                $text = ProductFieldValueNormalizer::normalizeDisplayValue($text);
+                if ($text === '') {
+                    continue;
+                }
             }
 
             $dedupeKey = function_exists('mb_strtolower')
@@ -190,7 +198,7 @@ class SettingsController {
                 continue;
             }
 
-            $defaults[$key] = $this->sanitizeReferenceOptionList($source[$key] ?? []);
+            $defaults[$key] = $this->sanitizeReferenceOptionList($source[$key] ?? [], $key);
         }
 
         return $defaults;

@@ -31,6 +31,7 @@ final class ProductVariantMetadata
 
     public static function apply(array $product, array $attributes): array
     {
+        $attributes = ProductFieldValueNormalizer::normalizeVariantAttributeMap($attributes);
         $label = self::resolveVariantLabel($product, $attributes);
         if ($label === '') {
             unset($attributes['variantLabel'], $attributes['variantBaseName'], $attributes['variantGroupKey']);
@@ -40,12 +41,12 @@ final class ProductVariantMetadata
         $baseName = self::resolveVariantBaseName($product, $attributes, $label);
         $groupKey = self::buildGroupKey($product, $attributes, $baseName);
 
-        $attributes['variantLabel'] = $label;
+        $attributes['variantLabel'] = ProductFieldValueNormalizer::normalizeVariantLabelValue($label);
         $attributes['variantBaseName'] = $baseName;
         $attributes['variantGroupKey'] = $groupKey;
 
         if (self::isMeasurementLikeLabel($label) && trim((string)($attributes['size'] ?? '')) === '') {
-            $attributes['size'] = $label;
+            $attributes['size'] = ProductFieldValueNormalizer::normalizeDisplayValue($label);
         }
 
         return $attributes;
@@ -146,14 +147,14 @@ final class ProductVariantMetadata
         $candidates = array_values(array_unique(array_filter([
             $label,
             preg_replace('/\s+/', '', $label) ?: '',
-            str_replace('-', '\\s*-\\s*', preg_quote($label, '/')),
         ])));
 
         $base = $name;
         foreach ($candidates as $candidate) {
-            $escaped = $candidate === $label
-                ? preg_quote($candidate, '/')
-                : $candidate;
+            $escaped = self::buildFlexibleSuffixPattern($candidate);
+            if ($escaped === '') {
+                continue;
+            }
             $separator = self::requiresSeparatedSuffix($candidate)
                 ? '(?:\s+|-)'
                 : '(?:\s+|-)?';
@@ -258,6 +259,51 @@ final class ProductVariantMetadata
             'ML' => ['dimension' => 'volume', 'value' => $value],
             'OZ' => ['dimension' => 'weight', 'value' => $value * 28.3495],
             default => ['dimension' => 'unknown', 'value' => $value],
+        };
+    }
+
+    private static function buildFlexibleSuffixPattern(string $label): string
+    {
+        $normalized = self::normalizeLabel($label);
+        if ($normalized === '') {
+            return '';
+        }
+
+        $parts = preg_split(
+            '/(\d+(?:\.\d+)?(?:KGS?|KG|K|GR|G|LB|L|ML|MG|OZ|TABS?|DS|UN|UNI|PACK|PZA|PZ)\b)/u',
+            $normalized,
+            -1,
+            PREG_SPLIT_DELIM_CAPTURE
+        ) ?: [$normalized];
+
+        $pattern = '';
+        foreach ($parts as $part) {
+            if ($part === '') {
+                continue;
+            }
+
+            if (preg_match('/^(\d+(?:\.\d+)?)(KGS?|KG|K|GR|G|LB|L|ML|MG|OZ|TABS?|DS|UN|UNI|PACK|PZA|PZ)\b/u', $part, $matches) === 1) {
+                $pattern .= preg_quote((string)$matches[1], '/') . '\s*' . self::buildFlexibleUnitPattern((string)$matches[2]);
+                continue;
+            }
+
+            $escaped = preg_quote($part, '/');
+            $escaped = preg_replace('/\s+/', '\\s*', $escaped) ?? $escaped;
+            $pattern .= str_replace('\-', '\s*-\s*', $escaped);
+        }
+
+        return $pattern;
+    }
+
+    private static function buildFlexibleUnitPattern(string $unit): string
+    {
+        return match (strtoupper($unit)) {
+            'KG', 'KGS', 'K' => '(?:KGS?|KG|K)',
+            'GR', 'G' => '(?:GR|G)',
+            'ML' => '(?:MLS?|ML)',
+            'TABS', 'TAB' => 'TABS?',
+            'UN', 'UNI' => '(?:UN|UNI)',
+            default => preg_quote(strtoupper($unit), '/'),
         };
     }
 
