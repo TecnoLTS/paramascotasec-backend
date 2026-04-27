@@ -413,6 +413,8 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'CREATE INDEX IF NOT EXISTS "Product_tenant_legacy_id_idx" ON "Product" (tenant_id, legacy_id)',
         'CREATE INDEX IF NOT EXISTS "Product_tenant_created_idx" ON "Product" (tenant_id, created_at DESC)',
         'CREATE INDEX IF NOT EXISTS "Product_catalog_listing_idx" ON "Product" (tenant_id, created_at DESC) WHERE COALESCE(is_published, true) = true AND COALESCE(quantity, 0) > 0',
+        'CREATE UNIQUE INDEX IF NOT EXISTS "Product_tenant_sku_active_uidx" ON "Product" (tenant_id, upper(trim(attributes->>\'sku\'))) WHERE COALESCE(NULLIF(trim(attributes->>\'sku\'), \'\'), \'\') <> \'\' AND COALESCE(attributes->>\'archived\', \'false\') <> \'true\'',
+        'CREATE UNIQUE INDEX IF NOT EXISTS "Product_tenant_variant_label_active_uidx" ON "Product" (tenant_id, (attributes->>\'variantGroupKey\'), (attributes->>\'variantLabel\')) WHERE COALESCE(NULLIF(attributes->>\'variantGroupKey\', \'\'), \'\') <> \'\' AND COALESCE(NULLIF(attributes->>\'variantLabel\', \'\'), \'\') <> \'\' AND COALESCE(attributes->>\'archived\', \'false\') <> \'true\'',
         'CREATE INDEX IF NOT EXISTS "Order_tenant_id_idx" ON "Order" (tenant_id)',
         'CREATE INDEX IF NOT EXISTS "Order_tenant_created_idx" ON "Order" (tenant_id, created_at)',
         'CREATE INDEX IF NOT EXISTS "Order_tenant_user_idx" ON "Order" (tenant_id, user_id)',
@@ -449,6 +451,14 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'CREATE INDEX IF NOT EXISTS "AuthSecurityEvent_tenant_email_idx" ON "AuthSecurityEvent" (tenant_id, email, created_at DESC)',
         'CREATE INDEX IF NOT EXISTS "ContactMessage_tenant_created_idx" ON "ContactMessage" (tenant_id, created_at DESC)',
         'CREATE INDEX IF NOT EXISTS "ContactMessage_tenant_status_idx" ON "ContactMessage" (tenant_id, status)',
+        'DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = \'InventoryLot_product_id_fkey\') THEN ALTER TABLE "InventoryLot" ADD CONSTRAINT "InventoryLot_product_id_fkey" FOREIGN KEY (product_id) REFERENCES "Product"(id) ON UPDATE CASCADE ON DELETE RESTRICT; END IF; END $$',
+        'DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = \'InventoryLot_purchase_invoice_id_fkey\') THEN ALTER TABLE "InventoryLot" ADD CONSTRAINT "InventoryLot_purchase_invoice_id_fkey" FOREIGN KEY (purchase_invoice_id) REFERENCES "PurchaseInvoice"(id) ON UPDATE CASCADE ON DELETE SET NULL; END IF; END $$',
+        'DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = \'InventoryLot_purchase_invoice_item_id_fkey\') THEN ALTER TABLE "InventoryLot" ADD CONSTRAINT "InventoryLot_purchase_invoice_item_id_fkey" FOREIGN KEY (purchase_invoice_item_id) REFERENCES "PurchaseInvoiceItem"(id) ON UPDATE CASCADE ON DELETE SET NULL; END IF; END $$',
+        'DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = \'PurchaseInvoiceItem_purchase_invoice_id_fkey\') THEN ALTER TABLE "PurchaseInvoiceItem" ADD CONSTRAINT "PurchaseInvoiceItem_purchase_invoice_id_fkey" FOREIGN KEY (purchase_invoice_id) REFERENCES "PurchaseInvoice"(id) ON UPDATE CASCADE ON DELETE CASCADE; END IF; END $$',
+        'DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = \'PurchaseInvoiceItem_product_id_fkey\') THEN ALTER TABLE "PurchaseInvoiceItem" ADD CONSTRAINT "PurchaseInvoiceItem_product_id_fkey" FOREIGN KEY (product_id) REFERENCES "Product"(id) ON UPDATE CASCADE ON DELETE RESTRICT; END IF; END $$',
+        'DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = \'InventoryLotAllocation_lot_id_fkey\') THEN ALTER TABLE "InventoryLotAllocation" ADD CONSTRAINT "InventoryLotAllocation_lot_id_fkey" FOREIGN KEY (lot_id) REFERENCES "InventoryLot"(id) ON UPDATE CASCADE ON DELETE RESTRICT; END IF; END $$',
+        'DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = \'InventoryLotAllocation_product_id_fkey\') THEN ALTER TABLE "InventoryLotAllocation" ADD CONSTRAINT "InventoryLotAllocation_product_id_fkey" FOREIGN KEY (product_id) REFERENCES "Product"(id) ON UPDATE CASCADE ON DELETE RESTRICT; END IF; END $$',
+        'DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = \'InventoryLotAllocation_order_item_id_fkey\') THEN ALTER TABLE "InventoryLotAllocation" ADD CONSTRAINT "InventoryLotAllocation_order_item_id_fkey" FOREIGN KEY (order_item_id) REFERENCES "OrderItem"(id) ON UPDATE CASCADE ON DELETE SET NULL; END IF; END $$',
     ];
 
     foreach ($statements as $sql) {
