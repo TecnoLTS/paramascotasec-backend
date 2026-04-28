@@ -103,6 +103,13 @@ final class ProductVariantMetadata
         $presentation = self::normalizeLabel((string)($attributes['presentation'] ?? ''));
         $color = self::cleanWhitespace((string)($attributes['color'] ?? ''));
         $explicit = self::normalizeLabel((string)($attributes['variantLabel'] ?? $product['variantLabel'] ?? ''));
+        $variantAxis = trim((string)($attributes['variantAxis'] ?? $attributes['variantDefinitionField'] ?? ''));
+        if ($variantAxis !== '') {
+            $axisValue = self::normalizeLabel((string)($attributes[$variantAxis] ?? ''));
+            if ($axisValue !== '') {
+                return $axisValue;
+            }
+        }
 
         return match ($normalizedType) {
             'ropa' => $size !== '' ? $size : ($color !== '' ? $color : $explicit),
