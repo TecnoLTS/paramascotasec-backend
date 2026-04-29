@@ -102,6 +102,7 @@ final class ProductVariantMetadata
         $weight = self::normalizeLabel((string)($attributes['weight'] ?? ''));
         $presentation = self::normalizeLabel((string)($attributes['presentation'] ?? ''));
         $color = self::cleanWhitespace((string)($attributes['color'] ?? ''));
+        $normalizedColor = self::normalizeLabel($color);
         $explicit = self::normalizeLabel((string)($attributes['variantLabel'] ?? $product['variantLabel'] ?? ''));
         $variantAxis = trim((string)($attributes['variantAxis'] ?? $attributes['variantDefinitionField'] ?? ''));
         if ($variantAxis !== '') {
@@ -112,12 +113,29 @@ final class ProductVariantMetadata
         }
 
         return match ($normalizedType) {
-            'ropa' => $size !== '' ? $size : ($color !== '' ? $color : $explicit),
-            'accesorios' => $color !== '' ? $color : ($size !== '' ? $size : ($presentation !== '' ? $presentation : $explicit)),
+            'ropa' => self::shouldPreserveDetailedExplicitLabel($explicit, $size, $normalizedColor)
+                ? $explicit
+                : ($size !== '' ? $size : ($normalizedColor !== '' ? $normalizedColor : $explicit)),
+            'accesorios' => self::shouldPreserveDetailedExplicitLabel($explicit, $size, $normalizedColor)
+                ? $explicit
+                : ($normalizedColor !== '' ? $normalizedColor : ($size !== '' ? $size : ($presentation !== '' ? $presentation : $explicit))),
             'cuidado' => $presentation !== '' ? $presentation : ($size !== '' ? $size : $explicit),
             'alimento' => $weight !== '' ? $weight : ($size !== '' ? $size : ($presentation !== '' ? $presentation : $explicit)),
             default => $explicit,
         };
+    }
+
+    private static function shouldPreserveDetailedExplicitLabel(string $explicit, string $size, string $color): bool
+    {
+        if ($explicit === '' || $size === '' || $color === '') {
+            return false;
+        }
+
+        if ($explicit === $size || $explicit === $color) {
+            return false;
+        }
+
+        return str_contains($explicit, $size) && str_contains($explicit, $color);
     }
 
     private static function normalizeProductType(string $type, string $category = ''): string
@@ -135,19 +153,26 @@ final class ProductVariantMetadata
 
     public static function resolveVariantBaseName(array $product, array $attributes, ?string $label = null): string
     {
-        $explicit = trim((string)($product['variantBaseName'] ?? ''));
-        if ($explicit !== '') {
-            return self::cleanWhitespace($explicit);
-        }
-
-        $attributeBase = trim((string)($attributes['variantBaseName'] ?? ''));
-        if ($attributeBase !== '') {
-            return self::cleanWhitespace($attributeBase);
-        }
-
         $name = self::cleanWhitespace((string)($product['name'] ?? ''));
         $label = $label ?? self::resolveVariantLabel($product, $attributes);
-        if ($name === '' || $label === '') {
+        if ($name === '') {
+            return $name;
+        }
+
+        $explicitCandidates = array_values(array_filter([
+            self::cleanWhitespace((string)($product['variantBaseName'] ?? '')),
+            self::cleanWhitespace((string)($attributes['variantBaseName'] ?? '')),
+        ], static fn (string $value): bool => $value !== ''));
+
+        $candidateLabels = self::resolveVariantBaseNameCandidateLabels($product, $attributes, $label);
+
+        foreach ($explicitCandidates as $candidate) {
+            if (self::isBaseNameConsistentWithName($name, $candidate, $candidateLabels)) {
+                return $candidate;
+            }
+        }
+
+        if ($label === '') {
             return $name;
         }
 
@@ -170,6 +195,99 @@ final class ProductVariantMetadata
         }
 
         return $base !== '' ? $base : $name;
+    }
+
+    private static function resolveVariantBaseNameCandidateLabels(array $product, array $attributes, string $label): array
+    {
+        $labels = [
+            $label,
+            (string)($product['variantLabel'] ?? ''),
+        ];
+
+        foreach (self::ATTRIBUTE_LABEL_KEYS as $key) {
+            $labels[] = (string)($attributes[$key] ?? '');
+        }
+
+        $normalizedLabels = [];
+        foreach ($labels as $candidate) {
+            $normalized = self::normalizeLabel($candidate);
+            if ($normalized !== '') {
+                $normalizedLabels[$normalized] = $normalized;
+            }
+        }
+
+        return array_values($normalizedLabels);
+    }
+
+    private static function labelMatchesEntireValue(string $value, string $label): bool
+    {
+        $value = self::cleanWhitespace($value);
+        $label = self::normalizeLabel($label);
+        if ($value === '' || $label === '') {
+            return false;
+        }
+
+        $escaped = self::buildFlexibleSuffixPattern($label);
+        if ($escaped === '') {
+            return false;
+        }
+
+        return preg_match('/^' . $escaped . '$/iu', $value) === 1;
+    }
+
+    private static function isBaseNameConsistentWithName(string $name, string $baseName, array $labels): bool
+    {
+        $normalizedName = mb_strtolower(self::cleanWhitespace($name));
+        $normalizedBase = mb_strtolower(self::cleanWhitespace($baseName));
+
+        if ($normalizedName === '' || $normalizedBase === '') {
+            return false;
+        }
+
+        if ($normalizedName === $normalizedBase) {
+            return true;
+        }
+
+        if (str_starts_with($normalizedName, $normalizedBase)) {
+            $suffix = trim((string)mb_substr($name, mb_strlen($baseName)));
+            $suffix = preg_replace('/^(?:\s+|-)+/u', '', $suffix) ?? $suffix;
+            $suffix = self::cleanWhitespace($suffix);
+
+            foreach ($labels as $candidateLabel) {
+                if (self::labelMatchesEntireValue($suffix, $candidateLabel)) {
+                    return true;
+                }
+            }
+        }
+
+        if ($labels === []) {
+            return false;
+        }
+
+        foreach ($labels as $candidateLabel) {
+            $normalizedLabel = self::normalizeLabel($candidateLabel);
+            if ($normalizedLabel === '') {
+                continue;
+            }
+
+            $escaped = self::buildFlexibleSuffixPattern($normalizedLabel);
+            if ($escaped === '') {
+                continue;
+            }
+
+            $separator = self::requiresSeparatedSuffix($normalizedLabel)
+                ? '(?:\s+|-)'
+                : '(?:\s+|-)?';
+
+            $derived = preg_replace('/' . $separator . $escaped . '$/iu', '', $name) ?? $name;
+            $derived = mb_strtolower(self::cleanWhitespace($derived));
+
+            if ($derived !== '' && $derived === $normalizedBase) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static function describeLabel(string $label): array

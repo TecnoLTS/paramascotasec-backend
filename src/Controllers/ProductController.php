@@ -238,8 +238,8 @@ class ProductController {
             'category' => $data['category'] ?? ($currentProduct['category'] ?? ''),
             'gender' => $data['gender'] ?? ($currentProduct['gender'] ?? ''),
             'variantLabel' => $data['variantLabel'] ?? ($currentProduct['variantLabel'] ?? ''),
-            'variantBaseName' => $data['variantBaseName'] ?? ($currentProduct['variantBaseName'] ?? ''),
-            'variantGroupKey' => $data['variantGroupKey'] ?? ($currentProduct['variantGroupKey'] ?? ''),
+            'variantBaseName' => $data['variantBaseName'] ?? '',
+            'variantGroupKey' => $data['variantGroupKey'] ?? '',
         ];
 
         $data['attributes'] = ProductVariantMetadata::apply($effectiveProduct, $effectiveAttributes);
@@ -257,8 +257,8 @@ class ProductController {
             'category' => $data['category'] ?? ($currentProduct['category'] ?? ''),
             'gender' => $data['gender'] ?? ($currentProduct['gender'] ?? ''),
             'variantLabel' => $data['variantLabel'] ?? ($currentProduct['variantLabel'] ?? ''),
-            'variantBaseName' => $data['variantBaseName'] ?? ($currentProduct['variantBaseName'] ?? ''),
-            'variantGroupKey' => $data['variantGroupKey'] ?? ($currentProduct['variantGroupKey'] ?? ''),
+            'variantBaseName' => $data['variantBaseName'] ?? '',
+            'variantGroupKey' => $data['variantGroupKey'] ?? '',
         ];
 
         $hasVariantContext =

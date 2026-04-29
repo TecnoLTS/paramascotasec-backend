@@ -172,6 +172,7 @@ header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Tenant');
 header('Access-Control-Max-Age: 600');
 header('Vary: Origin');
+Response::noStore();
 if ($origin && TenantContext::isOriginAllowed($origin)) {
     header('Access-Control-Allow-Origin: ' . $origin);
 } elseif ($origin && $isLocalOrigin && ($isDev || $isLocalHostRequest)) {
