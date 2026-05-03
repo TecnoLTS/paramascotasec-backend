@@ -29,6 +29,7 @@ class ProductReferenceCatalogRepository {
 
     public function getAll(): array {
         $result = [
+            'categories' => [],
             'brands' => [],
             'suppliers' => [],
             'sizes' => [],

@@ -8,9 +8,9 @@ final class ProductAudience
 {
     public static function normalizeCategory(?string $value, ?string $fallbackProductType = null): string
     {
-        $normalizedValue = self::normalizeCategoryToken((string)$value);
-        if ($normalizedValue !== '') {
-            return $normalizedValue;
+        $clean = self::clean($value);
+        if ($clean !== '') {
+            return $clean;
         }
 
         $productType = self::normalizeProductType($fallbackProductType);
@@ -139,19 +139,19 @@ final class ProductAudience
             return '';
         }
 
-        if (self::tokenContainsAny($token, ['ropa', 'vestimenta', 'vestido', 'prenda', 'abrigo', 'camiseta', 'sueter', 'sudadera'])) {
+        if (in_array($token, ['ropa', 'vestimenta'], true)) {
             return 'ropa';
         }
 
-        if (self::tokenContainsAny($token, ['cuidado', 'cuidados', 'higiene', 'medicina', 'medicinas', 'salud', 'farmacia', 'antiparasit', 'pipeta', 'shampoo'])) {
+        if (in_array($token, ['cuidado', 'cuidados', 'higiene', 'medicina', 'medicinas', 'salud', 'farmacia'], true)) {
             return 'salud';
         }
 
-        if (self::tokenContainsAny($token, ['Alimento', 'alimento', 'snack', 'golosina', 'croqueta', 'pienso', 'lata'])) {
+        if (in_array($token, ['alimento', 'alimentos'], true)) {
             return 'Alimento';
         }
 
-        if (self::tokenContainsAny($token, ['accesorio', 'accesorios', 'juguete', 'juguetes', 'cama', 'camas', 'comedero', 'comederos', 'plato', 'platos', 'correa', 'correas', 'collar', 'collares', 'arnes', 'arneses', 'transportadora', 'transportadoras', 'bolsa', 'bolsas'])) {
+        if (in_array($token, ['accesorio', 'accesorios'], true)) {
             return 'accesorios';
         }
 

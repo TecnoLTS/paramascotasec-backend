@@ -12,6 +12,7 @@ use App\Core\Auth;
 class SettingsController {
     private function getDefaultProductReferenceData() {
         return [
+            'categories' => [],
             'brands' => [],
             'suppliers' => [],
             'sizes' => [],
