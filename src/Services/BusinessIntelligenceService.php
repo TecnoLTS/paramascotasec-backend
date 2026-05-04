@@ -77,11 +77,15 @@ class BusinessIntelligenceService {
         $raw = $this->orderRepo->getProfitStats();
         $grossProfit = (float)($raw['gross_profit'] ?? $raw['profit'] ?? 0);
         $netProfit = (float)($raw['net_profit'] ?? $grossProfit);
+        $netCommittedProfit = (float)($raw['net_committed_profit'] ?? $netProfit);
         $cost = (float)($raw['cost'] ?? 0);
-        $operatingExpenses = (float)($raw['operating_expenses'] ?? 0);
+        $paidExpenses = (float)($raw['paid_expenses'] ?? $raw['operating_expenses'] ?? 0);
+        $committedExpenses = (float)($raw['committed_expenses'] ?? $paidExpenses);
         $raw['roi'] = $cost > 0 ? round(($grossProfit / $cost) * 100, 1) : 0;
-        $netInvestmentBase = $cost + $operatingExpenses;
+        $netInvestmentBase = $cost + $paidExpenses;
         $raw['net_roi'] = $netInvestmentBase > 0 ? round(($netProfit / $netInvestmentBase) * 100, 1) : 0;
+        $committedInvestmentBase = $cost + $committedExpenses;
+        $raw['committed_net_roi'] = $committedInvestmentBase > 0 ? round(($netCommittedProfit / $committedInvestmentBase) * 100, 1) : 0;
         return $raw;
     }
 

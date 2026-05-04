@@ -55,6 +55,7 @@ class PosRepository {
             )
         ');
         $this->db->exec('CREATE INDEX IF NOT EXISTS idx_pos_movement_shift ON "PosMovement"(tenant_id, shift_id, created_at DESC)');
+        $this->db->exec('ALTER TABLE "PosMovement" ADD COLUMN IF NOT EXISTS business_expense_id varchar(64) NULL');
 
         self::$schemaEnsured = true;
     }
@@ -193,6 +194,7 @@ class PosRepository {
             'type' => strtolower((string)($row['type'] ?? 'income')),
             'amount' => round((float)($row['amount'] ?? 0), 2),
             'description' => $row['description'] ?? null,
+            'business_expense_id' => $row['business_expense_id'] ?? null,
             'created_by_user_id' => (string)($row['created_by_user_id'] ?? ''),
             'created_at' => $row['created_at'] ?? null
         ];
@@ -291,7 +293,7 @@ class PosRepository {
 
     public function listMovements(string $shiftId): array {
         $stmt = $this->db->prepare('
-            SELECT id, shift_id, type, amount, description, created_by_user_id, created_at
+            SELECT id, shift_id, type, amount, description, business_expense_id, created_by_user_id, created_at
             FROM "PosMovement"
             WHERE tenant_id = :tenant_id
               AND shift_id = :shift_id
@@ -532,7 +534,7 @@ class PosRepository {
         }
     }
 
-    public function addMovement(string $type, float $amount, string $description, string $userId): array {
+    public function addMovement(string $type, float $amount, string $description, string $userId, ?string $businessExpenseId = null): array {
         $type = strtolower(trim($type));
         if (!in_array($type, $this->movementTypes, true)) {
             throw new \Exception('Tipo de movimiento inválido.');
@@ -551,11 +553,11 @@ class PosRepository {
 
         $stmt = $this->db->prepare('
             INSERT INTO "PosMovement" (
-                tenant_id, shift_id, type, amount, description, created_by_user_id, created_at
+                tenant_id, shift_id, type, amount, description, business_expense_id, created_by_user_id, created_at
             ) VALUES (
-                :tenant_id, :shift_id, :type, :amount, :description, :created_by_user_id, NOW()
+                :tenant_id, :shift_id, :type, :amount, :description, :business_expense_id, :created_by_user_id, NOW()
             )
-            RETURNING id, shift_id, type, amount, description, created_by_user_id, created_at
+            RETURNING id, shift_id, type, amount, description, business_expense_id, created_by_user_id, created_at
         ');
         $stmt->execute([
             'tenant_id' => $this->getTenantId(),
@@ -563,6 +565,7 @@ class PosRepository {
             'type' => $type,
             'amount' => round($amount, 2),
             'description' => $description !== '' ? $description : null,
+            'business_expense_id' => $businessExpenseId,
             'created_by_user_id' => $userId
         ]);
         $row = $stmt->fetch();

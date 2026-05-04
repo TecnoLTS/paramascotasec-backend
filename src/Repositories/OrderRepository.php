@@ -1749,20 +1749,34 @@ class OrderRepository {
         $cost = (float)($costRow['cost'] ?? 0);
         $grossProfit = $revenue - $cost;
         $grossMargin = $revenue > 0 ? ($grossProfit / $revenue) * 100 : 0;
-        $operatingExpenses = $this->getRegisteredOperatingExpenses();
-        $netProfit = $grossProfit - $operatingExpenses;
-        $netMargin = $revenue > 0 ? ($netProfit / $revenue) * 100 : 0;
+        $expenseSummary = $this->getBusinessExpenseSummary();
+        $paidExpenses = (float)($expenseSummary['paid'] ?? 0);
+        $pendingExpenses = (float)($expenseSummary['pending'] ?? 0);
+        $overdueExpenses = (float)($expenseSummary['overdue'] ?? 0);
+        $committedExpenses = $paidExpenses + $pendingExpenses + $overdueExpenses;
+        $netCashProfit = $grossProfit - $paidExpenses;
+        $netCommittedProfit = $grossProfit - $committedExpenses;
+        $netCashMargin = $revenue > 0 ? ($netCashProfit / $revenue) * 100 : 0;
+        $netCommittedMargin = $revenue > 0 ? ($netCommittedProfit / $revenue) * 100 : 0;
 
         return [
             'revenue' => round($revenue, 2),
             'cost' => round($cost, 2),
             'shipping_collected' => round($shippingCollected, 2),
-            'operating_expenses' => round($operatingExpenses, 2),
+            'operating_expenses' => round($paidExpenses, 2),
+            'paid_expenses' => round($paidExpenses, 2),
+            'pending_expenses' => round($pendingExpenses, 2),
+            'overdue_expenses' => round($overdueExpenses, 2),
+            'committed_expenses' => round($committedExpenses, 2),
             'gross_profit' => round($grossProfit, 2),
             'gross_margin' => round($grossMargin, 1),
-            'net_profit' => round($netProfit, 2),
-            'net_margin' => round($netMargin, 1),
-            'expense_source' => 'pos_movements',
+            'net_cash_profit' => round($netCashProfit, 2),
+            'net_cash_margin' => round($netCashMargin, 1),
+            'net_committed_profit' => round($netCommittedProfit, 2),
+            'net_committed_margin' => round($netCommittedMargin, 1),
+            'net_profit' => round($netCashProfit, 2),
+            'net_margin' => round($netCashMargin, 1),
+            'expense_source' => 'business_expenses',
             // Backwards-compatible names used by older panel widgets.
             'shipping_cost' => 0,
             'profit' => round($grossProfit, 2),
@@ -1770,25 +1784,15 @@ class OrderRepository {
         ];
     }
 
-    private function getRegisteredOperatingExpenses(): float {
+    private function getBusinessExpenseSummary(): array {
         try {
-            $existsStmt = $this->db->query("SELECT to_regclass('public.\"PosMovement\"') as table_name");
-            $existsRow = $existsStmt ? $existsStmt->fetch() : null;
-            if (empty($existsRow['table_name'])) {
-                return 0.0;
-            }
-
-            $stmt = $this->db->prepare("
-                SELECT SUM(amount) as total
-                FROM \"PosMovement\"
-                WHERE tenant_id = :tenant_id
-                  AND type IN ('expense', 'withdrawal')
-            ");
-            $stmt->execute(['tenant_id' => $this->getTenantId()]);
-            $row = $stmt->fetch();
-            return max(0.0, (float)($row['total'] ?? 0));
+            return (new BusinessExpenseRepository())->summary();
         } catch (\Throwable $e) {
-            return 0.0;
+            return [
+                'paid' => 0.0,
+                'pending' => 0.0,
+                'overdue' => 0.0,
+            ];
         }
     }
 

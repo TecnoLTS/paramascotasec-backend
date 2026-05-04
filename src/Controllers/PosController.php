@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Response;
+use App\Repositories\BusinessExpenseRepository;
 use App\Repositories\PosRepository;
 
 class PosController {
@@ -129,8 +130,34 @@ class PosController {
             }
             $amount = round((float)$data['amount'], 2);
             $description = trim((string)($data['description'] ?? ''));
+            $businessExpenseId = trim((string)($data['business_expense_id'] ?? '')) ?: null;
 
-            $movement = $this->repository->addMovement($type, $amount, $description, $this->getCurrentUserId($user));
+            if (in_array($type, ['expense', 'withdrawal'], true)) {
+                $expenseRepo = new BusinessExpenseRepository();
+                if ($businessExpenseId) {
+                    $expenseRepo->updateStatus($businessExpenseId, 'paid', [
+                        'payment_method' => 'cash',
+                        'reference' => 'POS',
+                    ], $this->getCurrentUserId($user));
+                } elseif (!empty($data['create_business_expense'])) {
+                    $expense = $expenseRepo->create([
+                        'category' => trim((string)($data['business_expense_category'] ?? 'Otros')) ?: 'Otros',
+                        'description' => $description !== '' ? $description : 'Egreso POS',
+                        'amount' => $amount,
+                        'tax_amount' => 0,
+                        'total' => $amount,
+                        'expense_date' => date('Y-m-d'),
+                        'due_date' => date('Y-m-d'),
+                        'status' => 'paid',
+                        'payment_method' => 'cash',
+                        'reference' => 'POS',
+                        'source' => 'pos',
+                    ], $this->getCurrentUserId($user));
+                    $businessExpenseId = (string)($expense['id'] ?? '');
+                }
+            }
+
+            $movement = $this->repository->addMovement($type, $amount, $description, $this->getCurrentUserId($user), $businessExpenseId ?: null);
             $shift = $this->repository->getActiveShift();
             $movements = $shift ? $this->repository->listMovements((string)$shift['id']) : [];
             $history = $this->repository->listShifts(20);
