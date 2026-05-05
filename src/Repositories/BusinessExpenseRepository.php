@@ -4,11 +4,13 @@ namespace App\Repositories;
 
 use App\Core\Database;
 use App\Core\TenantContext;
+use App\Exceptions\FinancialPeriodClosedException;
 use DateTimeImmutable;
 use PDO;
 
 class BusinessExpenseRepository {
     private $db;
+    private FinancialPeriodRepository $financialPeriods;
     private static $schemaEnsured = false;
     private array $statuses = ['pending', 'paid', 'overdue', 'cancelled'];
     private array $types = ['one_time', 'recurring_instance'];
@@ -16,6 +18,7 @@ class BusinessExpenseRepository {
 
     public function __construct() {
         $this->db = Database::getInstance();
+        $this->financialPeriods = new FinancialPeriodRepository($this->db);
         $this->ensureSchema();
     }
 
@@ -116,11 +119,19 @@ class BusinessExpenseRepository {
         return in_array($value, $this->statuses, true) ? $value : 'pending';
     }
 
+    private function asBool($value): bool {
+        if (is_bool($value)) return $value;
+        return in_array(strtolower(trim((string)$value)), ['1', 't', 'true', 'yes', 'on'], true);
+    }
+
     private function normalizeExpenseRow(array $row): array {
         foreach (['amount', 'tax_amount', 'total'] as $field) {
             $row[$field] = isset($row[$field]) ? (float)$row[$field] : 0.0;
         }
-        $row['payment_exists'] = (bool)($row['payment_exists'] ?? $row['pdf_exists'] ?? false);
+        $row['payment_exists'] = $this->asBool($row['payment_exists'] ?? $row['pdf_exists'] ?? false);
+        $period = $this->financialPeriods->periodForDate((string)($row['expense_date'] ?? date('Y-m-d')));
+        $row['financial_period_key'] = $row['financial_period_key'] ?? $period['period_key'];
+        $row['is_period_closed'] = $this->asBool($row['is_period_closed'] ?? false);
         return $row;
     }
 
@@ -129,12 +140,26 @@ class BusinessExpenseRepository {
             $row[$field] = isset($row[$field]) ? (float)$row[$field] : 0.0;
         }
         $row['interval_count'] = (int)($row['interval_count'] ?? 1);
-        $row['active'] = (bool)($row['active'] ?? true);
+        $row['active'] = $this->asBool($row['active'] ?? true);
         return $row;
     }
 
     private function refreshOverdue(): void {
-        $stmt = $this->db->prepare('UPDATE "BusinessExpense" SET status = \'overdue\', updated_at = NOW() WHERE tenant_id = :tenant_id AND status = \'pending\' AND due_date IS NOT NULL AND due_date < CURRENT_DATE');
+        $stmt = $this->db->prepare('
+            UPDATE "BusinessExpense"
+            SET status = \'overdue\', updated_at = NOW()
+            WHERE tenant_id = :tenant_id
+              AND status = \'pending\'
+              AND due_date IS NOT NULL
+              AND due_date < CURRENT_DATE
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM "FinancialPeriod" fp
+                  WHERE fp.tenant_id = "BusinessExpense".tenant_id
+                    AND fp.period_key = TO_CHAR("BusinessExpense".expense_date, \'YYYY-MM\')
+                    AND fp.status = \'closed\'
+              )
+        ');
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
     }
 
@@ -160,7 +185,23 @@ class BusinessExpenseRepository {
             $params['to_date'] = $filters['to'];
         }
 
-        $stmt = $this->db->prepare('SELECT *, EXISTS(SELECT 1 FROM "BusinessExpensePayment" p WHERE p.expense_id = "BusinessExpense".id AND p.tenant_id = "BusinessExpense".tenant_id) AS payment_exists FROM "BusinessExpense" WHERE ' . implode(' AND ', $where) . ' ORDER BY COALESCE(due_date, expense_date) DESC, created_at DESC LIMIT 300');
+        $stmt = $this->db->prepare('
+            SELECT
+                "BusinessExpense".*,
+                TO_CHAR("BusinessExpense".expense_date, \'YYYY-MM\') AS financial_period_key,
+                EXISTS(
+                    SELECT 1
+                    FROM "FinancialPeriod" fp
+                    WHERE fp.tenant_id = "BusinessExpense".tenant_id
+                      AND fp.period_key = TO_CHAR("BusinessExpense".expense_date, \'YYYY-MM\')
+                      AND fp.status = \'closed\'
+                ) AS is_period_closed,
+                EXISTS(SELECT 1 FROM "BusinessExpensePayment" p WHERE p.expense_id = "BusinessExpense".id AND p.tenant_id = "BusinessExpense".tenant_id) AS payment_exists
+            FROM "BusinessExpense"
+            WHERE ' . implode(' AND ', $where) . '
+            ORDER BY COALESCE(due_date, expense_date) DESC, created_at DESC
+            LIMIT 300
+        ');
         $stmt->execute($params);
         return array_map(fn($row) => $this->normalizeExpenseRow($row), $stmt->fetchAll() ?: []);
     }
@@ -191,6 +232,7 @@ class BusinessExpenseRepository {
         $paidAt = $status === 'paid' ? ($data['paid_at'] ?? date(DATE_ATOM)) : null;
         $expenseDate = $this->cleanDate($data['expense_date'] ?? null);
         $dueDate = !empty($data['due_date']) ? $this->cleanDate($data['due_date']) : null;
+        $this->financialPeriods->assertDateOpen($expenseDate, 'gasto');
 
         $stmt = $this->db->prepare('
             INSERT INTO "BusinessExpense" (id, tenant_id, recurrence_id, category, description, amount, tax_amount, total, expense_date, due_date, paid_at, status, type, payment_method, reference, notes, source, source_id, created_by_user_id, created_at, updated_at)
@@ -210,7 +252,7 @@ class BusinessExpenseRepository {
             'due_date' => $dueDate,
             'paid_at' => $paidAt,
             'status' => $status,
-            'type' => in_array(($data['type'] ?? 'one_time'), $this->types, true) ? $data['type'] : 'one_time',
+            'type' => in_array(($data['type'] ?? 'one_time'), $this->types, true) ? ($data['type'] ?? 'one_time') : 'one_time',
             'payment_method' => trim((string)($data['payment_method'] ?? '')) ?: null,
             'reference' => trim((string)($data['reference'] ?? '')) ?: null,
             'notes' => trim((string)($data['notes'] ?? '')) ?: null,
@@ -228,6 +270,10 @@ class BusinessExpenseRepository {
     public function update(string $id, array $data): array {
         $existing = $this->find($id);
         if (!$existing) throw new \Exception('Gasto no encontrado.');
+        $this->financialPeriods->assertDateOpen((string)$existing['expense_date'], 'gasto');
+
+        $newExpenseDate = $this->cleanDate($data['expense_date'] ?? $existing['expense_date']);
+        $this->financialPeriods->assertDateOpen($newExpenseDate, 'gasto');
 
         $amount = $this->money($data['amount'] ?? $existing['amount']);
         $tax = $this->money($data['tax_amount'] ?? $existing['tax_amount']);
@@ -247,7 +293,7 @@ class BusinessExpenseRepository {
             'amount' => $amount,
             'tax_amount' => $tax,
             'total' => $total,
-            'expense_date' => $this->cleanDate($data['expense_date'] ?? $existing['expense_date']),
+            'expense_date' => $newExpenseDate,
             'due_date' => !empty($data['due_date']) ? $this->cleanDate($data['due_date']) : null,
             'paid_at' => $status === 'paid' ? ($data['paid_at'] ?? $existing['paid_at'] ?? date(DATE_ATOM)) : null,
             'status' => $status,
@@ -255,12 +301,21 @@ class BusinessExpenseRepository {
             'reference' => trim((string)($data['reference'] ?? '')) ?: null,
             'notes' => trim((string)($data['notes'] ?? '')) ?: null,
         ]);
-        return $this->normalizeExpenseRow($stmt->fetch() ?: []);
+        $row = $stmt->fetch() ?: [];
+        if ($row && $status === 'paid' && strtolower((string)($existing['status'] ?? '')) !== 'paid') {
+            $this->recordPayment((string)$row['id'], (float)$row['total'], $row['payment_method'] ?? null, $row['reference'] ?? null, (string)($row['created_by_user_id'] ?? 'service'));
+        }
+        return $this->normalizeExpenseRow($row);
     }
 
     public function updateStatus(string $id, string $status, array $data = [], ?string $userId = null): array {
         $status = $this->normalizeStatus($status);
-        $paidAt = $status === 'paid' ? date(DATE_ATOM) : null;
+        $existing = $this->find($id);
+        if (!$existing) throw new \Exception('Gasto no encontrado.');
+        $this->financialPeriods->assertDateOpen((string)$existing['expense_date'], 'gasto');
+        $paidAt = $status === 'paid'
+            ? (strtolower((string)($existing['status'] ?? '')) === 'paid' ? ($existing['paid_at'] ?? date(DATE_ATOM)) : ($data['paid_at'] ?? date(DATE_ATOM)))
+            : null;
         $stmt = $this->db->prepare('UPDATE "BusinessExpense" SET status = :status, paid_at = :paid_at, payment_method = COALESCE(:payment_method, payment_method), reference = COALESCE(:reference, reference), updated_at = NOW() WHERE id = :id AND tenant_id = :tenant_id RETURNING *');
         $stmt->execute([
             'id' => $id,
@@ -273,7 +328,7 @@ class BusinessExpenseRepository {
         $row = $stmt->fetch();
         if (!$row) throw new \Exception('Gasto no encontrado.');
 
-        if ($status === 'paid' && $userId) {
+        if ($status === 'paid' && $userId && strtolower((string)($existing['status'] ?? '')) !== 'paid') {
             $this->recordPayment((string)$row['id'], (float)$row['total'], $row['payment_method'] ?? null, $row['reference'] ?? null, $userId);
         }
 
@@ -281,6 +336,15 @@ class BusinessExpenseRepository {
     }
 
     private function recordPayment(string $expenseId, float $amount, ?string $method, ?string $reference, string $userId): void {
+        $existing = $this->db->prepare('SELECT 1 FROM "BusinessExpensePayment" WHERE tenant_id = :tenant_id AND expense_id = :expense_id LIMIT 1');
+        $existing->execute([
+            'tenant_id' => $this->getTenantId(),
+            'expense_id' => $expenseId,
+        ]);
+        if ($existing->fetch()) {
+            return;
+        }
+
         $stmt = $this->db->prepare('INSERT INTO "BusinessExpensePayment" (tenant_id, expense_id, amount, payment_method, reference, created_by_user_id) VALUES (:tenant_id, :expense_id, :amount, :payment_method, :reference, :created_by_user_id)');
         $stmt->execute([
             'tenant_id' => $this->getTenantId(),
@@ -299,9 +363,19 @@ class BusinessExpenseRepository {
         return $row ? $this->normalizeExpenseRow($row) : null;
     }
 
-    public function summary(): array {
+    public function summary(array $options = []): array {
         $this->generateDueRecurringInstances();
         $this->refreshOverdue();
+        $where = ['tenant_id = :tenant_id', 'status <> \'cancelled\''];
+        if (!empty($options['exclude_closed_periods'])) {
+            $where[] = 'NOT EXISTS (
+                SELECT 1
+                FROM "FinancialPeriod" fp
+                WHERE fp.tenant_id = "BusinessExpense".tenant_id
+                  AND fp.period_key = TO_CHAR("BusinessExpense".expense_date, \'YYYY-MM\')
+                  AND fp.status = \'closed\'
+            )';
+        }
         $stmt = $this->db->prepare('
             SELECT
                 SUM(total) FILTER (WHERE status = \'paid\') AS paid,
@@ -312,7 +386,7 @@ class BusinessExpenseRepository {
                 COUNT(*) FILTER (WHERE status = \'pending\') AS pending_count,
                 COUNT(*) FILTER (WHERE status = \'overdue\') AS overdue_count
             FROM "BusinessExpense"
-            WHERE tenant_id = :tenant_id AND status <> \'cancelled\'
+            WHERE ' . implode(' AND ', $where) . '
         ');
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $row = $stmt->fetch() ?: [];
@@ -350,6 +424,7 @@ class BusinessExpenseRepository {
         if (!in_array($frequency, $this->frequencies, true)) $frequency = 'monthly';
         $startDate = $this->cleanDate($data['start_date'] ?? null);
         $nextDue = $this->cleanDate($data['next_due_date'] ?? $startDate, $startDate);
+        $this->financialPeriods->assertDateOpen($nextDue, 'gasto recurrente');
 
         $stmt = $this->db->prepare('
             INSERT INTO "BusinessExpenseRecurrence" (id, tenant_id, category, description, amount, tax_amount, total, frequency, interval_count, start_date, next_due_date, payment_method, reference, notes, active, created_by_user_id, created_at, updated_at)
@@ -374,8 +449,20 @@ class BusinessExpenseRepository {
             'created_by_user_id' => $userId,
         ]);
         $row = $stmt->fetch();
-        $this->generateDueRecurringInstances();
-        return $this->normalizeRecurrenceRow($row ?: []);
+        if (!$row) {
+            return [];
+        }
+
+        $this->createRecurringInstance($row, $nextDue);
+        $nextRecurringDue = $this->nextDueDate($nextDue, $frequency, max(1, (int)($data['interval_count'] ?? 1)));
+        $update = $this->db->prepare('UPDATE "BusinessExpenseRecurrence" SET next_due_date = :next_due_date, updated_at = NOW() WHERE id = :id AND tenant_id = :tenant_id RETURNING *');
+        $update->execute([
+            'next_due_date' => $nextRecurringDue,
+            'id' => $row['id'],
+            'tenant_id' => $this->getTenantId(),
+        ]);
+        $updated = $update->fetch();
+        return $this->normalizeRecurrenceRow($updated ?: $row);
     }
 
     public function updateRecurrence(string $id, array $data): array {
@@ -403,14 +490,16 @@ class BusinessExpenseRepository {
     }
 
     public function generateDueRecurringInstances(): void {
-        $stmt = $this->db->prepare('SELECT * FROM "BusinessExpenseRecurrence" WHERE tenant_id = :tenant_id AND active = TRUE AND next_due_date <= (CURRENT_DATE + INTERVAL \'45 days\') ORDER BY next_due_date ASC LIMIT 100');
+        $stmt = $this->db->prepare('SELECT * FROM "BusinessExpenseRecurrence" WHERE tenant_id = :tenant_id AND active = TRUE AND next_due_date <= CURRENT_DATE ORDER BY next_due_date ASC LIMIT 100');
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $rows = $stmt->fetchAll() ?: [];
         foreach ($rows as $row) {
             $nextDue = (string)$row['next_due_date'];
             $iterations = 0;
-            while ($nextDue <= (new DateTimeImmutable('+45 days'))->format('Y-m-d') && $iterations < 24) {
-                $this->createRecurringInstance($row, $nextDue);
+            while ($nextDue <= (new DateTimeImmutable('today'))->format('Y-m-d') && $iterations < 24) {
+                if (!$this->financialPeriods->isDateClosed($nextDue)) {
+                    $this->createRecurringInstance($row, $nextDue);
+                }
                 $nextDue = $this->nextDueDate($nextDue, (string)$row['frequency'], (int)$row['interval_count']);
                 $iterations++;
             }
@@ -445,7 +534,12 @@ class BusinessExpenseRepository {
 
     private function nextDueDate(string $date, string $frequency, int $interval): string {
         $dt = new DateTimeImmutable($date);
-        $spec = $frequency === 'weekly' ? '+' . $interval . ' week' : '+' . $interval . ' month';
-        return $dt->modify($spec)->format('Y-m-d');
+        if ($frequency === 'weekly') {
+            return $dt->modify('+' . $interval . ' week')->format('Y-m-d');
+        }
+
+        $targetMonth = $dt->modify('first day of this month')->modify('+' . $interval . ' month');
+        $day = min((int)$dt->format('d'), (int)$targetMonth->format('t'));
+        return $targetMonth->setDate((int)$targetMonth->format('Y'), (int)$targetMonth->format('m'), $day)->format('Y-m-d');
     }
 }

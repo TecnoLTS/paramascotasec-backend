@@ -9,6 +9,7 @@ use App\Repositories\UserRepository;
 use App\Core\Response;
 use App\Core\Auth;
 use App\Core\TenantContext;
+use App\Exceptions\FinancialPeriodClosedException;
 use App\Services\FacturadorApiService;
 use Dompdf\Dompdf;
 use Dompdf\Options;
@@ -198,6 +199,10 @@ class OrderController {
             $updated = $this->orderRepository->updateStatus($id, $newStatus);
             Response::json($updated);
             $this->dispatchFacturadorInvoiceAfterResponse($updated ?: []);
+        } catch (FinancialPeriodClosedException $e) {
+            Response::error($e->getMessage(), 409, 'FINANCIAL_PERIOD_CLOSED', [
+                'period_key' => $e->getPeriodKey(),
+            ]);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 500, 'ORDER_STATUS_UPDATE_FAILED');
         }
@@ -371,7 +376,7 @@ class OrderController {
         $role = strtolower(trim((string)($user['role'] ?? 'customer')));
         $channel = strtolower(trim((string)($data['payment_details']['channel'] ?? '')));
 
-        if ($role === 'admin' && $channel === 'local_pos') {
+        if ($role === 'admin' && in_array($channel, ['local_pos', 'historical_import'], true)) {
             $shippingAddress = $this->decodeAddress($data['shipping_address'] ?? null);
             $billingAddress = $this->decodeAddress($data['billing_address'] ?? null);
             $address = !empty($shippingAddress) ? $shippingAddress : $billingAddress;
@@ -381,7 +386,7 @@ class OrderController {
             $fullName = trim((string)($address['name'] ?? trim($firstName . ' ' . $lastName)));
 
             $customerUser = $this->userRepository->upsertLocalSaleCustomer([
-                'name' => $fullName !== '' ? $fullName : 'Cliente local',
+                'name' => $fullName !== '' ? $fullName : ($channel === 'historical_import' ? 'Cliente histórico' : 'Cliente local'),
                 'first_name' => $firstName,
                 'last_name' => $lastName,
                 'email' => $address['email'] ?? null,
@@ -950,6 +955,86 @@ class OrderController {
             $this->dispatchFacturadorInvoiceAfterResponse($order ?: []);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 400, 'ORDER_CREATE_FAILED');
+        }
+    }
+
+    public function storeHistoricalSale() {
+        $user = $this->authenticate();
+        if (($user['role'] ?? '') !== 'admin') {
+            Response::error('No autorizado', 403, 'AUTH_FORBIDDEN');
+            return;
+        }
+
+        try {
+            $data = json_decode(file_get_contents('php://input'), true) ?: [];
+            $saleDate = trim((string)($data['sale_date'] ?? ''));
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $saleDate)) {
+                Response::error('Fecha histórica inválida. Usa YYYY-MM-DD.', 400, 'HISTORICAL_SALE_DATE_INVALID');
+                return;
+            }
+            if (!isset($data['items']) || !is_array($data['items']) || count($data['items']) === 0) {
+                Response::error('Agrega al menos un producto a la venta histórica.', 400, 'HISTORICAL_SALE_ITEMS_REQUIRED');
+                return;
+            }
+
+            $paymentDetails = is_array($data['payment_details'] ?? null) ? $data['payment_details'] : [];
+            $affectInventory = filter_var($data['affect_inventory'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            $reference = trim((string)($data['reference'] ?? ($paymentDetails['reference'] ?? '')));
+            $notes = trim((string)($data['order_notes'] ?? $data['notes'] ?? ''));
+            $paymentDetails = array_merge($paymentDetails, [
+                'channel' => 'historical_import',
+                'sale_date' => $saleDate,
+                'reference' => $reference !== '' ? $reference : null,
+                'created_by_user_id' => $user['sub'] ?? null,
+                'no_inventory_impact' => !$affectInventory,
+                'sri_invoice' => 'not_emitted_historical_import',
+            ]);
+
+            $customerName = trim((string)($data['customer_name'] ?? ''));
+            $customerDocument = trim((string)($data['customer_document'] ?? ''));
+            $customerEmail = trim((string)($data['customer_email'] ?? ''));
+            $customerPhone = trim((string)($data['customer_phone'] ?? ''));
+            $customerAddress = [
+                'firstName' => $customerName !== '' ? $customerName : 'Cliente',
+                'lastName' => 'histórico',
+                'name' => $customerName !== '' ? $customerName : 'Cliente histórico',
+                'phone' => $customerPhone !== '' ? $customerPhone : null,
+                'email' => $customerEmail !== '' ? $customerEmail : null,
+                'street' => trim((string)($data['customer_address'] ?? '')) ?: 'Venta histórica',
+                'city' => trim((string)($data['customer_city'] ?? '')) ?: null,
+                'state' => null,
+                'country' => 'EC',
+                'zip' => null,
+                'documentType' => trim((string)($data['customer_document_type'] ?? 'cedula')) ?: 'cedula',
+                'documentNumber' => $customerDocument !== '' ? $customerDocument : null,
+            ];
+
+            $payload = [
+                'id' => 'HIST-' . date('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(4))),
+                'historical_sale_date' => $saleDate,
+                'skip_inventory_impact' => !$affectInventory,
+                'allow_historical_pricing' => true,
+                'user_id' => null,
+                'status' => 'completed',
+                'delivery_method' => 'pickup',
+                'payment_method' => trim((string)($data['payment_method'] ?? 'historical')),
+                'shipping_address' => $customerAddress,
+                'billing_address' => $customerAddress,
+                'payment_details' => $paymentDetails,
+                'order_notes' => $notes !== '' ? $notes : 'Carga histórica de venta',
+                'items' => $data['items'],
+            ];
+            $payload['user_id'] = $this->resolveCustomerUserId($payload, $user);
+
+            $baseUrl = TenantContext::appUrl() ?? ($_ENV['APP_URL'] ?? null);
+            $order = $this->orderRepository->create($payload, $baseUrl);
+            Response::json($order, 201);
+        } catch (FinancialPeriodClosedException $e) {
+            Response::error($e->getMessage(), 409, 'FINANCIAL_PERIOD_CLOSED', [
+                'period_key' => $e->getPeriodKey(),
+            ]);
+        } catch (\Exception $e) {
+            Response::error($e->getMessage(), 400, 'HISTORICAL_SALE_CREATE_FAILED');
         }
     }
 }

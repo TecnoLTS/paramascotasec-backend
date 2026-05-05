@@ -334,6 +334,7 @@ $router->add('PATCH', '/api/orders/{id}/status', 'OrderController@updateStatus')
 $router->add('GET', '/api/orders/{id}/invoice', 'OrderController@invoice');
 $router->add('POST', '/api/orders', 'OrderController@store');
 $router->add('POST', '/api/orders/quote', 'OrderController@quote');
+$router->add('POST', '/api/admin/historical-sales', 'OrderController@storeHistoricalSale');
 
 // Admin Dashboard Routes
 $router->add('GET', '/api/admin/dashboard/stats', 'DashboardController@stats');
@@ -364,6 +365,10 @@ $router->add('PUT', '/api/admin/discounts/{id}', 'DiscountController@update');
 $router->add('PATCH', '/api/admin/discounts/{id}/status', 'DiscountController@updateStatus');
 $router->add('GET', '/api/admin/expenses', 'BusinessExpenseController@index');
 $router->add('POST', '/api/admin/expenses', 'BusinessExpenseController@store');
+$router->add('GET', '/api/admin/financial-periods', 'FinancialPeriodController@index');
+$router->add('GET', '/api/admin/financial-periods/{period}/preview', 'FinancialPeriodController@preview');
+$router->add('POST', '/api/admin/financial-periods/{period}/close', 'FinancialPeriodController@close');
+$router->add('POST', '/api/admin/financial-adjustments', 'FinancialPeriodController@storeAdjustment');
 $router->add('GET', '/api/admin/expenses/recurrences', 'BusinessExpenseController@recurrences');
 $router->add('POST', '/api/admin/expenses/recurrences', 'BusinessExpenseController@storeRecurrence');
 $router->add('PUT', '/api/admin/expenses/recurrences/{id}', 'BusinessExpenseController@updateRecurrence');

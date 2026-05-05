@@ -454,6 +454,7 @@ class PosRepository {
     }
 
     public function openShift(float $openingCash, string $notes, string $userId): array {
+        (new FinancialPeriodRepository($this->db))->assertDateOpen(date('Y-m-d'), 'caja POS');
         $active = $this->getActiveShift();
         if ($active) {
             throw new \Exception('Ya existe un turno de caja abierto.');
@@ -479,6 +480,7 @@ class PosRepository {
     }
 
     public function closeActiveShift(float $closingCash, string $notes, string $userId): array {
+        (new FinancialPeriodRepository($this->db))->assertDateOpen(date('Y-m-d'), 'caja POS');
         $this->db->beginTransaction();
         try {
             $stmt = $this->db->prepare('
@@ -535,6 +537,7 @@ class PosRepository {
     }
 
     public function addMovement(string $type, float $amount, string $description, string $userId, ?string $businessExpenseId = null): array {
+        (new FinancialPeriodRepository($this->db))->assertDateOpen(date('Y-m-d'), 'movimiento de caja');
         $type = strtolower(trim($type));
         if (!in_array($type, $this->movementTypes, true)) {
             throw new \Exception('Tipo de movimiento inválido.');

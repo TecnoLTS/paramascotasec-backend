@@ -4,6 +4,7 @@ namespace App\Repositories;
 
 use App\Core\Database;
 use App\Core\TenantContext;
+use App\Repositories\FinancialPeriodRepository;
 use PDO;
 
 class OrderRepository {
@@ -141,7 +142,7 @@ class OrderRepository {
         $this->db->beginTransaction();
         try {
             $inventoryLots = new InventoryLotRepository($this->db);
-            $stmtCurrent = $this->db->prepare('SELECT status FROM "Order" WHERE id = :id AND tenant_id = :tenant_id FOR UPDATE');
+            $stmtCurrent = $this->db->prepare('SELECT status, payment_details, (created_at AT TIME ZONE \'America/Guayaquil\')::date AS financial_date FROM "Order" WHERE id = :id AND tenant_id = :tenant_id FOR UPDATE');
             $stmtCurrent->execute([
                 'id' => $id,
                 'tenant_id' => $tenantId
@@ -154,8 +155,10 @@ class OrderRepository {
 
             $currentStatus = strtolower(trim((string)($current['status'] ?? 'pending')));
             $nextStatus = strtolower(trim((string)$status));
-            $currentActive = $this->orderAffectsInventory($currentStatus);
-            $nextActive = $this->orderAffectsInventory($nextStatus);
+            (new FinancialPeriodRepository($this->db))->assertDateOpen((string)($current['financial_date'] ?? date('Y-m-d')), 'pedido');
+            $skipInventoryImpact = $this->orderSkipsInventoryImpact($current['payment_details'] ?? null);
+            $currentActive = !$skipInventoryImpact && $this->orderAffectsInventory($currentStatus);
+            $nextActive = !$skipInventoryImpact && $this->orderAffectsInventory($nextStatus);
 
             if ($currentActive !== $nextActive) {
                 $stmtItems = $this->db->prepare('SELECT id, product_id, quantity, unit_cost, cost_total FROM "OrderItem" WHERE order_id = :order_id');
@@ -377,10 +380,13 @@ class OrderRepository {
         return $invoiceHtml;
     }
 
-    public function calculateQuote($items, $deliveryMethod = 'delivery', $discountCode = null, $context = 'quote', $orderId = null, $userId = null) {
+    public function calculateQuote($items, $deliveryMethod = 'delivery', $discountCode = null, $context = 'quote', $orderId = null, $userId = null, array $options = []) {
         if (!is_array($items) || count($items) === 0) {
             throw new \Exception('Items required');
         }
+        $bypassStockCheck = (bool)($options['bypass_stock_check'] ?? false);
+        $bypassLotAllocation = (bool)($options['bypass_lot_allocation'] ?? false);
+        $allowPriceOverrides = (bool)($options['allow_price_overrides'] ?? false);
         $itemsGrossSubtotal = 0;
         $itemsCostSubtotal = 0;
         $itemsWithDetails = [];
@@ -412,7 +418,7 @@ class OrderRepository {
             }
 
             $availableQty = (int)($product['quantity'] ?? 0);
-            if ($availableQty < $quantity) {
+            if (!$bypassStockCheck && $availableQty < $quantity) {
                 throw new \Exception('Stock insuficiente para: ' . $product['name']);
             }
 
@@ -438,13 +444,39 @@ class OrderRepository {
 
             $baseUnitPrice = round((float)($product['price'] ?? 0), 4);
             $priceWithTax = round($baseUnitPrice * $itemTaxMultiplier, 2);
+            if ($allowPriceOverrides) {
+                $overrideGross = $item['unit_price_gross'] ?? $item['price_gross'] ?? $item['price'] ?? null;
+                if ($overrideGross !== null && $overrideGross !== '' && is_numeric($overrideGross)) {
+                    $priceWithTax = round(max(0, (float)$overrideGross), 2);
+                    $baseUnitPrice = $itemTaxMultiplier > 0 ? round($priceWithTax / $itemTaxMultiplier, 4) : $priceWithTax;
+                }
+                $overrideTaxRate = $item['tax_rate'] ?? null;
+                if ($overrideTaxRate !== null && $overrideTaxRate !== '' && is_numeric($overrideTaxRate)) {
+                    $itemTaxRate = max(0, (float)$overrideTaxRate);
+                    $itemTaxMultiplier = 1 + ($itemTaxRate / 100);
+                    $baseUnitPrice = $itemTaxMultiplier > 0 ? round($priceWithTax / $itemTaxMultiplier, 4) : $priceWithTax;
+                }
+            }
             $lineTotal = round($priceWithTax * $quantity, 2);
-            $costAllocation = $inventoryLots->previewSaleAllocation(
-                (string)$product['id'],
-                $quantity,
-                $availableQty,
-                round((float)($product['cost'] ?? 0), 4)
-            );
+            $fallbackUnitCost = round((float)($product['cost'] ?? 0), 4);
+            if ($allowPriceOverrides) {
+                $overrideUnitCost = $item['unit_cost'] ?? $item['cost'] ?? null;
+                if ($overrideUnitCost !== null && $overrideUnitCost !== '' && is_numeric($overrideUnitCost)) {
+                    $fallbackUnitCost = round(max(0, (float)$overrideUnitCost), 4);
+                }
+            }
+            $costAllocation = $bypassLotAllocation
+                ? [
+                    'unit_cost' => $fallbackUnitCost,
+                    'cost_total' => round($fallbackUnitCost * $quantity, 4),
+                    'allocations' => [],
+                ]
+                : $inventoryLots->previewSaleAllocation(
+                    (string)$product['id'],
+                    $quantity,
+                    $availableQty,
+                    $fallbackUnitCost
+                );
             $itemsGrossSubtotal += $lineTotal;
             $itemsCostSubtotal += round((float)($costAllocation['cost_total'] ?? 0), 4);
             $itemGrossLineTotals[] = $lineTotal;
@@ -711,6 +743,23 @@ class OrderRepository {
                 $paymentDetails = is_array($decoded) ? $decoded : null;
             }
             $channel = strtolower(trim((string)($paymentDetails['channel'] ?? '')));
+            $isHistoricalImport = $channel === 'historical_import';
+            $skipInventoryImpact = filter_var($data['skip_inventory_impact'] ?? ($paymentDetails['no_inventory_impact'] ?? false), FILTER_VALIDATE_BOOLEAN);
+            $createdAtExpression = 'NOW()';
+            $createdAtParam = null;
+            if ($isHistoricalImport) {
+                $saleDate = trim((string)($data['historical_sale_date'] ?? $paymentDetails['sale_date'] ?? ''));
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $saleDate)) {
+                    throw new \Exception('Fecha histórica inválida.');
+                }
+                (new FinancialPeriodRepository($this->db))->assertDateOpen($saleDate, 'venta histórica');
+                $createdAtExpression = ':created_at';
+                $createdAtParam = $saleDate . ' 12:00:00';
+                $paymentDetails['channel'] = 'historical_import';
+                $paymentDetails['sale_date'] = $saleDate;
+                $paymentDetails['no_inventory_impact'] = $skipInventoryImpact;
+                $data['payment_details'] = $paymentDetails;
+            }
             if ($channel === 'local_pos') {
                 $posRepository = new PosRepository();
                 $activeShift = $posRepository->getActiveShift();
@@ -754,13 +803,18 @@ class OrderRepository {
                 $data['coupon_code'] ?? ($data['discount_code'] ?? null),
                 'order',
                 $data['id'],
-                $data['user_id'] ?? null
+                $data['user_id'] ?? null,
+                [
+                    'bypass_stock_check' => $isHistoricalImport && $skipInventoryImpact,
+                    'bypass_lot_allocation' => $isHistoricalImport && $skipInventoryImpact,
+                    'allow_price_overrides' => $isHistoricalImport && filter_var($data['allow_historical_pricing'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                ]
             );
             $orderStatus = strtolower(trim((string)($data['status'] ?? 'pending')));
             
-            $stmt = $this->db->prepare('INSERT INTO "Order" ("id", "tenant_id", "user_id", "total", "status", "created_at", "shipping_address", "billing_address", "payment_method", "delivery_method", "payment_details", "items_subtotal", "vat_subtotal", "vat_rate", "vat_amount", "shipping", "shipping_base", "shipping_tax_rate", "shipping_tax_amount", "discount_code", "discount_total", "discount_snapshot", "order_notes") VALUES (:id, :tenant_id, :user_id, :total, :status, NOW(), :shipping_address, :billing_address, :payment_method, :delivery_method, :payment_details, :items_subtotal, :vat_subtotal, :vat_rate, :vat_amount, :shipping, :shipping_base, :shipping_tax_rate, :shipping_tax_amount, :discount_code, :discount_total, :discount_snapshot, :order_notes)');
+            $stmt = $this->db->prepare('INSERT INTO "Order" ("id", "tenant_id", "user_id", "total", "status", "created_at", "shipping_address", "billing_address", "payment_method", "delivery_method", "payment_details", "items_subtotal", "vat_subtotal", "vat_rate", "vat_amount", "shipping", "shipping_base", "shipping_tax_rate", "shipping_tax_amount", "discount_code", "discount_total", "discount_snapshot", "order_notes") VALUES (:id, :tenant_id, :user_id, :total, :status, ' . $createdAtExpression . ', :shipping_address, :billing_address, :payment_method, :delivery_method, :payment_details, :items_subtotal, :vat_subtotal, :vat_rate, :vat_amount, :shipping, :shipping_base, :shipping_tax_rate, :shipping_tax_amount, :discount_code, :discount_total, :discount_snapshot, :order_notes)');
             
-            $stmt->execute([
+            $orderParams = [
                 'id' => $data['id'],
                 'tenant_id' => $this->getTenantId(),
                 'user_id' => $data['user_id'],
@@ -783,7 +837,11 @@ class OrderRepository {
                 'discount_total' => $quote['discount_total'] ?? 0,
                 'discount_snapshot' => isset($quote['discounts_applied']) ? json_encode($quote['discounts_applied']) : null,
                 'order_notes' => $data['order_notes'] ?? null
-            ]);
+            ];
+            if ($createdAtParam !== null) {
+                $orderParams['created_at'] = $createdAtParam;
+            }
+            $stmt->execute($orderParams);
 
             $stmtItem = $this->db->prepare('INSERT INTO "OrderItem" ("id", "order_id", "product_id", "product_name", "product_image", "quantity", "price", "price_net", "net_total", "tax_rate", "tax_amount", "unit_cost", "cost_total") VALUES (:id, :order_id, :product_id, :product_name, :product_image, :quantity, :price, :price_net, :net_total, :tax_rate, :tax_amount, :unit_cost, :cost_total)');
             $stmtUpdateStock = $this->db->prepare('UPDATE "Product" SET quantity = quantity - :qty, sold = sold + :qty WHERE id = :id AND tenant_id = :tenant_id AND quantity >= :qty');
@@ -821,7 +879,7 @@ class OrderRepository {
                     'cost_total' => $previewCostTotal
                 ]);
 
-                if ($this->orderAffectsInventory($orderStatus)) {
+                if (!$skipInventoryImpact && $this->orderAffectsInventory($orderStatus)) {
                     $stmtLockProduct->execute([
                         'id' => $item['product_id'],
                         'tenant_id' => $this->getTenantId()
@@ -896,6 +954,19 @@ class OrderRepository {
     private function orderAffectsInventory($status) {
         $normalized = strtolower(trim((string)$status));
         return !in_array($normalized, ['canceled', 'cancelled'], true);
+    }
+
+    private function orderSkipsInventoryImpact($paymentDetails): bool {
+        if (is_string($paymentDetails) && trim($paymentDetails) !== '') {
+            $decoded = json_decode($paymentDetails, true);
+            $paymentDetails = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($paymentDetails)) {
+            return false;
+        }
+        $channel = strtolower(trim((string)($paymentDetails['channel'] ?? '')));
+        $skip = filter_var($paymentDetails['no_inventory_impact'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        return $skip || ($channel === 'historical_import' && array_key_exists('no_inventory_impact', $paymentDetails) && $skip);
     }
 
     private function orderItemCostExpression(string $orderItemAlias = 'oi', string $productAlias = 'p'): string {
@@ -1067,6 +1138,15 @@ class OrderRepository {
     }
 
     public function getSalesSummary() {
+        $financialPeriods = new FinancialPeriodRepository($this->db);
+        $closedTotals = $financialPeriods->closedSnapshotTotals();
+        $closedPeriodGuard = "NOT EXISTS (
+            SELECT 1
+            FROM \"FinancialPeriod\" fp
+            WHERE fp.tenant_id = o.tenant_id
+              AND fp.period_key = TO_CHAR((o.created_at AT TIME ZONE 'America/Guayaquil')::date, 'YYYY-MM')
+              AND fp.status = 'closed'
+        )";
         $netExpr = $this->netSalesSql('o');
         $vatExpr = $this->vatAmountSql('o');
         $realizedStatus = $this->realizedSalesCondition('o');
@@ -1078,19 +1158,21 @@ class OrderRepository {
                 SUM($vatExpr) as vat,
                 SUM(COALESCE(o.shipping, 0)) as shipping
             FROM \"Order\" o
-            WHERE o.tenant_id = :tenant_id AND $realizedStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus AND $closedPeriodGuard
         ");
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $row = $stmt->fetch();
-        $ordersCount = (int)($row['orders_count'] ?? 0);
-        $net = (float)($row['net'] ?? 0);
-        $gross = (float)($row['gross'] ?? 0);
+        $ordersCount = (int)($closedTotals['sales']['orders_count'] ?? 0) + (int)($row['orders_count'] ?? 0);
+        $net = (float)($closedTotals['sales']['net'] ?? 0) + (float)($row['net'] ?? 0);
+        $gross = (float)($closedTotals['sales']['total'] ?? 0) + (float)($row['gross'] ?? 0);
+        $vat = (float)($closedTotals['sales']['tax'] ?? 0) + (float)($row['vat'] ?? 0);
+        $shipping = (float)($closedTotals['sales']['shipping'] ?? 0) + (float)($row['shipping'] ?? 0);
         return [
             'orders_count' => $ordersCount,
             'gross' => round($gross, 2),
             'net' => round($net, 2),
-            'vat' => round((float)($row['vat'] ?? 0), 2),
-            'shipping' => round((float)($row['shipping'] ?? 0), 2),
+            'vat' => round($vat, 2),
+            'shipping' => round($shipping, 2),
             'average_order_net' => $ordersCount > 0 ? round($net / $ordersCount, 2) : 0,
             'average_order_gross' => $ordersCount > 0 ? round($gross / $ordersCount, 2) : 0
         ];
@@ -1722,6 +1804,15 @@ class OrderRepository {
     }
 
     public function getProfitStats() {
+        $financialPeriods = new FinancialPeriodRepository($this->db);
+        $closedTotals = $financialPeriods->closedSnapshotTotals();
+        $closedPeriodGuard = "NOT EXISTS (
+            SELECT 1
+            FROM \"FinancialPeriod\" fp
+            WHERE fp.tenant_id = o.tenant_id
+              AND fp.period_key = TO_CHAR((o.created_at AT TIME ZONE 'America/Guayaquil')::date, 'YYYY-MM')
+              AND fp.status = 'closed'
+        )";
         $netExpr = $this->netSalesSql('o');
         $realizedStatus = $this->realizedSalesCondition('o');
         $salesStmt = $this->db->prepare("
@@ -1729,12 +1820,12 @@ class OrderRepository {
                 SUM($netExpr) as revenue,
                 SUM(COALESCE(o.shipping_base, o.shipping, 0)) as shipping_collected
             FROM \"Order\" o
-            WHERE o.tenant_id = :tenant_id AND $realizedStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus AND $closedPeriodGuard
         ");
         $salesStmt->execute(['tenant_id' => $this->getTenantId()]);
         $salesRow = $salesStmt->fetch();
-        $revenue = (float)($salesRow['revenue'] ?? 0);
-        $shippingCollected = (float)($salesRow['shipping_collected'] ?? 0);
+        $revenue = (float)($closedTotals['sales']['net'] ?? 0) + (float)($salesRow['revenue'] ?? 0);
+        $shippingCollected = (float)($closedTotals['sales']['shipping'] ?? 0) + (float)($salesRow['shipping_collected'] ?? 0);
         $costExpr = $this->orderItemCostExpression('oi', 'p');
 
         $costStmt = $this->db->prepare("
@@ -1742,20 +1833,21 @@ class OrderRepository {
             FROM \"OrderItem\" oi
             JOIN \"Order\" o ON oi.order_id = o.id
             LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
-            WHERE o.tenant_id = :tenant_id AND $realizedStatus
+            WHERE o.tenant_id = :tenant_id AND $realizedStatus AND $closedPeriodGuard
         ");
         $costStmt->execute(['tenant_id' => $this->getTenantId()]);
         $costRow = $costStmt->fetch();
-        $cost = (float)($costRow['cost'] ?? 0);
+        $cost = (float)($closedTotals['profit']['cost'] ?? 0) + (float)($costRow['cost'] ?? 0);
         $grossProfit = $revenue - $cost;
         $grossMargin = $revenue > 0 ? ($grossProfit / $revenue) * 100 : 0;
-        $expenseSummary = $this->getBusinessExpenseSummary();
-        $paidExpenses = (float)($expenseSummary['paid'] ?? 0);
-        $pendingExpenses = (float)($expenseSummary['pending'] ?? 0);
-        $overdueExpenses = (float)($expenseSummary['overdue'] ?? 0);
+        $expenseSummary = $this->getBusinessExpenseSummary(true);
+        $paidExpenses = (float)($closedTotals['profit']['paid_expenses'] ?? 0) + (float)($expenseSummary['paid'] ?? 0);
+        $pendingExpenses = (float)($closedTotals['profit']['pending_expenses'] ?? 0) + (float)($expenseSummary['pending'] ?? 0);
+        $overdueExpenses = (float)($closedTotals['profit']['overdue_expenses'] ?? 0) + (float)($expenseSummary['overdue'] ?? 0);
         $committedExpenses = $paidExpenses + $pendingExpenses + $overdueExpenses;
-        $netCashProfit = $grossProfit - $paidExpenses;
-        $netCommittedProfit = $grossProfit - $committedExpenses;
+        $financialAdjustments = (float)($closedTotals['profit']['financial_adjustments'] ?? 0) + (float)($financialPeriods->adjustmentSummary(null, true)['total'] ?? 0);
+        $netCashProfit = $grossProfit - $paidExpenses - $financialAdjustments;
+        $netCommittedProfit = $grossProfit - $committedExpenses - $financialAdjustments;
         $netCashMargin = $revenue > 0 ? ($netCashProfit / $revenue) * 100 : 0;
         $netCommittedMargin = $revenue > 0 ? ($netCommittedProfit / $revenue) * 100 : 0;
 
@@ -1768,6 +1860,7 @@ class OrderRepository {
             'pending_expenses' => round($pendingExpenses, 2),
             'overdue_expenses' => round($overdueExpenses, 2),
             'committed_expenses' => round($committedExpenses, 2),
+            'financial_adjustments' => round($financialAdjustments, 2),
             'gross_profit' => round($grossProfit, 2),
             'gross_margin' => round($grossMargin, 1),
             'net_cash_profit' => round($netCashProfit, 2),
@@ -1784,9 +1877,11 @@ class OrderRepository {
         ];
     }
 
-    private function getBusinessExpenseSummary(): array {
+    private function getBusinessExpenseSummary(bool $excludeClosedPeriods = false): array {
         try {
-            return (new BusinessExpenseRepository())->summary();
+            return (new BusinessExpenseRepository())->summary([
+                'exclude_closed_periods' => $excludeClosedPeriods,
+            ]);
         } catch (\Throwable $e) {
             return [
                 'paid' => 0.0,

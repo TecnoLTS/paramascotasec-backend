@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Response;
+use App\Exceptions\FinancialPeriodClosedException;
 use App\Repositories\BusinessExpenseRepository;
 use App\Repositories\PosRepository;
 
@@ -87,6 +88,10 @@ class PosController {
                 'movements' => $movements,
                 'history' => $history
             ], 201);
+        } catch (FinancialPeriodClosedException $e) {
+            Response::error($e->getMessage(), 409, 'FINANCIAL_PERIOD_CLOSED', [
+                'period_key' => $e->getPeriodKey(),
+            ]);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 400, 'POS_SHIFT_OPEN_FAILED');
         }
@@ -109,6 +114,10 @@ class PosController {
                 'shift' => $shift,
                 'movements' => [],
                 'history' => $history
+            ]);
+        } catch (FinancialPeriodClosedException $e) {
+            Response::error($e->getMessage(), 409, 'FINANCIAL_PERIOD_CLOSED', [
+                'period_key' => $e->getPeriodKey(),
             ]);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 400, 'POS_SHIFT_CLOSE_FAILED');
@@ -168,6 +177,10 @@ class PosController {
                 'movements' => $movements,
                 'history' => $history
             ], 201);
+        } catch (FinancialPeriodClosedException $e) {
+            Response::error($e->getMessage(), 409, 'FINANCIAL_PERIOD_CLOSED', [
+                'period_key' => $e->getPeriodKey(),
+            ]);
         } catch (\Exception $e) {
             Response::error($e->getMessage(), 400, 'POS_MOVEMENT_CREATE_FAILED');
         }

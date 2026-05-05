@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Response;
+use App\Exceptions\FinancialPeriodClosedException;
 use App\Repositories\BusinessExpenseRepository;
 
 class BusinessExpenseController {
@@ -74,6 +75,10 @@ class BusinessExpenseController {
                 'expense' => $expense,
                 'summary' => $this->repository->summary(),
             ], 201);
+        } catch (FinancialPeriodClosedException $e) {
+            Response::error($e->getMessage(), 409, 'FINANCIAL_PERIOD_CLOSED', [
+                'period_key' => $e->getPeriodKey(),
+            ]);
         } catch (\Throwable $e) {
             Response::error($e->getMessage(), 400, 'BUSINESS_EXPENSE_CREATE_FAILED');
         }
@@ -86,6 +91,10 @@ class BusinessExpenseController {
             Response::json([
                 'expense' => $expense,
                 'summary' => $this->repository->summary(),
+            ]);
+        } catch (FinancialPeriodClosedException $e) {
+            Response::error($e->getMessage(), 409, 'FINANCIAL_PERIOD_CLOSED', [
+                'period_key' => $e->getPeriodKey(),
             ]);
         } catch (\Throwable $e) {
             Response::error($e->getMessage(), 400, 'BUSINESS_EXPENSE_UPDATE_FAILED');
@@ -105,6 +114,10 @@ class BusinessExpenseController {
             Response::json([
                 'expense' => $expense,
                 'summary' => $this->repository->summary(),
+            ]);
+        } catch (FinancialPeriodClosedException $e) {
+            Response::error($e->getMessage(), 409, 'FINANCIAL_PERIOD_CLOSED', [
+                'period_key' => $e->getPeriodKey(),
             ]);
         } catch (\Throwable $e) {
             Response::error($e->getMessage(), 400, 'BUSINESS_EXPENSE_STATUS_FAILED');
@@ -133,6 +146,10 @@ class BusinessExpenseController {
                 'expenses' => $this->repository->list($this->filters()),
                 'summary' => $this->repository->summary(),
             ], 201);
+        } catch (FinancialPeriodClosedException $e) {
+            Response::error($e->getMessage(), 409, 'FINANCIAL_PERIOD_CLOSED', [
+                'period_key' => $e->getPeriodKey(),
+            ]);
         } catch (\Throwable $e) {
             Response::error($e->getMessage(), 400, 'BUSINESS_EXPENSE_RECURRENCE_CREATE_FAILED');
         }
