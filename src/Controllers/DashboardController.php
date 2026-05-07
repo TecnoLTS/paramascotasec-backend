@@ -25,7 +25,9 @@ class DashboardController {
         
         try {
             $biService = new \App\Services\BusinessIntelligenceService();
-            $selectedMonth = isset($_GET['month']) ? (string)$_GET['month'] : null;
+            $selectedMonth = isset($_GET['period'])
+                ? (string)$_GET['period']
+                : (isset($_GET['month']) ? (string)$_GET['month'] : null);
             $response = $biService->getFullDashboardStats($selectedMonth);
             Response::json($response);
         } catch (\Exception $e) {

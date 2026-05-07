@@ -49,6 +49,7 @@ class BusinessExpenseController {
             'status' => $_GET['status'] ?? null,
             'category' => $_GET['category'] ?? null,
             'type' => $_GET['type'] ?? null,
+            'period' => $_GET['period'] ?? null,
             'from' => $_GET['from'] ?? null,
             'to' => $_GET['to'] ?? null,
         ];
@@ -59,7 +60,7 @@ class BusinessExpenseController {
         try {
             Response::json([
                 'expenses' => $this->repository->list($this->filters()),
-                'summary' => $this->repository->summary(),
+                'summary' => $this->repository->summary($this->filters()),
                 'categories' => $this->categories(),
             ]);
         } catch (\Throwable $e) {

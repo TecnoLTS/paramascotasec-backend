@@ -373,6 +373,7 @@ class FinancialPeriodRepository {
             'profit' => [
                 'cost' => 0.0,
                 'paid_expenses' => 0.0,
+                'period_expenses' => 0.0,
                 'pending_expenses' => 0.0,
                 'overdue_expenses' => 0.0,
                 'committed_expenses' => 0.0,
@@ -439,6 +440,9 @@ class FinancialPeriodRepository {
         $expenseStmt = $this->db->prepare("
             SELECT
                 COALESCE(SUM(total) FILTER (
+                    WHERE expense_date BETWEEN :start_date AND :end_date
+                ), 0) AS period_expenses,
+                COALESCE(SUM(total) FILTER (
                     WHERE status = 'paid'
                       AND COALESCE((paid_at AT TIME ZONE 'America/Guayaquil')::date, expense_date) BETWEEN :start_date AND :end_date
                 ), 0) AS paid,
@@ -482,13 +486,15 @@ class FinancialPeriodRepository {
         $adjustments = $this->adjustmentSummary($periodKey);
         $netSales = (float)($sales['net_sales'] ?? 0);
         $paidExpenses = (float)($expenses['paid'] ?? 0);
+        $periodExpenses = (float)($expenses['period_expenses'] ?? 0);
         $pendingExpenses = (float)($expenses['pending'] ?? 0);
         $overdueExpenses = (float)($expenses['overdue'] ?? 0);
-        $committedExpenses = $paidExpenses + $pendingExpenses + $overdueExpenses;
+        $committedExpenses = $periodExpenses;
         $adjustmentTotal = (float)($adjustments['total'] ?? 0);
         $grossProfit = $netSales - $cost;
         $netCashProfit = $grossProfit - $paidExpenses - $adjustmentTotal;
-        $netCommittedProfit = $grossProfit - $committedExpenses - $adjustmentTotal;
+        $netPeriodProfit = $grossProfit - $periodExpenses - $adjustmentTotal;
+        $netCommittedProfit = $netPeriodProfit;
 
         return [
             'period_key' => $periodKey,
@@ -505,6 +511,7 @@ class FinancialPeriodRepository {
                 'cost' => round($cost, 2),
                 'gross_profit' => round($grossProfit, 2),
                 'gross_margin' => $netSales > 0 ? round(($grossProfit / $netSales) * 100, 1) : 0,
+                'period_expenses' => round($periodExpenses, 2),
                 'paid_expenses' => round($paidExpenses, 2),
                 'pending_expenses' => round($pendingExpenses, 2),
                 'overdue_expenses' => round($overdueExpenses, 2),
@@ -512,6 +519,8 @@ class FinancialPeriodRepository {
                 'financial_adjustments' => round($adjustmentTotal, 2),
                 'net_cash_profit' => round($netCashProfit, 2),
                 'net_cash_margin' => $netSales > 0 ? round(($netCashProfit / $netSales) * 100, 1) : 0,
+                'net_period_profit' => round($netPeriodProfit, 2),
+                'net_period_margin' => $netSales > 0 ? round(($netPeriodProfit / $netSales) * 100, 1) : 0,
                 'net_committed_profit' => round($netCommittedProfit, 2),
                 'net_committed_margin' => $netSales > 0 ? round(($netCommittedProfit / $netSales) * 100, 1) : 0,
             ],

@@ -1047,9 +1047,15 @@ class OrderRepository {
         $stmtThis = $this->db->prepare("
             SELECT SUM($netExpr)
             FROM \"Order\" o
+            CROSS JOIN (
+                SELECT
+                    (NOW() AT TIME ZONE 'America/Guayaquil')::date AS today,
+                    DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Guayaquil')::date)::date AS month_start
+            ) bounds
             WHERE o.tenant_id = :tenant_id
               AND $realizedStatus
-              AND o.created_at >= DATE_TRUNC('month', NOW())
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= bounds.month_start
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date <= bounds.today
         ");
         $stmtThis->execute(['tenant_id' => $this->getTenantId()]);
         $thisMonth = (float)($stmtThis->fetchColumn() ?: 0);
@@ -1057,11 +1063,17 @@ class OrderRepository {
         $stmtLast = $this->db->prepare("
             SELECT SUM($netExpr)
             FROM \"Order\" o
+            CROSS JOIN (
+                SELECT
+                    (NOW() AT TIME ZONE 'America/Guayaquil')::date AS today,
+                    DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Guayaquil')::date)::date AS month_start,
+                    (DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Guayaquil')::date) - INTERVAL '1 month')::date AS previous_month_start
+            ) bounds
             WHERE o.tenant_id = :tenant_id
               AND $realizedStatus
-              AND o.created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
-              AND o.created_at < DATE_TRUNC('month', NOW() - INTERVAL '1 month')
-                + ((CURRENT_DATE - DATE_TRUNC('month', NOW())::date + 1) * INTERVAL '1 day')
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= bounds.previous_month_start
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < bounds.previous_month_start
+                + ((bounds.today - bounds.month_start + 1) * INTERVAL '1 day')
         ");
         $stmtLast->execute(['tenant_id' => $this->getTenantId()]);
         $lastMonth = (float)($stmtLast->fetchColumn() ?: 0);
@@ -1079,18 +1091,33 @@ class OrderRepository {
     }
 
     public function getNewOrdersCount() {
-        $stmt = $this->db->prepare('SELECT COUNT(*) as count FROM "Order" WHERE tenant_id = :tenant_id AND created_at >= CURRENT_DATE');
+        $stmt = $this->db->prepare('
+            SELECT COUNT(*) as count
+            FROM "Order"
+            WHERE tenant_id = :tenant_id
+              AND (created_at AT TIME ZONE \'America/Guayaquil\')::date = (NOW() AT TIME ZONE \'America/Guayaquil\')::date
+        ');
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         $result = $stmt->fetch();
         return (int)($result['count'] ?? 0);
     }
 
     public function getOrdersProgress() {
-        $stmtToday = $this->db->prepare('SELECT COUNT(*) FROM "Order" WHERE tenant_id = :tenant_id AND created_at >= CURRENT_DATE');
+        $stmtToday = $this->db->prepare('
+            SELECT COUNT(*)
+            FROM "Order"
+            WHERE tenant_id = :tenant_id
+              AND (created_at AT TIME ZONE \'America/Guayaquil\')::date = (NOW() AT TIME ZONE \'America/Guayaquil\')::date
+        ');
         $stmtToday->execute(['tenant_id' => $this->getTenantId()]);
         $today = (int)($stmtToday->fetchColumn() ?: 0);
 
-        $stmtYesterday = $this->db->prepare('SELECT COUNT(*) FROM "Order" WHERE tenant_id = :tenant_id AND created_at >= CURRENT_DATE - INTERVAL \'1 day\' AND created_at < CURRENT_DATE');
+        $stmtYesterday = $this->db->prepare('
+            SELECT COUNT(*)
+            FROM "Order"
+            WHERE tenant_id = :tenant_id
+              AND (created_at AT TIME ZONE \'America/Guayaquil\')::date = (NOW() AT TIME ZONE \'America/Guayaquil\')::date - 1
+        ');
         $stmtYesterday->execute(['tenant_id' => $this->getTenantId()]);
         $yesterday = (int)($stmtYesterday->fetchColumn() ?: 0);
 
@@ -1109,9 +1136,15 @@ class OrderRepository {
         $netExpr = $this->netSalesSql('o');
         $realizedStatus = $this->realizedSalesCondition('o');
         $stmt = $this->db->prepare("
-            SELECT TO_CHAR(d, 'Dy') as day, COALESCE(SUM($netExpr), 0) as total
-            FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, '1 day') d
-            LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d)
+            SELECT TO_CHAR(d::date, 'YYYY-MM-DD') as day,
+                   TO_CHAR(d::date, 'YYYY-MM-DD') as date,
+                   COALESCE(SUM($netExpr), 0) as total
+            FROM generate_series(
+                (NOW() AT TIME ZONE 'America/Guayaquil')::date - INTERVAL '6 days',
+                (NOW() AT TIME ZONE 'America/Guayaquil')::date,
+                '1 day'
+            ) d
+            LEFT JOIN \"Order\" o ON (o.created_at AT TIME ZONE 'America/Guayaquil')::date = d::date
                 AND $realizedStatus
                 AND o.tenant_id = :tenant_id
             GROUP BY d
@@ -1125,9 +1158,15 @@ class OrderRepository {
         $netExpr = $this->netSalesSql('o');
         $realizedStatus = $this->realizedSalesCondition('o');
         $stmt = $this->db->prepare("
-            SELECT TO_CHAR(d, 'DD Mon') as day, COALESCE(SUM($netExpr), 0) as total
-            FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, '1 day') d
-            LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d)
+            SELECT TO_CHAR(d::date, 'YYYY-MM-DD') as day,
+                   TO_CHAR(d::date, 'YYYY-MM-DD') as date,
+                   COALESCE(SUM($netExpr), 0) as total
+            FROM generate_series(
+                (NOW() AT TIME ZONE 'America/Guayaquil')::date - INTERVAL '29 days',
+                (NOW() AT TIME ZONE 'America/Guayaquil')::date,
+                '1 day'
+            ) d
+            LEFT JOIN \"Order\" o ON (o.created_at AT TIME ZONE 'America/Guayaquil')::date = d::date
                 AND $realizedStatus
                 AND o.tenant_id = :tenant_id
             GROUP BY d
@@ -1135,6 +1174,269 @@ class OrderRepository {
         ");
         $stmt->execute(['tenant_id' => $this->getTenantId()]);
         return $stmt->fetchAll();
+    }
+
+    public function getFinancialTrends(): array {
+        try {
+            (new BusinessExpenseRepository())->summary();
+        } catch (\Throwable $e) {
+            // Trend generation should not fail the dashboard if expenses are temporarily unavailable.
+        }
+
+        $startDate = $this->resolveFinancialTrendStartDate();
+        $daily = $this->getFinancialTrendRows('day', $startDate);
+        $monthly = $this->getFinancialTrendRows('month', $startDate);
+
+        return [
+            'start_date' => $startDate,
+            'daily' => $daily,
+            'monthly' => $monthly,
+            'totals' => $this->summarizeFinancialTrendRows($monthly),
+        ];
+    }
+
+    private function resolveFinancialTrendStartDate(): string {
+        $stmt = $this->db->prepare("
+            SELECT MIN(activity_date) AS first_activity
+            FROM (
+                SELECT (created_at AT TIME ZONE 'America/Guayaquil')::date AS activity_date
+                FROM \"Order\"
+                WHERE tenant_id = :tenant_id
+                UNION ALL
+                SELECT expense_date AS activity_date
+                FROM \"BusinessExpense\"
+                WHERE tenant_id = :tenant_id
+                UNION ALL
+                SELECT COALESCE((paid_at AT TIME ZONE 'America/Guayaquil')::date, expense_date) AS activity_date
+                FROM \"BusinessExpense\"
+                WHERE tenant_id = :tenant_id AND status = 'paid'
+                UNION ALL
+                SELECT adjustment_date AS activity_date
+                FROM \"FinancialAdjustment\"
+                WHERE tenant_id = :tenant_id
+            ) activity
+            WHERE activity_date IS NOT NULL
+        ");
+        $stmt->execute(['tenant_id' => $this->getTenantId()]);
+        $first = $stmt->fetchColumn();
+        if (is_string($first) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $first) === 1) {
+            return $first;
+        }
+
+        return (new \DateTimeImmutable('first day of this month', new \DateTimeZone('America/Guayaquil')))->format('Y-m-d');
+    }
+
+    private function getFinancialTrendRows(string $grain, string $startDate): array {
+        $isMonthly = $grain === 'month';
+        $seriesSql = $isMonthly
+            ? "generate_series(DATE_TRUNC('month', CAST(:start_date AS date)), DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Guayaquil')::date), INTERVAL '1 month')"
+            : "generate_series(GREATEST(CAST(:start_date AS date), (NOW() AT TIME ZONE 'America/Guayaquil')::date - INTERVAL '89 days'), (NOW() AT TIME ZONE 'America/Guayaquil')::date, INTERVAL '1 day')";
+        $periodSelect = $isMonthly ? "TO_CHAR(s.period_start, 'YYYY-MM')" : "TO_CHAR(s.period_start, 'YYYY-MM-DD')";
+        $salesGroup = $isMonthly
+            ? "DATE_TRUNC('month', (o.created_at AT TIME ZONE 'America/Guayaquil')::date)::date"
+            : "(o.created_at AT TIME ZONE 'America/Guayaquil')::date";
+        $expenseGroup = $isMonthly ? "DATE_TRUNC('month', be.expense_date)::date" : "be.expense_date";
+        $adjustmentGroup = $isMonthly ? "DATE_TRUNC('month', adjustment_date)::date" : "adjustment_date";
+        $netExpr = $this->netSalesSql('o');
+        $vatExpr = $this->vatAmountSql('o');
+        $costExpr = $this->orderItemCostExpression('oi', 'p');
+        $realizedStatus = $this->realizedSalesCondition('o');
+
+        $stmt = $this->db->prepare("
+            WITH series AS (
+                SELECT period_start::date AS period_start
+                FROM {$seriesSql} AS period_start
+            ),
+            sales AS (
+                SELECT
+                    {$salesGroup} AS period_start,
+                    COUNT(*)::int AS orders_count,
+                    COALESCE(SUM(o.total), 0) AS gross_sales,
+                    COALESCE(SUM({$netExpr}), 0) AS net_sales,
+                    COALESCE(SUM({$vatExpr}), 0) AS tax_collected,
+                    COALESCE(SUM(o.shipping), 0) AS shipping_collected
+                FROM \"Order\" o
+                WHERE o.tenant_id = :tenant_id
+                  AND {$realizedStatus}
+                GROUP BY {$salesGroup}
+            ),
+            costs AS (
+                SELECT
+                    {$salesGroup} AS period_start,
+                    COALESCE(SUM({$costExpr}), 0) AS product_cost
+                FROM \"OrderItem\" oi
+                JOIN \"Order\" o ON oi.order_id = o.id
+                LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
+                WHERE o.tenant_id = :tenant_id
+                  AND {$realizedStatus}
+                GROUP BY {$salesGroup}
+            ),
+            paid_expenses AS (
+                SELECT
+                    {$expenseGroup} AS period_start,
+                    COALESCE(SUM(be.total), 0) AS expenses_paid,
+                    COUNT(*)::int AS expenses_paid_count
+                FROM \"BusinessExpense\" be
+                WHERE be.tenant_id = :tenant_id
+                  AND be.status = 'paid'
+                GROUP BY {$expenseGroup}
+            ),
+            period_expenses AS (
+                SELECT
+                    {$expenseGroup} AS period_start,
+                    COALESCE(SUM(be.total), 0) AS expenses_incurred,
+                    COALESCE(SUM(be.total) FILTER (WHERE be.status = 'paid'), 0) AS expenses_incurred_paid,
+                    COUNT(*)::int AS expenses_incurred_count
+                FROM \"BusinessExpense\" be
+                WHERE be.tenant_id = :tenant_id
+                  AND be.status <> 'cancelled'
+                GROUP BY {$expenseGroup}
+            ),
+            unpaid_expenses AS (
+                SELECT
+                    {$expenseGroup} AS period_start,
+                    COALESCE(SUM(be.total) FILTER (WHERE be.status = 'pending'), 0) AS expenses_pending,
+                    COALESCE(SUM(be.total) FILTER (WHERE be.status = 'overdue'), 0) AS expenses_overdue,
+                    COUNT(*) FILTER (WHERE be.status = 'pending')::int AS expenses_pending_count,
+                    COUNT(*) FILTER (WHERE be.status = 'overdue')::int AS expenses_overdue_count
+                FROM \"BusinessExpense\" be
+                WHERE be.tenant_id = :tenant_id
+                  AND be.status IN ('pending', 'overdue')
+                GROUP BY {$expenseGroup}
+            ),
+            adjustments AS (
+                SELECT
+                    {$adjustmentGroup} AS period_start,
+                    COALESCE(SUM(total), 0) AS financial_adjustments
+                FROM \"FinancialAdjustment\"
+                WHERE tenant_id = :tenant_id
+                GROUP BY {$adjustmentGroup}
+            )
+            SELECT
+                {$periodSelect} AS period,
+                s.period_start,
+                COALESCE(sa.orders_count, 0)::int AS orders_count,
+                COALESCE(sa.gross_sales, 0) AS gross_sales,
+                COALESCE(sa.net_sales, 0) AS net_sales,
+                COALESCE(sa.tax_collected, 0) AS tax_collected,
+                COALESCE(sa.shipping_collected, 0) AS shipping_collected,
+                COALESCE(c.product_cost, 0) AS product_cost,
+                COALESCE(pe.expenses_paid, 0) AS expenses_paid,
+                COALESCE(ie.expenses_incurred, 0) AS expenses_incurred,
+                COALESCE(ie.expenses_incurred_paid, 0) AS expenses_incurred_paid,
+                COALESCE(ue.expenses_pending, 0) AS expenses_pending,
+                COALESCE(ue.expenses_overdue, 0) AS expenses_overdue,
+                COALESCE(pe.expenses_paid_count, 0)::int AS expenses_paid_count,
+                COALESCE(ie.expenses_incurred_count, 0)::int AS expenses_incurred_count,
+                COALESCE(ue.expenses_pending_count, 0)::int AS expenses_pending_count,
+                COALESCE(ue.expenses_overdue_count, 0)::int AS expenses_overdue_count,
+                COALESCE(a.financial_adjustments, 0) AS financial_adjustments
+            FROM series s
+            LEFT JOIN sales sa ON sa.period_start = s.period_start
+            LEFT JOIN costs c ON c.period_start = s.period_start
+            LEFT JOIN paid_expenses pe ON pe.period_start = s.period_start
+            LEFT JOIN period_expenses ie ON ie.period_start = s.period_start
+            LEFT JOIN unpaid_expenses ue ON ue.period_start = s.period_start
+            LEFT JOIN adjustments a ON a.period_start = s.period_start
+            ORDER BY s.period_start ASC
+        ");
+        $stmt->execute([
+            'tenant_id' => $this->getTenantId(),
+            'start_date' => $startDate,
+        ]);
+
+        return array_map(function (array $row): array {
+            $net = (float)($row['net_sales'] ?? 0);
+            $cost = (float)($row['product_cost'] ?? 0);
+            $paid = (float)($row['expenses_paid'] ?? 0);
+            $incurred = (float)($row['expenses_incurred'] ?? 0);
+            $pending = (float)($row['expenses_pending'] ?? 0);
+            $overdue = (float)($row['expenses_overdue'] ?? 0);
+            $adjustments = (float)($row['financial_adjustments'] ?? 0);
+            $grossProfit = $net - $cost;
+            $cashProfit = $grossProfit - $paid - $adjustments;
+            $periodExpenses = $incurred;
+            $committedExpenses = $periodExpenses;
+            $periodProfit = $grossProfit - $incurred - $adjustments;
+            $committedProfit = $grossProfit - $committedExpenses - $adjustments;
+            $periodMargin = $net > 0 ? round(($periodProfit / $net) * 100, 1) : 0;
+
+            return [
+                'period' => (string)($row['period'] ?? ''),
+                'date' => (string)($row['period_start'] ?? ''),
+                'orders_count' => (int)($row['orders_count'] ?? 0),
+                'gross_sales' => round((float)($row['gross_sales'] ?? 0), 2),
+                'net_sales' => round($net, 2),
+                'tax_collected' => round((float)($row['tax_collected'] ?? 0), 2),
+                'shipping_collected' => round((float)($row['shipping_collected'] ?? 0), 2),
+                'product_cost' => round($cost, 2),
+                'gross_profit' => round($grossProfit, 2),
+                'expenses_paid' => round($paid, 2),
+                'expenses_cash_paid' => round($paid, 2),
+                'expenses_incurred' => round($incurred, 2),
+                'period_expenses' => round($periodExpenses, 2),
+                'expenses_incurred_paid' => round((float)($row['expenses_incurred_paid'] ?? 0), 2),
+                'expenses_pending' => round($pending, 2),
+                'expenses_overdue' => round($overdue, 2),
+                'committed_expenses' => round($committedExpenses, 2),
+                'expenses_paid_count' => (int)($row['expenses_paid_count'] ?? 0),
+                'expenses_incurred_count' => (int)($row['expenses_incurred_count'] ?? 0),
+                'expenses_pending_count' => (int)($row['expenses_pending_count'] ?? 0),
+                'expenses_overdue_count' => (int)($row['expenses_overdue_count'] ?? 0),
+                'financial_adjustments' => round($adjustments, 2),
+                'net_cash_profit' => round($cashProfit, 2),
+                'net_period_profit' => round($periodProfit, 2),
+                'net_committed_profit' => round($committedProfit, 2),
+                'gross_margin' => $net > 0 ? round(($grossProfit / $net) * 100, 1) : 0,
+                'net_cash_margin' => $net > 0 ? round(($cashProfit / $net) * 100, 1) : 0,
+                'net_period_margin' => $periodMargin,
+                'net_committed_margin' => $net > 0 ? round(($committedProfit / $net) * 100, 1) : 0,
+            ];
+        }, $stmt->fetchAll() ?: []);
+    }
+
+    private function summarizeFinancialTrendRows(array $rows): array {
+        $totals = [
+            'orders_count' => 0,
+            'gross_sales' => 0.0,
+            'net_sales' => 0.0,
+            'tax_collected' => 0.0,
+            'shipping_collected' => 0.0,
+            'product_cost' => 0.0,
+            'gross_profit' => 0.0,
+            'expenses_paid' => 0.0,
+            'expenses_cash_paid' => 0.0,
+            'expenses_incurred' => 0.0,
+            'period_expenses' => 0.0,
+            'expenses_incurred_paid' => 0.0,
+            'expenses_pending' => 0.0,
+            'expenses_overdue' => 0.0,
+            'committed_expenses' => 0.0,
+            'financial_adjustments' => 0.0,
+            'net_cash_profit' => 0.0,
+            'net_period_profit' => 0.0,
+            'net_committed_profit' => 0.0,
+        ];
+
+        foreach ($rows as $row) {
+            foreach ($totals as $key => $value) {
+                $totals[$key] += $key === 'orders_count'
+                    ? (int)($row[$key] ?? 0)
+                    : (float)($row[$key] ?? 0);
+            }
+        }
+
+        foreach ($totals as $key => $value) {
+            $totals[$key] = $key === 'orders_count' ? (int)$value : round((float)$value, 2);
+        }
+
+        $net = (float)$totals['net_sales'];
+        $totals['gross_margin'] = $net > 0 ? round(((float)$totals['gross_profit'] / $net) * 100, 1) : 0;
+        $totals['net_cash_margin'] = $net > 0 ? round(((float)$totals['net_cash_profit'] / $net) * 100, 1) : 0;
+        $totals['net_period_margin'] = $net > 0 ? round(((float)$totals['net_period_profit'] / $net) * 100, 1) : 0;
+        $totals['net_committed_margin'] = $net > 0 ? round(((float)$totals['net_committed_profit'] / $net) * 100, 1) : 0;
+
+        return $totals;
     }
 
     public function getSalesSummary() {
@@ -1186,6 +1488,7 @@ class OrderRepository {
         $vatExpr = $this->vatAmountSql('o');
         $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
         $itemGrossExpr = $this->orderItemGrossTotalExpression('oi', 'o');
+        $itemCostExpr = $this->orderItemCostExpression('oi', 'p');
 
         $ordersStmt = $this->db->prepare("
             SELECT
@@ -1227,6 +1530,7 @@ class OrderRepository {
                     COALESCE(o.shipping, 0) AS order_shipping,
                     COALESCE($netExpr, 0) AS order_net,
                     COALESCE($vatExpr, 0) AS order_vat,
+                    $itemCostExpr AS line_cost,
                     SUM($itemGrossExpr) OVER (PARTITION BY o.id) AS order_items_gross
                 FROM \"OrderItem\" oi
                 JOIN \"Order\" o ON oi.order_id = o.id
@@ -1250,7 +1554,8 @@ class OrderRepository {
                         WHEN order_net > 0 THEN order_vat * (line_net_estimate / order_net)
                         WHEN order_items_gross > 0 THEN GREATEST(line_gross_items - line_net_estimate, 0)
                         ELSE 0
-                    END AS line_vat
+                    END AS line_vat,
+                    line_cost
                 FROM active_lines
             )
             SELECT
@@ -1261,6 +1566,7 @@ class OrderRepository {
                 COALESCE(SUM(line_net_estimate), 0) AS net_revenue,
                 COALESCE(SUM(line_vat), 0) AS vat_amount,
                 COALESCE(SUM(line_shipping), 0) AS shipping_amount,
+                COALESCE(SUM(line_cost), 0) AS cost,
                 COALESCE(SUM(line_net_estimate + line_vat + line_shipping), 0) AS gross_revenue,
                 STRING_AGG(DISTINCT order_id, ', ') AS order_refs
             FROM distributed_lines
@@ -1278,6 +1584,9 @@ class OrderRepository {
             $product['net_revenue'] = round((float)($product['net_revenue'] ?? 0), 2);
             $product['vat_amount'] = round((float)($product['vat_amount'] ?? 0), 2);
             $product['shipping_amount'] = round((float)($product['shipping_amount'] ?? 0), 2);
+            $product['cost'] = round((float)($product['cost'] ?? 0), 2);
+            $product['profit'] = round($product['net_revenue'] - $product['cost'], 2);
+            $product['margin'] = $product['net_revenue'] > 0 ? round(($product['profit'] / $product['net_revenue']) * 100, 1) : 0;
             $product['gross_revenue'] = round((float)($product['gross_revenue'] ?? 0), 2);
             $refs = trim((string)($product['order_refs'] ?? ''));
             $product['order_refs'] = $refs === '' ? [] : array_values(array_filter(array_map('trim', explode(',', $refs))));
@@ -1294,6 +1603,7 @@ class OrderRepository {
                     COALESCE(o.shipping, 0) AS order_shipping,
                     COALESCE($netExpr, 0) AS order_net,
                     COALESCE($vatExpr, 0) AS order_vat,
+                    $itemCostExpr AS line_cost,
                     SUM($itemGrossExpr) OVER (PARTITION BY o.id) AS order_items_gross
                 FROM \"OrderItem\" oi
                 JOIN \"Order\" o ON oi.order_id = o.id
@@ -1314,7 +1624,8 @@ class OrderRepository {
                         WHEN order_net > 0 THEN order_vat * (line_net_estimate / order_net)
                         WHEN order_items_gross > 0 THEN GREATEST(line_gross_items - line_net_estimate, 0)
                         ELSE 0
-                    END AS line_vat
+                    END AS line_vat,
+                    line_cost
                 FROM active_lines
             )
             SELECT
@@ -1322,6 +1633,7 @@ class OrderRepository {
                 COALESCE(SUM(line_net_estimate), 0) AS net_revenue,
                 COALESCE(SUM(line_vat), 0) AS vat_amount,
                 COALESCE(SUM(line_shipping), 0) AS shipping_amount,
+                COALESCE(SUM(line_cost), 0) AS cost,
                 COALESCE(SUM(line_net_estimate + line_vat + line_shipping), 0) AS gross_revenue,
                 STRING_AGG(DISTINCT order_id, ', ') AS order_refs
             FROM distributed_lines
@@ -1338,6 +1650,9 @@ class OrderRepository {
             $category['net_revenue'] = round((float)($category['net_revenue'] ?? 0), 2);
             $category['vat_amount'] = round((float)($category['vat_amount'] ?? 0), 2);
             $category['shipping_amount'] = round((float)($category['shipping_amount'] ?? 0), 2);
+            $category['cost'] = round((float)($category['cost'] ?? 0), 2);
+            $category['profit'] = round($category['net_revenue'] - $category['cost'], 2);
+            $category['margin'] = $category['net_revenue'] > 0 ? round(($category['profit'] / $category['net_revenue']) * 100, 1) : 0;
             $category['gross_revenue'] = round((float)($category['gross_revenue'] ?? 0), 2);
             $refs = trim((string)($category['order_refs'] ?? ''));
             $category['order_refs'] = $refs === '' ? [] : array_values(array_filter(array_map('trim', explode(',', $refs))));
@@ -1369,6 +1684,266 @@ class OrderRepository {
         return $stmt->fetchAll();
     }
 
+    private function resolveReportPeriod(?string $selectedMonth = null): array {
+        $monthKey = null;
+        if (is_string($selectedMonth) && preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $selectedMonth) === 1) {
+            $monthKey = $selectedMonth;
+        }
+        if ($monthKey === null) {
+            $monthKey = (new \DateTimeImmutable('now', new \DateTimeZone('America/Guayaquil')))->format('Y-m');
+        }
+
+        $startDate = $monthKey . '-01';
+        return [
+            'period_key' => $monthKey,
+            'start_date' => $startDate,
+            'end_date' => date('Y-m-t', strtotime($startDate)),
+            'end_exclusive' => date('Y-m-d', strtotime($startDate . ' +1 month')),
+            'timezone' => 'America/Guayaquil',
+        ];
+    }
+
+    public function getReportPeriodSummary(?string $selectedMonth = null): array {
+        $tenantId = $this->getTenantId();
+        $period = $this->resolveReportPeriod($selectedMonth);
+        $financialPeriods = new FinancialPeriodRepository($this->db);
+        $snapshot = $financialPeriods->buildSnapshot($period['start_date'], $period['end_date'], $period['period_key']);
+        $realizedSales = $this->realizedSalesCondition('o');
+        $netExpr = $this->netSalesSql('o');
+        $vatExpr = $this->vatAmountSql('o');
+        $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
+        $itemGrossExpr = $this->orderItemGrossTotalExpression('oi', 'o');
+        $unitCostExpr = $this->orderItemUnitCostExpression('oi', 'p');
+        $lineCostExpr = $this->orderItemCostExpression('oi', 'p');
+
+        $ordersStmt = $this->db->prepare("
+            SELECT
+                o.id,
+                o.created_at,
+                LOWER(COALESCE(o.status, 'pending')) AS status,
+                COALESCE(
+                    NULLIF(TRIM(u.name), ''),
+                    NULLIF(TRIM(CONCAT_WS(' ', o.shipping_address->>'firstName', o.shipping_address->>'lastName')), ''),
+                    NULLIF(TRIM(CONCAT_WS(' ', o.billing_address->>'firstName', o.billing_address->>'lastName')), ''),
+                    'Consumidor final'
+                ) AS user_name,
+                COALESCE(NULLIF(TRIM(u.email), ''), NULLIF(TRIM(o.shipping_address->>'email'), ''), NULLIF(TRIM(o.billing_address->>'email'), '')) AS customer_email,
+                COALESCE(NULLIF(TRIM(o.shipping_address->>'phone'), ''), NULLIF(TRIM(o.billing_address->>'phone'), '')) AS customer_phone,
+                COALESCE(NULLIF(TRIM(u.document_type), ''), NULLIF(TRIM(o.shipping_address->>'documentType'), ''), NULLIF(TRIM(o.billing_address->>'documentType'), '')) AS customer_document_type,
+                COALESCE(NULLIF(TRIM(u.document_number), ''), NULLIF(TRIM(o.shipping_address->>'documentNumber'), ''), NULLIF(TRIM(o.billing_address->>'documentNumber'), '')) AS customer_document_number,
+                o.payment_method,
+                o.delivery_method,
+                o.discount_code,
+                COALESCE(o.discount_total, 0) AS discount_total,
+                COALESCE(o.items_subtotal, 0) AS items_subtotal,
+                COALESCE(o.vat_rate, 0) AS vat_rate,
+                COALESCE(o.shipping_base, o.shipping, 0) AS shipping_base,
+                COALESCE(o.shipping_tax_amount, 0) AS shipping_tax_amount,
+                COALESCE(items.item_lines_count, 0)::int AS item_lines_count,
+                COALESCE(items.units_count, 0)::int AS units_count,
+                COALESCE(items.cost, 0) AS cost,
+                COALESCE(items.items_summary, '') AS items_summary,
+                COALESCE(o.total, 0) AS gross,
+                $netExpr AS net,
+                $vatExpr AS vat,
+                COALESCE(o.shipping, 0) AS shipping
+            FROM \"Order\" o
+            LEFT JOIN \"User\" u ON o.user_id = u.id AND u.tenant_id = o.tenant_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*) AS item_lines_count,
+                    COALESCE(SUM(COALESCE(oi.quantity, 0)), 0)::int AS units_count,
+                    COALESCE(SUM($lineCostExpr), 0) AS cost,
+                    STRING_AGG(
+                        COALESCE(NULLIF(TRIM(oi.product_name), ''), NULLIF(TRIM(p.name), ''), 'Producto sin nombre')
+                            || ' x' || COALESCE(oi.quantity, 0)::text,
+                        '; '
+                        ORDER BY COALESCE(NULLIF(TRIM(oi.product_name), ''), NULLIF(TRIM(p.name), ''), 'Producto sin nombre')
+                    ) AS items_summary
+                FROM \"OrderItem\" oi
+                LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = o.tenant_id
+                WHERE oi.order_id = o.id
+            ) items ON true
+            WHERE o.tenant_id = :tenant_id
+              AND $realizedSales
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:start_date AS date)
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:end_exclusive AS date)
+            ORDER BY o.created_at DESC
+        ");
+        $ordersStmt->execute([
+            'tenant_id' => $tenantId,
+            'start_date' => $period['start_date'],
+            'end_exclusive' => $period['end_exclusive'],
+        ]);
+        $orders = array_map(static function (array $row): array {
+            $net = round((float)($row['net'] ?? 0), 2);
+            $cost = round((float)($row['cost'] ?? 0), 2);
+            $profit = round($net - $cost, 2);
+            $unitsCount = (int)($row['units_count'] ?? 0);
+            return [
+                'id' => (string)($row['id'] ?? ''),
+                'created_at' => (string)($row['created_at'] ?? ''),
+                'status' => (string)($row['status'] ?? ''),
+                'user_name' => $row['user_name'] ?? null,
+                'customer_email' => $row['customer_email'] ?? null,
+                'customer_phone' => $row['customer_phone'] ?? null,
+                'customer_document_type' => $row['customer_document_type'] ?? null,
+                'customer_document_number' => $row['customer_document_number'] ?? null,
+                'payment_method' => $row['payment_method'] ?? null,
+                'delivery_method' => $row['delivery_method'] ?? null,
+                'discount_code' => $row['discount_code'] ?? null,
+                'discount_total' => round((float)($row['discount_total'] ?? 0), 2),
+                'items_subtotal' => round((float)($row['items_subtotal'] ?? 0), 2),
+                'vat_rate' => round((float)($row['vat_rate'] ?? 0), 2),
+                'shipping_base' => round((float)($row['shipping_base'] ?? 0), 2),
+                'shipping_tax_amount' => round((float)($row['shipping_tax_amount'] ?? 0), 2),
+                'item_lines_count' => (int)($row['item_lines_count'] ?? 0),
+                'units_count' => $unitsCount,
+                'items_summary' => (string)($row['items_summary'] ?? ''),
+                'gross' => round((float)($row['gross'] ?? 0), 2),
+                'net' => $net,
+                'vat' => round((float)($row['vat'] ?? 0), 2),
+                'shipping' => round((float)($row['shipping'] ?? 0), 2),
+                'cost' => $cost,
+                'profit' => $profit,
+                'margin' => $net > 0 ? round(($profit / $net) * 100, 1) : 0,
+                'average_unit_net' => $unitsCount > 0 ? round($net / $unitsCount, 2) : 0,
+            ];
+        }, $ordersStmt->fetchAll() ?: []);
+
+        $metricsStmt = $this->db->prepare("
+            WITH active_lines AS (
+                SELECT
+                    oi.product_id,
+                    COALESCE(NULLIF(TRIM(oi.product_name), ''), NULLIF(TRIM(p.name), ''), 'Producto sin nombre') AS product_name,
+                    COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') AS category,
+                    o.id AS order_id,
+                    COALESCE(oi.quantity, 0)::numeric AS quantity,
+                    $itemGrossExpr AS line_gross_items,
+                    $itemNetExpr AS line_net_estimate,
+                    COALESCE(o.shipping, 0) AS order_shipping,
+                    COALESCE($netExpr, 0) AS order_net,
+                    COALESCE($vatExpr, 0) AS order_vat,
+                    SUM($itemGrossExpr) OVER (PARTITION BY o.id) AS order_items_gross,
+                    $unitCostExpr AS unit_cost,
+                    $lineCostExpr AS line_cost
+                FROM \"OrderItem\" oi
+                JOIN \"Order\" o ON oi.order_id = o.id
+                LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
+                WHERE o.tenant_id = :tenant_id
+                  AND $realizedSales
+                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:start_date AS date)
+                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:end_exclusive AS date)
+            ),
+            distributed_lines AS (
+                SELECT
+                    product_id,
+                    product_name,
+                    category,
+                    order_id,
+                    quantity,
+                    line_gross_items,
+                    line_net_estimate,
+                    CASE
+                        WHEN order_net > 0 THEN order_shipping * (line_net_estimate / order_net)
+                        WHEN order_items_gross > 0 THEN order_shipping * (line_gross_items / order_items_gross)
+                        ELSE 0
+                    END AS line_shipping,
+                    CASE
+                        WHEN order_net > 0 THEN order_vat * (line_net_estimate / order_net)
+                        WHEN order_items_gross > 0 THEN GREATEST(line_gross_items - line_net_estimate, 0)
+                        ELSE 0
+                    END AS line_vat,
+                    line_cost
+                FROM active_lines
+            ),
+            product_rows AS (
+                SELECT
+                    product_id,
+                    product_name,
+                    category,
+                    COUNT(DISTINCT order_id)::int AS orders_count,
+                    COALESCE(SUM(quantity), 0)::int AS units_sold,
+                    COALESCE(SUM(line_gross_items + line_shipping), 0) AS gross_revenue,
+                    COALESCE(SUM(line_net_estimate), 0) AS net_revenue,
+                    COALESCE(SUM(line_vat), 0) AS vat_amount,
+                    COALESCE(SUM(line_shipping), 0) AS shipping_amount,
+                    COALESCE(SUM(line_cost), 0) AS cost,
+                    STRING_AGG(DISTINCT order_id::text, ', ' ORDER BY order_id::text) AS order_refs
+                FROM distributed_lines
+                GROUP BY product_id, product_name, category
+            ),
+            category_rows AS (
+                SELECT
+                    category,
+                    COUNT(DISTINCT order_id)::int AS orders_count,
+                    COALESCE(SUM(quantity), 0)::int AS units_sold,
+                    COALESCE(SUM(line_gross_items + line_shipping), 0) AS gross_revenue,
+                    COALESCE(SUM(line_net_estimate), 0) AS net_revenue,
+                    COALESCE(SUM(line_vat), 0) AS vat_amount,
+                    COALESCE(SUM(line_shipping), 0) AS shipping_amount,
+                    COALESCE(SUM(line_cost), 0) AS cost,
+                    STRING_AGG(DISTINCT order_id::text, ', ' ORDER BY order_id::text) AS order_refs
+                FROM distributed_lines
+                GROUP BY category
+            )
+            SELECT 'product' AS row_type, product_id, product_name, category, orders_count, units_sold, gross_revenue, net_revenue, vat_amount, shipping_amount, cost, order_refs
+            FROM product_rows
+            UNION ALL
+            SELECT 'category' AS row_type, NULL AS product_id, NULL AS product_name, category, orders_count, units_sold, gross_revenue, net_revenue, vat_amount, shipping_amount, cost, order_refs
+            FROM category_rows
+            ORDER BY row_type DESC, net_revenue DESC, units_sold DESC
+        ");
+        $metricsStmt->execute([
+            'tenant_id' => $tenantId,
+            'start_date' => $period['start_date'],
+            'end_exclusive' => $period['end_exclusive'],
+        ]);
+
+        $products = [];
+        $categories = [];
+        foreach ($metricsStmt->fetchAll() ?: [] as $row) {
+            $net = (float)($row['net_revenue'] ?? 0);
+            $cost = (float)($row['cost'] ?? 0);
+            $profit = $net - $cost;
+            $refs = trim((string)($row['order_refs'] ?? ''));
+            $normalized = [
+                'category' => (string)($row['category'] ?? 'Sin categoría'),
+                'orders_count' => (int)($row['orders_count'] ?? 0),
+                'units_sold' => (int)($row['units_sold'] ?? 0),
+                'gross_revenue' => round((float)($row['gross_revenue'] ?? 0), 2),
+                'net_revenue' => round($net, 2),
+                'vat_amount' => round((float)($row['vat_amount'] ?? 0), 2),
+                'shipping_amount' => round((float)($row['shipping_amount'] ?? 0), 2),
+                'cost' => round($cost, 2),
+                'profit' => round($profit, 2),
+                'margin' => $net > 0 ? round(($profit / $net) * 100, 1) : 0,
+                'order_refs' => $refs === '' ? [] : array_values(array_filter(array_map('trim', explode(',', $refs)))),
+            ];
+            if (($row['row_type'] ?? '') === 'product') {
+                $products[] = array_merge($normalized, [
+                    'product_id' => (string)($row['product_id'] ?? ''),
+                    'product_name' => (string)($row['product_name'] ?? 'Producto sin nombre'),
+                ]);
+            } else {
+                $categories[] = $normalized;
+            }
+        }
+
+        return [
+            'period' => $period,
+            'timezone' => 'America/Guayaquil',
+            'realized_statuses' => ['completed', 'delivered'],
+            'sales' => $snapshot['sales'] ?? [],
+            'profit' => $snapshot['profit'] ?? [],
+            'expenses' => $snapshot['expenses'] ?? [],
+            'adjustments' => $snapshot['adjustments'] ?? [],
+            'orders' => $orders,
+            'products' => $products,
+            'categories' => $categories,
+        ];
+    }
+
     public function getProductSalesRanking(?string $selectedMonth = null) {
         $tenantId = $this->getTenantId();
         $realizedSales = $this->realizedSalesCondition('o');
@@ -1381,8 +1956,8 @@ class OrderRepository {
         $itemGrossExpr = $this->orderItemGrossTotalExpression('oi', 'o');
         $periodStmt = $this->db->prepare("
             SELECT
-                MIN(o.created_at)::date AS historical_start,
-                MAX(o.created_at)::date AS historical_end
+                MIN((o.created_at AT TIME ZONE 'America/Guayaquil')::date) AS historical_start,
+                MAX((o.created_at AT TIME ZONE 'America/Guayaquil')::date) AS historical_end
             FROM \"Order\" o
             WHERE o.tenant_id = :tenant_id
               AND $realizedSales
@@ -1394,11 +1969,15 @@ class OrderRepository {
             $monthKey = $selectedMonth;
         }
         if ($monthKey === null) {
-            $monthKey = date('Y-m');
+            $monthKey = (new \DateTimeImmutable('now', new \DateTimeZone('America/Guayaquil')))->format('Y-m');
         }
         $monthStart = $monthKey . '-01';
         $nextMonthStart = date('Y-m-01', strtotime($monthStart . ' +1 month'));
         $monthEnd = date('Y-m-t', strtotime($monthStart));
+        $todayEcuador = new \DateTimeImmutable('today', new \DateTimeZone('America/Guayaquil'));
+        $rangeStart = $todayEcuador->modify('-29 days')->format('Y-m-d');
+        $rangeEnd = $todayEcuador->format('Y-m-d');
+        $rangeEndExclusive = $todayEcuador->modify('+1 day')->format('Y-m-d');
 
         $monthlySalesStmt = $this->db->prepare("
             SELECT
@@ -1410,8 +1989,8 @@ class OrderRepository {
             FROM \"Order\" o
             WHERE o.tenant_id = :tenant_id
               AND $realizedSales
-              AND o.created_at >= :start_date
-              AND o.created_at < :end_date
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:start_date AS date)
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:end_date AS date)
         ");
         $monthlySalesStmt->execute([
             'tenant_id' => $tenantId,
@@ -1419,6 +1998,26 @@ class OrderRepository {
             'end_date' => $nextMonthStart
         ]);
         $monthlySales = $monthlySalesStmt->fetch() ?: [];
+
+        $rangeSalesStmt = $this->db->prepare("
+            SELECT
+                COUNT(*)::int AS orders_count,
+                COALESCE(SUM(COALESCE(o.total, 0)), 0) AS gross,
+                COALESCE(SUM($netExpr), 0) AS net,
+                COALESCE(SUM($vatExpr), 0) AS vat,
+                COALESCE(SUM(COALESCE(o.shipping, 0)), 0) AS shipping
+            FROM \"Order\" o
+            WHERE o.tenant_id = :tenant_id
+              AND $realizedSales
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:range_start_date AS date)
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:range_end_exclusive AS date)
+        ");
+        $rangeSalesStmt->execute([
+            'tenant_id' => $tenantId,
+            'range_start_date' => $rangeStart,
+            'range_end_exclusive' => $rangeEndExclusive
+        ]);
+        $rangeSales = $rangeSalesStmt->fetch() ?: [];
 
         $historicalSalesStmt = $this->db->prepare("
             SELECT
@@ -1443,8 +2042,8 @@ class OrderRepository {
             LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
             WHERE o.tenant_id = :tenant_id
               AND $realizedSales
-              AND o.created_at >= :start_date
-              AND o.created_at < :end_date
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:start_date AS date)
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:end_date AS date)
         ");
         $monthlyCostStmt->execute([
             'tenant_id' => $tenantId,
@@ -1452,6 +2051,23 @@ class OrderRepository {
             'end_date' => $nextMonthStart
         ]);
         $monthlyCost = (float)($monthlyCostStmt->fetchColumn() ?: 0);
+
+        $rangeCostStmt = $this->db->prepare("
+            SELECT COALESCE(SUM($costExpr), 0) AS cost
+            FROM \"OrderItem\" oi
+            JOIN \"Order\" o ON oi.order_id = o.id
+            LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
+            WHERE o.tenant_id = :tenant_id
+              AND $realizedSales
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:range_start_date AS date)
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:range_end_exclusive AS date)
+        ");
+        $rangeCostStmt->execute([
+            'tenant_id' => $tenantId,
+            'range_start_date' => $rangeStart,
+            'range_end_exclusive' => $rangeEndExclusive
+        ]);
+        $rangeCost = (float)($rangeCostStmt->fetchColumn() ?: 0);
 
         $historicalCostStmt = $this->db->prepare("
             SELECT COALESCE(SUM($costExpr), 0) AS cost
@@ -1471,7 +2087,7 @@ class OrderRepository {
                 SELECT
                     oi.product_id,
                     o.id AS order_id,
-                    o.created_at,
+	                    (o.created_at AT TIME ZONE 'America/Guayaquil')::date AS created_local_date,
                     COALESCE(oi.quantity, 0)::numeric AS quantity,
                     $itemGrossExpr AS line_gross_items,
                     $itemNetExpr AS line_net_estimate,
@@ -1491,7 +2107,7 @@ class OrderRepository {
                 SELECT
                     product_id,
                     order_id,
-                    created_at,
+	                    created_local_date,
                     quantity,
                     line_gross_items,
                     line_net_estimate,
@@ -1513,26 +2129,54 @@ class OrderRepository {
                 SELECT
                     dl.product_id,
                     COUNT(DISTINCT dl.order_id) FILTER (
-                        WHERE dl.created_at >= :start_date AND dl.created_at < :end_date
-                    )::int AS month_orders_count,
+	                        WHERE dl.created_local_date >= CAST(:start_date AS date) AND dl.created_local_date < CAST(:end_date AS date)
+	                    )::int AS month_orders_count,
+	                    COALESCE(SUM(dl.quantity) FILTER (
+	                        WHERE dl.created_local_date >= CAST(:start_date AS date) AND dl.created_local_date < CAST(:end_date AS date)
+	                    ), 0)::int AS month_units_sold,
+	                    COALESCE(SUM(dl.line_gross_items + dl.line_shipping) FILTER (
+	                        WHERE dl.created_local_date >= CAST(:start_date AS date) AND dl.created_local_date < CAST(:end_date AS date)
+	                    ), 0) AS month_gross_revenue,
+	                    COALESCE(SUM(dl.line_net_estimate) FILTER (
+	                        WHERE dl.created_local_date >= CAST(:start_date AS date) AND dl.created_local_date < CAST(:end_date AS date)
+	                    ), 0) AS month_net_revenue,
+	                    COALESCE(SUM(dl.line_vat) FILTER (
+	                        WHERE dl.created_local_date >= CAST(:start_date AS date) AND dl.created_local_date < CAST(:end_date AS date)
+	                    ), 0) AS month_vat_amount,
+	                    COALESCE(SUM(dl.line_shipping) FILTER (
+	                        WHERE dl.created_local_date >= CAST(:start_date AS date) AND dl.created_local_date < CAST(:end_date AS date)
+	                    ), 0) AS month_shipping_amount,
+	                    COALESCE(SUM(dl.line_cost) FILTER (
+	                        WHERE dl.created_local_date >= CAST(:start_date AS date) AND dl.created_local_date < CAST(:end_date AS date)
+	                    ), 0) AS month_cost,
+                    COUNT(DISTINCT dl.order_id) FILTER (
+                        WHERE dl.created_local_date >= CAST(:range_start_date AS date)
+                          AND dl.created_local_date < CAST(:range_end_exclusive AS date)
+                    )::int AS range_orders_count,
                     COALESCE(SUM(dl.quantity) FILTER (
-                        WHERE dl.created_at >= :start_date AND dl.created_at < :end_date
-                    ), 0)::int AS month_units_sold,
+                        WHERE dl.created_local_date >= CAST(:range_start_date AS date)
+                          AND dl.created_local_date < CAST(:range_end_exclusive AS date)
+                    ), 0)::int AS range_units_sold,
                     COALESCE(SUM(dl.line_gross_items + dl.line_shipping) FILTER (
-                        WHERE dl.created_at >= :start_date AND dl.created_at < :end_date
-                    ), 0) AS month_gross_revenue,
+                        WHERE dl.created_local_date >= CAST(:range_start_date AS date)
+                          AND dl.created_local_date < CAST(:range_end_exclusive AS date)
+                    ), 0) AS range_gross_revenue,
                     COALESCE(SUM(dl.line_net_estimate) FILTER (
-                        WHERE dl.created_at >= :start_date AND dl.created_at < :end_date
-                    ), 0) AS month_net_revenue,
+                        WHERE dl.created_local_date >= CAST(:range_start_date AS date)
+                          AND dl.created_local_date < CAST(:range_end_exclusive AS date)
+                    ), 0) AS range_net_revenue,
                     COALESCE(SUM(dl.line_vat) FILTER (
-                        WHERE dl.created_at >= :start_date AND dl.created_at < :end_date
-                    ), 0) AS month_vat_amount,
+                        WHERE dl.created_local_date >= CAST(:range_start_date AS date)
+                          AND dl.created_local_date < CAST(:range_end_exclusive AS date)
+                    ), 0) AS range_vat_amount,
                     COALESCE(SUM(dl.line_shipping) FILTER (
-                        WHERE dl.created_at >= :start_date AND dl.created_at < :end_date
-                    ), 0) AS month_shipping_amount,
+                        WHERE dl.created_local_date >= CAST(:range_start_date AS date)
+                          AND dl.created_local_date < CAST(:range_end_exclusive AS date)
+                    ), 0) AS range_shipping_amount,
                     COALESCE(SUM(dl.line_cost) FILTER (
-                        WHERE dl.created_at >= :start_date AND dl.created_at < :end_date
-                    ), 0) AS month_cost,
+                        WHERE dl.created_local_date >= CAST(:range_start_date AS date)
+                          AND dl.created_local_date < CAST(:range_end_exclusive AS date)
+                    ), 0) AS range_cost,
                     COUNT(DISTINCT dl.order_id)::int AS historical_orders_count,
                     COALESCE(SUM(dl.quantity), 0)::int AS historical_units_sold,
                     COALESCE(SUM(dl.line_gross_items + dl.line_shipping), 0) AS historical_gross_revenue,
@@ -1554,6 +2198,13 @@ class OrderRepository {
                 COALESCE(pm.month_vat_amount, 0) AS month_vat_amount,
                 COALESCE(pm.month_shipping_amount, 0) AS month_shipping_amount,
                 COALESCE(pm.month_cost, 0) AS month_cost,
+                COALESCE(pm.range_orders_count, 0) AS range_orders_count,
+                COALESCE(pm.range_units_sold, 0) AS range_units_sold,
+                COALESCE(pm.range_gross_revenue, 0) AS range_gross_revenue,
+                COALESCE(pm.range_net_revenue, 0) AS range_net_revenue,
+                COALESCE(pm.range_vat_amount, 0) AS range_vat_amount,
+                COALESCE(pm.range_shipping_amount, 0) AS range_shipping_amount,
+                COALESCE(pm.range_cost, 0) AS range_cost,
                 COALESCE(pm.historical_orders_count, 0) AS historical_orders_count,
                 COALESCE(pm.historical_units_sold, 0) AS historical_units_sold,
                 COALESCE(pm.historical_gross_revenue, 0) AS historical_gross_revenue,
@@ -1568,7 +2219,9 @@ class OrderRepository {
         $stmt->execute([
             'tenant_id' => $tenantId,
             'start_date' => $monthStart,
-            'end_date' => $nextMonthStart
+            'end_date' => $nextMonthStart,
+            'range_start_date' => $rangeStart,
+            'range_end_exclusive' => $rangeEndExclusive
         ]);
         $rows = $stmt->fetchAll() ?: [];
 
@@ -1577,6 +2230,10 @@ class OrderRepository {
             $monthCost = (float)($row['month_cost'] ?? 0);
             $monthProfit = $monthNet - $monthCost;
             $monthMargin = $monthNet > 0 ? ($monthProfit / $monthNet) * 100 : 0;
+            $rangeNet = (float)($row['range_net_revenue'] ?? 0);
+            $rangeCost = (float)($row['range_cost'] ?? 0);
+            $rangeProfit = $rangeNet - $rangeCost;
+            $rangeMargin = $rangeNet > 0 ? ($rangeProfit / $rangeNet) * 100 : 0;
             $historicalNet = (float)($row['historical_net_revenue'] ?? 0);
             $historicalCost = (float)($row['historical_cost'] ?? 0);
             $historicalProfit = $historicalNet - $historicalCost;
@@ -1595,6 +2252,15 @@ class OrderRepository {
                 'month_cost' => round($monthCost, 2),
                 'month_profit' => round($monthProfit, 2),
                 'month_margin' => round($monthMargin, 1),
+                'range_orders_count' => (int)($row['range_orders_count'] ?? 0),
+                'range_units_sold' => (int)($row['range_units_sold'] ?? 0),
+                'range_gross_revenue' => round((float)($row['range_gross_revenue'] ?? 0), 2),
+                'range_net_revenue' => round((float)($row['range_net_revenue'] ?? 0), 2),
+                'range_vat_amount' => round((float)($row['range_vat_amount'] ?? 0), 2),
+                'range_shipping_amount' => round((float)($row['range_shipping_amount'] ?? 0), 2),
+                'range_cost' => round($rangeCost, 2),
+                'range_profit' => round($rangeProfit, 2),
+                'range_margin' => round($rangeMargin, 1),
                 'historical_orders_count' => (int)($row['historical_orders_count'] ?? 0),
                 'historical_units_sold' => (int)($row['historical_units_sold'] ?? 0),
                 'historical_gross_revenue' => round((float)($row['historical_gross_revenue'] ?? 0), 2),
@@ -1618,6 +2284,17 @@ class OrderRepository {
             return strcmp((string)$a['product_name'], (string)$b['product_name']);
         });
 
+        $rangeRanking = $normalized;
+        usort($rangeRanking, static function ($a, $b) {
+            if ($a['range_units_sold'] !== $b['range_units_sold']) {
+                return $b['range_units_sold'] <=> $a['range_units_sold'];
+            }
+            if ($a['range_net_revenue'] !== $b['range_net_revenue']) {
+                return $b['range_net_revenue'] <=> $a['range_net_revenue'];
+            }
+            return strcmp((string)$a['product_name'], (string)$b['product_name']);
+        });
+
         $historicalRanking = $normalized;
         usort($historicalRanking, static function ($a, $b) {
             if ($a['historical_units_sold'] !== $b['historical_units_sold']) {
@@ -1631,20 +2308,27 @@ class OrderRepository {
 
         $monthUnitsTotal = 0;
         $monthNetTotal = 0.0;
+        $rangeUnitsTotal = 0;
+        $rangeNetTotal = 0.0;
         $historicalUnitsTotal = 0;
         $historicalNetTotal = 0.0;
         foreach ($normalized as $item) {
             $monthUnitsTotal += (int)$item['month_units_sold'];
             $monthNetTotal += (float)$item['month_net_revenue'];
+            $rangeUnitsTotal += (int)$item['range_units_sold'];
+            $rangeNetTotal += (float)$item['range_net_revenue'];
             $historicalUnitsTotal += (int)$item['historical_units_sold'];
             $historicalNetTotal += (float)$item['historical_net_revenue'];
         }
 
         $monthlyNet = (float)($monthlySales['net'] ?? 0);
+        $rangeNet = (float)($rangeSales['net'] ?? 0);
         $historicalNet = (float)($historicalSales['net'] ?? 0);
         $monthlyProfit = $monthlyNet - $monthlyCost;
+        $rangeProfit = $rangeNet - $rangeCost;
         $historicalProfit = $historicalNet - $historicalCost;
         $monthlyMargin = $monthlyNet > 0 ? ($monthlyProfit / $monthlyNet) * 100 : 0;
+        $rangeMargin = $rangeNet > 0 ? ($rangeProfit / $rangeNet) * 100 : 0;
         $historicalMargin = $historicalNet > 0 ? ($historicalProfit / $historicalNet) * 100 : 0;
 
         return [
@@ -1655,7 +2339,11 @@ class OrderRepository {
             'selectedMonth' => $monthKey,
             'historicalPeriod' => [
                 'start' => isset($periodRow['historical_start']) && $periodRow['historical_start'] !== null ? (string)$periodRow['historical_start'] : null,
-                'end' => isset($periodRow['historical_end']) && $periodRow['historical_end'] !== null ? (string)$periodRow['historical_end'] : date('Y-m-d'),
+                'end' => isset($periodRow['historical_end']) && $periodRow['historical_end'] !== null ? (string)$periodRow['historical_end'] : (new \DateTimeImmutable('now', new \DateTimeZone('America/Guayaquil')))->format('Y-m-d'),
+            ],
+            'rangePeriod' => [
+                'start' => $rangeStart,
+                'end' => $rangeEnd,
             ],
             'monthlyTotals' => [
                 'units_sold' => $monthUnitsTotal,
@@ -1670,6 +2358,20 @@ class OrderRepository {
                 'cost' => round($monthlyCost, 2),
                 'profit' => round($monthlyProfit, 2),
                 'margin' => round($monthlyMargin, 1),
+            ],
+            'rangeTotals' => [
+                'units_sold' => $rangeUnitsTotal,
+                'net_revenue' => round($rangeNetTotal, 2),
+            ],
+            'rangeFinancial' => [
+                'orders_count' => (int)($rangeSales['orders_count'] ?? 0),
+                'gross' => round((float)($rangeSales['gross'] ?? 0), 2),
+                'net' => round($rangeNet, 2),
+                'vat' => round((float)($rangeSales['vat'] ?? 0), 2),
+                'shipping' => round((float)($rangeSales['shipping'] ?? 0), 2),
+                'cost' => round($rangeCost, 2),
+                'profit' => round($rangeProfit, 2),
+                'margin' => round($rangeMargin, 1),
             ],
             'historicalTotals' => [
                 'units_sold' => $historicalUnitsTotal,
@@ -1686,6 +2388,7 @@ class OrderRepository {
                 'margin' => round($historicalMargin, 1),
             ],
             'monthlyRanking' => $monthlyRanking,
+            'rangeRanking' => $rangeRanking,
             'historicalRanking' => $historicalRanking,
         ];
     }
@@ -1724,8 +2427,12 @@ class OrderRepository {
         $realizedStatus = $this->realizedSalesCondition('o');
         $stmtCurrent = $this->db->prepare("
             SELECT EXTRACT(DAY FROM d) as day, COALESCE(SUM($netExpr), 0) as total
-            FROM generate_series(DATE_TRUNC('month', NOW()), CURRENT_DATE, '1 day') d
-            LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d)
+            FROM generate_series(
+                DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Guayaquil')::date),
+                (NOW() AT TIME ZONE 'America/Guayaquil')::date,
+                '1 day'
+            ) d
+            LEFT JOIN \"Order\" o ON (o.created_at AT TIME ZONE 'America/Guayaquil')::date = d::date
                 AND $realizedStatus
                 AND o.tenant_id = :tenant_id
             GROUP BY day ORDER BY day ASC
@@ -1734,13 +2441,20 @@ class OrderRepository {
         $currentDays = $stmtCurrent->fetchAll();
 
         $stmtPrevious = $this->db->prepare("
+            WITH bounds AS (
+                SELECT
+                    (NOW() AT TIME ZONE 'America/Guayaquil')::date AS today,
+                    DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Guayaquil')::date)::date AS month_start,
+                    (DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Guayaquil')::date) - INTERVAL '1 month')::date AS previous_month_start
+            )
             SELECT EXTRACT(DAY FROM d) as day, COALESCE(SUM($netExpr), 0) as total
-            FROM generate_series(
-                DATE_TRUNC('month', NOW() - INTERVAL '1 month'),
-                DATE_TRUNC('month', NOW() - INTERVAL '1 month') + (CURRENT_DATE - DATE_TRUNC('month', NOW())),
+            FROM bounds,
+            generate_series(
+                bounds.previous_month_start,
+                bounds.previous_month_start + ((bounds.today - bounds.month_start) * INTERVAL '1 day'),
                 '1 day'
             ) d
-            LEFT JOIN \"Order\" o ON DATE(o.created_at) = DATE(d)
+            LEFT JOIN \"Order\" o ON (o.created_at AT TIME ZONE 'America/Guayaquil')::date = d::date
                 AND $realizedStatus
                 AND o.tenant_id = :tenant_id
             GROUP BY day ORDER BY day ASC
@@ -1750,16 +2464,24 @@ class OrderRepository {
 
         $itemNetExpr = $this->orderItemNetTotalExpression('oi', 'o');
         $catGrowthStmt = $this->db->prepare("
-            WITH this_month AS (
+            WITH bounds AS (
+                SELECT
+                    (NOW() AT TIME ZONE 'America/Guayaquil')::date AS today,
+                    DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Guayaquil')::date)::date AS month_start,
+                    (DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Guayaquil')::date) - INTERVAL '1 month')::date AS previous_month_start
+            ),
+            this_month AS (
                 SELECT
                     COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') as category,
                     SUM($itemNetExpr) as current_sales
                 FROM \"OrderItem\" oi
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
                 JOIN \"Order\" o ON oi.order_id = o.id
+                CROSS JOIN bounds
                 WHERE $realizedStatus
                   AND o.tenant_id = :tenant_id
-                  AND o.created_at >= DATE_TRUNC('month', NOW())
+                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= bounds.month_start
+                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date <= bounds.today
                 GROUP BY COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría')
             ),
             last_month AS (
@@ -1769,11 +2491,12 @@ class OrderRepository {
                 FROM \"OrderItem\" oi
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
                 JOIN \"Order\" o ON oi.order_id = o.id
+                CROSS JOIN bounds
                 WHERE $realizedStatus
                   AND o.tenant_id = :tenant_id
-                  AND o.created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
-                  AND o.created_at < DATE_TRUNC('month', NOW() - INTERVAL '1 month')
-                    + ((CURRENT_DATE - DATE_TRUNC('month', NOW())::date + 1) * INTERVAL '1 day')
+                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= bounds.previous_month_start
+                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < bounds.previous_month_start
+                    + ((bounds.today - bounds.month_start + 1) * INTERVAL '1 day')
                 GROUP BY COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría')
             )
             SELECT
@@ -1844,18 +2567,26 @@ class OrderRepository {
         $paidExpenses = (float)($closedTotals['profit']['paid_expenses'] ?? 0) + (float)($expenseSummary['paid'] ?? 0);
         $pendingExpenses = (float)($closedTotals['profit']['pending_expenses'] ?? 0) + (float)($expenseSummary['pending'] ?? 0);
         $overdueExpenses = (float)($closedTotals['profit']['overdue_expenses'] ?? 0) + (float)($expenseSummary['overdue'] ?? 0);
-        $committedExpenses = $paidExpenses + $pendingExpenses + $overdueExpenses;
+        $periodExpenses = (float)($closedTotals['profit']['period_expenses'] ?? 0);
+        if ($periodExpenses <= 0) {
+            $periodExpenses = (float)($closedTotals['profit']['committed_expenses'] ?? 0);
+        }
+        $periodExpenses += (float)($expenseSummary['period_expenses'] ?? $expenseSummary['committed_expenses'] ?? ($expenseSummary['paid'] ?? 0) + ($expenseSummary['pending'] ?? 0) + ($expenseSummary['overdue'] ?? 0));
+        $committedExpenses = $periodExpenses;
         $financialAdjustments = (float)($closedTotals['profit']['financial_adjustments'] ?? 0) + (float)($financialPeriods->adjustmentSummary(null, true)['total'] ?? 0);
         $netCashProfit = $grossProfit - $paidExpenses - $financialAdjustments;
-        $netCommittedProfit = $grossProfit - $committedExpenses - $financialAdjustments;
+        $netPeriodProfit = $grossProfit - $periodExpenses - $financialAdjustments;
+        $netCommittedProfit = $netPeriodProfit;
         $netCashMargin = $revenue > 0 ? ($netCashProfit / $revenue) * 100 : 0;
+        $netPeriodMargin = $revenue > 0 ? ($netPeriodProfit / $revenue) * 100 : 0;
         $netCommittedMargin = $revenue > 0 ? ($netCommittedProfit / $revenue) * 100 : 0;
 
         return [
             'revenue' => round($revenue, 2),
             'cost' => round($cost, 2),
             'shipping_collected' => round($shippingCollected, 2),
-            'operating_expenses' => round($paidExpenses, 2),
+            'operating_expenses' => round($periodExpenses, 2),
+            'period_expenses' => round($periodExpenses, 2),
             'paid_expenses' => round($paidExpenses, 2),
             'pending_expenses' => round($pendingExpenses, 2),
             'overdue_expenses' => round($overdueExpenses, 2),
@@ -1865,10 +2596,12 @@ class OrderRepository {
             'gross_margin' => round($grossMargin, 1),
             'net_cash_profit' => round($netCashProfit, 2),
             'net_cash_margin' => round($netCashMargin, 1),
+            'net_period_profit' => round($netPeriodProfit, 2),
+            'net_period_margin' => round($netPeriodMargin, 1),
             'net_committed_profit' => round($netCommittedProfit, 2),
             'net_committed_margin' => round($netCommittedMargin, 1),
-            'net_profit' => round($netCashProfit, 2),
-            'net_margin' => round($netCashMargin, 1),
+            'net_profit' => round($netPeriodProfit, 2),
+            'net_margin' => round($netPeriodMargin, 1),
             'expense_source' => 'business_expenses',
             // Backwards-compatible names used by older panel widgets.
             'shipping_cost' => 0,

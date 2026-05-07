@@ -114,6 +114,16 @@ class BusinessExpenseRepository {
         return $fallback ?: date('Y-m-d');
     }
 
+    private function normalizeFilters(array $filters = []): array {
+        $normalized = $filters;
+        $period = trim((string)($normalized['period'] ?? ''));
+        if ($period !== '' && preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
+            $normalized['from'] = $period . '-01';
+            $normalized['to'] = date('Y-m-t', strtotime($normalized['from']));
+        }
+        return $normalized;
+    }
+
     private function normalizeStatus(string $status): string {
         $value = strtolower(trim($status));
         return in_array($value, $this->statuses, true) ? $value : 'pending';
@@ -164,6 +174,7 @@ class BusinessExpenseRepository {
     }
 
     public function list(array $filters = []): array {
+        $filters = $this->normalizeFilters($filters);
         $this->generateDueRecurringInstances();
         $this->refreshOverdue();
 
@@ -364,9 +375,18 @@ class BusinessExpenseRepository {
     }
 
     public function summary(array $options = []): array {
+        $options = $this->normalizeFilters($options);
         $this->generateDueRecurringInstances();
         $this->refreshOverdue();
         $where = ['tenant_id = :tenant_id', 'status <> \'cancelled\''];
+        $params = ['tenant_id' => $this->getTenantId()];
+        foreach (['status', 'category', 'type'] as $field) {
+            $value = trim((string)($options[$field] ?? ''));
+            if ($value !== '' && strtolower($value) !== 'all') {
+                $where[] = $field . ' = :' . $field;
+                $params[$field] = $value;
+            }
+        }
         if (!empty($options['exclude_closed_periods'])) {
             $where[] = 'NOT EXISTS (
                 SELECT 1
@@ -376,30 +396,51 @@ class BusinessExpenseRepository {
                   AND fp.status = \'closed\'
             )';
         }
+        $fromDate = !empty($options['from']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$options['from'])
+            ? (string)$options['from']
+            : null;
+        $toDate = !empty($options['to']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$options['to'])
+            ? (string)$options['to']
+            : null;
+        $periodDateFilter = 'TRUE';
+        $paidDateFilter = 'TRUE';
+        if ($fromDate !== null) {
+            $periodDateFilter .= ' AND expense_date >= :from_date';
+            $paidDateFilter .= ' AND COALESCE((paid_at AT TIME ZONE \'America/Guayaquil\')::date, expense_date) >= :from_date';
+            $params['from_date'] = $fromDate;
+        }
+        if ($toDate !== null) {
+            $periodDateFilter .= ' AND expense_date <= :to_date';
+            $paidDateFilter .= ' AND COALESCE((paid_at AT TIME ZONE \'America/Guayaquil\')::date, expense_date) <= :to_date';
+            $params['to_date'] = $toDate;
+        }
         $stmt = $this->db->prepare('
             SELECT
-                SUM(total) FILTER (WHERE status = \'paid\') AS paid,
-                SUM(total) FILTER (WHERE status = \'pending\') AS pending,
-                SUM(total) FILTER (WHERE status = \'overdue\') AS overdue,
-                SUM(total) FILTER (WHERE status IN (\'pending\', \'overdue\')) AS committed,
-                COUNT(*) FILTER (WHERE status = \'paid\') AS paid_count,
-                COUNT(*) FILTER (WHERE status = \'pending\') AS pending_count,
-                COUNT(*) FILTER (WHERE status = \'overdue\') AS overdue_count
+                SUM(total) FILTER (WHERE status = \'paid\' AND ' . $paidDateFilter . ') AS paid,
+                SUM(total) FILTER (WHERE status = \'pending\' AND ' . $periodDateFilter . ') AS pending,
+                SUM(total) FILTER (WHERE status = \'overdue\' AND ' . $periodDateFilter . ') AS overdue,
+                SUM(total) FILTER (WHERE ' . $periodDateFilter . ') AS period_expenses,
+                SUM(total) FILTER (WHERE status IN (\'pending\', \'overdue\') AND ' . $periodDateFilter . ') AS committed,
+                COUNT(*) FILTER (WHERE status = \'paid\' AND ' . $paidDateFilter . ') AS paid_count,
+                COUNT(*) FILTER (WHERE status = \'pending\' AND ' . $periodDateFilter . ') AS pending_count,
+                COUNT(*) FILTER (WHERE status = \'overdue\' AND ' . $periodDateFilter . ') AS overdue_count
             FROM "BusinessExpense"
             WHERE ' . implode(' AND ', $where) . '
         ');
-        $stmt->execute(['tenant_id' => $this->getTenantId()]);
+        $stmt->execute($params);
         $row = $stmt->fetch() ?: [];
         $paid = round((float)($row['paid'] ?? 0), 2);
         $pending = round((float)($row['pending'] ?? 0), 2);
         $overdue = round((float)($row['overdue'] ?? 0), 2);
         $committed = round((float)($row['committed'] ?? 0), 2);
+        $periodExpenses = round((float)($row['period_expenses'] ?? ($paid + $committed)), 2);
         return [
             'paid' => $paid,
             'pending' => $pending,
             'overdue' => $overdue,
             'committed' => $committed,
             'cash_expenses' => $paid,
+            'period_expenses' => $periodExpenses,
             'committed_expenses' => round($paid + $committed, 2),
             'paid_count' => (int)($row['paid_count'] ?? 0),
             'pending_count' => (int)($row['pending_count'] ?? 0),

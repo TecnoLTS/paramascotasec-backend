@@ -33,6 +33,8 @@ class BusinessIntelligenceService {
         $salesSummary = $this->orderRepo->getSalesSummary();
         $traceability = $this->orderRepo->getKpiTraceability();
         $productSalesRanking = $this->orderRepo->getProductSalesRanking($selectedMonth);
+        $periodReport = $this->orderRepo->getReportPeriodSummary($selectedMonth);
+        $financialTrends = $this->orderRepo->getFinancialTrends();
 
         return [
             'tax' => [
@@ -66,8 +68,10 @@ class BusinessIntelligenceService {
                 'inventoryDeepDive' => $inventoryDeepDive,
                 'aovDeepDive' => $aovDeepDive,
                 'salesSummary' => $salesSummary,
+                'financialTrends' => $financialTrends,
                 'traceability' => $traceability,
-                'productSalesRanking' => $productSalesRanking
+                'productSalesRanking' => $productSalesRanking,
+                'report' => $periodReport
             ],
             'strategicAlerts' => $this->generateAlerts($inventoryDeepDive, $salesProgress, $productAnalysis, $ordersByStatus)
         ];
@@ -80,9 +84,12 @@ class BusinessIntelligenceService {
         $netCommittedProfit = (float)($raw['net_committed_profit'] ?? $netProfit);
         $cost = (float)($raw['cost'] ?? 0);
         $paidExpenses = (float)($raw['paid_expenses'] ?? $raw['operating_expenses'] ?? 0);
-        $committedExpenses = (float)($raw['committed_expenses'] ?? $paidExpenses);
+        $periodExpenses = (float)($raw['period_expenses'] ?? $raw['operating_expenses'] ?? $raw['committed_expenses'] ?? $paidExpenses);
+        $committedExpenses = (float)($raw['committed_expenses'] ?? $periodExpenses);
         $raw['roi'] = $cost > 0 ? round(($grossProfit / $cost) * 100, 1) : 0;
-        $netInvestmentBase = $cost + $paidExpenses;
+        $cashInvestmentBase = $cost + $paidExpenses;
+        $raw['cash_net_roi'] = $cashInvestmentBase > 0 ? round(((float)($raw['net_cash_profit'] ?? $netProfit) / $cashInvestmentBase) * 100, 1) : 0;
+        $netInvestmentBase = $cost + $periodExpenses;
         $raw['net_roi'] = $netInvestmentBase > 0 ? round(($netProfit / $netInvestmentBase) * 100, 1) : 0;
         $committedInvestmentBase = $cost + $committedExpenses;
         $raw['committed_net_roi'] = $committedInvestmentBase > 0 ? round(($netCommittedProfit / $committedInvestmentBase) * 100, 1) : 0;
