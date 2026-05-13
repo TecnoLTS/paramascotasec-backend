@@ -4,6 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+read_env_value() {
+  local file="$1"
+  local key="$2"
+
+  awk -F= -v target="${key}" '
+    $1 == target {
+      sub(/^[[:space:]]+/, "", $2)
+      sub(/[[:space:]]+$/, "", $2)
+      print $2
+      exit
+    }
+  ' "${file}"
+}
+
 ensure_docker_ready() {
   if ! command -v docker >/dev/null 2>&1; then
     echo "docker no esta instalado"
@@ -64,20 +78,31 @@ resolve_env_file() {
       fi
     fi
 
+    local backend_bind_ip backend_port backend_public_scheme backend_public_host app_url
+    backend_bind_ip="${BACKEND_BIND_IP:-$(read_env_value "${env_file}" "BACKEND_BIND_IP")}"
+    backend_bind_ip="${backend_bind_ip:-0.0.0.0}"
+    backend_port="${BACKEND_PORT:-$(read_env_value "${env_file}" "BACKEND_PORT")}"
+    backend_port="${backend_port:-8080}"
+    backend_public_scheme="${BACKEND_PUBLIC_SCHEME:-$(read_env_value "${env_file}" "BACKEND_PUBLIC_SCHEME")}"
+    backend_public_scheme="${backend_public_scheme:-http}"
+    backend_public_host="${BACKEND_PUBLIC_HOST:-$(read_env_value "${env_file}" "BACKEND_PUBLIC_HOST")}"
+    backend_public_host="${backend_public_host:-$(detect_development_public_host)}"
+    app_url="${backend_public_scheme}://${backend_public_host}"
+    if [[ "${backend_port}" != "80" && "${backend_port}" != "443" ]]; then
+      app_url="${app_url}:${backend_port}"
+    fi
+
     upsert_env_value "${env_file}" "APP_ENV" "development"
-    upsert_env_value "${env_file}" "APP_URL" "http://localhost:8080"
+    upsert_env_value "${env_file}" "BACKEND_BIND_IP" "${backend_bind_ip}"
+    upsert_env_value "${env_file}" "BACKEND_PORT" "${backend_port}"
+    upsert_env_value "${env_file}" "BACKEND_PUBLIC_SCHEME" "${backend_public_scheme}"
+    upsert_env_value "${env_file}" "BACKEND_PUBLIC_HOST" "${backend_public_host}"
+    upsert_env_value "${env_file}" "APP_URL" "${app_url}"
     upsert_env_value "${env_file}" "ADMIN_IP_MODE" "off"
     upsert_env_value "${env_file}" "ADMIN_IP_ALLOWLIST" ""
     upsert_env_value "${env_file}" "FACTURADOR_API_INVOICES_PATH" "/api/test/v1/invoices"
 
     printf '%s\n' "${env_file}"
-    return 0
-  fi
-
-  if [[ "${mode}" == "production" && -f "${APP_DIR}/.env.production" ]]; then
-    upsert_env_value "${APP_DIR}/.env.production" "APP_ENV" "production"
-    upsert_env_value "${APP_DIR}/.env.production" "FACTURADOR_API_INVOICES_PATH" "/api/production/v1/invoices"
-    printf '%s\n' "${APP_DIR}/.env.production"
     return 0
   fi
 
@@ -97,8 +122,26 @@ resolve_env_file() {
     return 0
   fi
 
-  echo "No se encontro .env, .env.development, .env.production ni .env.example" >&2
+  echo "No se encontro .env, .env.development ni .env.example" >&2
   exit 1
+}
+
+detect_development_public_host() {
+  local candidate
+
+  if command -v ip >/dev/null 2>&1; then
+    candidate="$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')"
+  fi
+
+  if [[ -z "${candidate:-}" ]]; then
+    candidate="$(hostname -I 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i != "127.0.0.1" && $i !~ /^172\.(1[6-9]|2[0-9]|3[0-1])\./) { print $i; exit }}')"
+  fi
+
+  if [[ -z "${candidate:-}" ]]; then
+    candidate="localhost"
+  fi
+
+  printf '%s\n' "${candidate}"
 }
 
 compose_cmd() {
@@ -152,7 +195,7 @@ wait_for_container_state() {
 deploy_backend() {
   local mode="${1:-development}"
   local env_file
-  local run_db_setup="${RUN_DB_SETUP:-${RUN_DB_BOOTSTRAP:-1}}"
+  local run_db_setup="${RUN_DB_SETUP:-${RUN_DB_BOOTSTRAP:-0}}"
 
   ensure_docker_ready
   env_file="$(resolve_env_file "${mode}")"
