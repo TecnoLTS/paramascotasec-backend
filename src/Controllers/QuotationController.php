@@ -328,7 +328,11 @@ class QuotationController {
                 $discountCode,
                 'quote',
                 null,
-                null
+                null,
+                [
+                    'shipping_address' => is_array($data['shipping_address'] ?? null) ? $data['shipping_address'] : null,
+                    'allow_missing_shipping_location' => true,
+                ]
             );
 
             $createdAt = new \DateTimeImmutable('now');

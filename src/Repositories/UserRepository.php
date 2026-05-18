@@ -756,6 +756,13 @@ class UserRepository {
             $source = [];
         }
 
+        $normalizeNumeric = static function ($value) {
+            if ($value === null || $value === '') {
+                return null;
+            }
+            return is_numeric($value) ? (float)$value : null;
+        };
+
         return [
             'firstName' => trim((string)($source['firstName'] ?? $source['first_name'] ?? ($fallback['firstName'] ?? ''))),
             'lastName' => trim((string)($source['lastName'] ?? $source['last_name'] ?? ($fallback['lastName'] ?? ''))),
@@ -767,6 +774,20 @@ class UserRepository {
             'zip' => trim((string)($source['zip'] ?? $source['postalCode'] ?? $source['postal_code'] ?? ($fallback['zip'] ?? ''))),
             'phone' => trim((string)($source['phone'] ?? $source['mobile'] ?? ($fallback['phone'] ?? ''))),
             'email' => trim((string)($source['email'] ?? ($fallback['email'] ?? ''))),
+            'documentType' => trim((string)($source['documentType'] ?? $source['document_type'] ?? ($fallback['documentType'] ?? ''))),
+            'documentNumber' => trim((string)($source['documentNumber'] ?? $source['document_number'] ?? ($fallback['documentNumber'] ?? ''))),
+            'latitude' => $normalizeNumeric($source['latitude'] ?? $source['lat'] ?? ($fallback['latitude'] ?? null)),
+            'longitude' => $normalizeNumeric($source['longitude'] ?? $source['lng'] ?? ($fallback['longitude'] ?? null)),
+            'formattedAddress' => trim((string)($source['formattedAddress'] ?? $source['formatted_address'] ?? ($fallback['formattedAddress'] ?? ''))),
+            'placeId' => trim((string)($source['placeId'] ?? $source['place_id'] ?? ($fallback['placeId'] ?? ''))),
+            'distanceKm' => $normalizeNumeric($source['distanceKm'] ?? $source['distance_km'] ?? ($fallback['distanceKm'] ?? null)),
+            'shippingZone' => trim((string)($source['shippingZone'] ?? $source['shipping_zone'] ?? ($fallback['shippingZone'] ?? ''))),
+            'shippingRule' => trim((string)($source['shippingRule'] ?? $source['shipping_rule'] ?? ($fallback['shippingRule'] ?? ''))),
+            'isFreeShipping' => filter_var($source['isFreeShipping'] ?? $source['is_free_shipping'] ?? ($fallback['isFreeShipping'] ?? false), FILTER_VALIDATE_BOOLEAN),
+            'storeAddress' => trim((string)($source['storeAddress'] ?? $source['store_address'] ?? ($fallback['storeAddress'] ?? ''))),
+            'storeLatitude' => $normalizeNumeric($source['storeLatitude'] ?? $source['store_latitude'] ?? ($fallback['storeLatitude'] ?? null)),
+            'storeLongitude' => $normalizeNumeric($source['storeLongitude'] ?? $source['store_longitude'] ?? ($fallback['storeLongitude'] ?? null)),
+            'freeShippingRadiusKm' => $normalizeNumeric($source['freeShippingRadiusKm'] ?? $source['free_shipping_radius_km'] ?? ($fallback['freeShippingRadiusKm'] ?? null)),
         ];
     }
 

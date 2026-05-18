@@ -906,7 +906,10 @@ class OrderController {
                 $discountCode,
                 'quote',
                 null,
-                null
+                null,
+                [
+                    'shipping_address' => is_array($data['shipping_address'] ?? null) ? $data['shipping_address'] : null,
+                ]
             );
             Response::json($quote);
         } catch (\Exception $e) {

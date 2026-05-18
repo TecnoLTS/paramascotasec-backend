@@ -8,10 +8,18 @@ use App\Repositories\FinancialPeriodRepository;
 use PDO;
 
 class OrderRepository {
+    private const DEFAULT_SHIPPING_STORE_ADDRESS = 'Av. de la Prensa y Juan Paz y Miño, 170104 Quito';
+    private const DEFAULT_SHIPPING_STORE_LATITUDE = -0.148306;
+    private const DEFAULT_SHIPPING_STORE_LONGITUDE = -78.490870;
+    private const PREVIOUS_SHIPPING_STORE_LATITUDE = -0.12231;
+    private const PREVIOUS_SHIPPING_STORE_LONGITUDE = -78.49375;
+    private const LEGACY_SHIPPING_STORE_LATITUDE = -0.117371;
+    private const LEGACY_SHIPPING_STORE_LONGITUDE = -78.494256;
+
     private $db;
     private $discountRepository;
     private $taxRateCache = null;
-    private $shippingRateCache = null;
+    private $shippingConfigCache = null;
     private $shippingTaxRateCache = null;
 
     public function __construct() {
@@ -384,6 +392,7 @@ class OrderRepository {
         if (!is_array($items) || count($items) === 0) {
             throw new \Exception('Items required');
         }
+        $deliveryMethod = strtolower(trim((string)$deliveryMethod));
         $bypassStockCheck = (bool)($options['bypass_stock_check'] ?? false);
         $bypassLotAllocation = (bool)($options['bypass_lot_allocation'] ?? false);
         $allowPriceOverrides = (bool)($options['allow_price_overrides'] ?? false);
@@ -541,7 +550,12 @@ class OrderRepository {
         }
         unset($item);
 
-        $shippingBase = $this->getShippingRate($deliveryMethod);
+        $shippingPricing = $this->resolveShippingPricing(
+            $deliveryMethod,
+            is_array($options['shipping_address'] ?? null) ? $options['shipping_address'] : null,
+            (bool)($options['allow_missing_shipping_location'] ?? false)
+        );
+        $shippingBase = $shippingPricing['shipping_base'];
         $shippingTaxRate = $this->getShippingTaxRate();
         $shippingTaxAmount = $shippingTaxRate > 0 ? ($shippingBase * ($shippingTaxRate / 100)) : 0;
         $shippingTotal = $shippingBase + $shippingTaxAmount;
@@ -558,6 +572,10 @@ class OrderRepository {
             'shipping_base' => round($shippingBase, 2),
             'shipping_tax_rate' => round($shippingTaxRate, 2),
             'shipping_tax_amount' => round($shippingTaxAmount, 2),
+            'distance_km' => $shippingPricing['distance_km'],
+            'shipping_rule' => $shippingPricing['shipping_rule'],
+            'is_free_shipping' => $shippingPricing['is_free_shipping'],
+            'store_address' => $shippingPricing['store_address'],
             'discount_code' => $discountResult['discount_code'] ?? null,
             'discount_total' => round($discountTotal, 2),
             'discounts_applied' => $discountResult['discounts_applied'] ?? [],
@@ -567,40 +585,244 @@ class OrderRepository {
         ];
     }
 
-    private function getShippingRate($deliveryMethod) {
-        if ($this->shippingRateCache === null) {
-            $settings = new \App\Repositories\SettingsRepository();
-            $delivery = $settings->get('shipping_delivery');
-            $pickup = $settings->get('shipping_pickup');
-            $deliveryValue = is_numeric($delivery) ? floatval($delivery) : 5.0;
-            $pickupValue = is_numeric($pickup) ? floatval($pickup) : 0.0;
-            if ($delivery === null) {
-                $settings->set('shipping_delivery', (string)$deliveryValue);
-            }
-            if ($pickup === null) {
-                $settings->set('shipping_pickup', (string)$pickupValue);
-            }
-            $this->shippingRateCache = [
-                'delivery' => $deliveryValue,
-                'pickup' => $pickupValue
-            ];
+    private function getShippingConfig(): array {
+        if ($this->shippingConfigCache !== null) {
+            return $this->shippingConfigCache;
         }
+
+        $settings = new \App\Repositories\SettingsRepository();
+        $delivery = $settings->get('shipping_delivery');
+        $pickup = $settings->get('shipping_pickup');
+        $taxRate = $settings->get('shipping_tax_rate');
+        $storeAddress = $settings->get('shipping_store_address');
+        $storeLatitude = $settings->get('shipping_store_latitude');
+        $storeLongitude = $settings->get('shipping_store_longitude');
+        $freeRadius = $settings->get('free_shipping_radius_km');
+        $kmFlatRateLimit = $settings->get('shipping_km_flat_rate_limit');
+        $perKmRate = $settings->get('shipping_per_km_rate');
+
+        $config = [
+            'delivery' => is_numeric($delivery) ? floatval($delivery) : 5.0,
+            'pickup' => is_numeric($pickup) ? floatval($pickup) : 0.0,
+            'tax_rate' => is_numeric($taxRate) ? floatval($taxRate) : $this->getTaxRate(),
+            'store_address' => $this->normalizeShippingStoreAddress(is_string($storeAddress) ? $storeAddress : null),
+            'store_latitude' => is_numeric($storeLatitude) ? floatval($storeLatitude) : self::DEFAULT_SHIPPING_STORE_LATITUDE,
+            'store_longitude' => is_numeric($storeLongitude) ? floatval($storeLongitude) : self::DEFAULT_SHIPPING_STORE_LONGITUDE,
+            'free_shipping_radius_km' => is_numeric($freeRadius) ? max(0, floatval($freeRadius)) : 5.0,
+            'shipping_km_flat_rate_limit' => is_numeric($kmFlatRateLimit) ? max(0, floatval($kmFlatRateLimit)) : 7.0,
+            'shipping_per_km_rate' => is_numeric($perKmRate) ? max(0, floatval($perKmRate)) : 1.0,
+        ];
+
+        $migratedLegacyStore = $this->isLegacyShippingStoreLocation(
+            (string)$config['store_address'],
+            (float)$config['store_latitude'],
+            (float)$config['store_longitude'],
+        );
+        if ($migratedLegacyStore) {
+            $config['store_address'] = self::DEFAULT_SHIPPING_STORE_ADDRESS;
+            $config['store_latitude'] = self::DEFAULT_SHIPPING_STORE_LATITUDE;
+            $config['store_longitude'] = self::DEFAULT_SHIPPING_STORE_LONGITUDE;
+        }
+
+        if ($delivery === null) {
+            $settings->set('shipping_delivery', (string)$config['delivery']);
+        }
+        if ($pickup === null) {
+            $settings->set('shipping_pickup', (string)$config['pickup']);
+        }
+        if ($taxRate === null) {
+            $settings->set('shipping_tax_rate', (string)$config['tax_rate']);
+        }
+        if ($storeAddress === null || $migratedLegacyStore) {
+            $settings->set('shipping_store_address', $config['store_address']);
+        }
+        if ($storeLatitude === null || $migratedLegacyStore) {
+            $settings->set('shipping_store_latitude', (string)$config['store_latitude']);
+        }
+        if ($storeLongitude === null || $migratedLegacyStore) {
+            $settings->set('shipping_store_longitude', (string)$config['store_longitude']);
+        }
+        if ($freeRadius === null) {
+            $settings->set('free_shipping_radius_km', (string)$config['free_shipping_radius_km']);
+        }
+        if ($kmFlatRateLimit === null) {
+            $settings->set('shipping_km_flat_rate_limit', (string)$config['shipping_km_flat_rate_limit']);
+        }
+        if ($perKmRate === null) {
+            $settings->set('shipping_per_km_rate', (string)$config['shipping_per_km_rate']);
+        }
+
+        $this->shippingConfigCache = $config;
+        return $this->shippingConfigCache;
+    }
+
+    private function getShippingRate($deliveryMethod) {
+        $config = $this->getShippingConfig();
         $method = $deliveryMethod === 'pickup' ? 'pickup' : 'delivery';
-        return (float)($this->shippingRateCache[$method] ?? 0);
+        return (float)($config[$method] ?? 0);
+    }
+
+    private function normalizeShippingStoreAddress(?string $value): string {
+        $address = trim((string)($value ?? ''));
+        return $address !== '' ? $address : self::DEFAULT_SHIPPING_STORE_ADDRESS;
+    }
+
+    private function normalizeShippingStoreKey(?string $value): string {
+        $normalized = function_exists('mb_strtolower')
+            ? mb_strtolower(trim((string)($value ?? '')), 'UTF-8')
+            : strtolower(trim((string)($value ?? '')));
+        $normalized = preg_replace('/[^a-z0-9]+/i', ' ', $normalized ?? '');
+        return trim((string)$normalized);
+    }
+
+    private function isLegacyShippingStoreLocation(string $address, float $latitude, float $longitude): bool {
+        $matchesLegacyPoint = (
+            abs($latitude - self::LEGACY_SHIPPING_STORE_LATITUDE) < 0.00001
+            && abs($longitude - self::LEGACY_SHIPPING_STORE_LONGITUDE) < 0.00001
+        ) || (
+            abs($latitude - self::PREVIOUS_SHIPPING_STORE_LATITUDE) < 0.00001
+            && abs($longitude - self::PREVIOUS_SHIPPING_STORE_LONGITUDE) < 0.00001
+        );
+        if (!$matchesLegacyPoint) {
+            return false;
+        }
+
+        $normalizedAddress = $this->normalizeShippingStoreKey($address);
+        $defaultAddress = $this->normalizeShippingStoreKey(self::DEFAULT_SHIPPING_STORE_ADDRESS);
+        return $normalizedAddress === '' || $normalizedAddress === $defaultAddress;
     }
 
     private function getShippingTaxRate() {
         if ($this->shippingTaxRateCache !== null) {
             return $this->shippingTaxRateCache;
         }
-        $settings = new \App\Repositories\SettingsRepository();
-        $value = $settings->get('shipping_tax_rate');
-        $rate = is_numeric($value) ? floatval($value) : $this->getTaxRate();
-        if ($value === null) {
-            $settings->set('shipping_tax_rate', (string)$rate);
-        }
+        $config = $this->getShippingConfig();
+        $rate = max(0, (float)($config['tax_rate'] ?? $this->getTaxRate()));
         $this->shippingTaxRateCache = $rate;
         return $rate;
+    }
+
+    private function normalizeCoordinate($value): ?float {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        return is_numeric($value) ? (float)$value : null;
+    }
+
+    private function normalizeCheckoutAddress(array $address): array {
+        $normalized = $address;
+        $normalized['country'] = $this->normalizeCountryName($address['country'] ?? null);
+        $normalized['street'] = trim((string)($address['street'] ?? $address['address'] ?? ''));
+        $normalized['city'] = trim((string)($address['city'] ?? ''));
+        $normalized['state'] = trim((string)($address['state'] ?? $address['province'] ?? ''));
+        $normalized['zip'] = trim((string)($address['zip'] ?? $address['postalCode'] ?? $address['postal_code'] ?? ''));
+        $normalized['formattedAddress'] = trim((string)($address['formattedAddress'] ?? $address['formatted_address'] ?? ''));
+        $normalized['placeId'] = trim((string)($address['placeId'] ?? $address['place_id'] ?? ''));
+        $normalized['latitude'] = $this->normalizeCoordinate($address['latitude'] ?? $address['lat'] ?? null);
+        $normalized['longitude'] = $this->normalizeCoordinate($address['longitude'] ?? $address['lng'] ?? null);
+        return $normalized;
+    }
+
+    private function calculateDistanceKm(float $startLatitude, float $startLongitude, float $endLatitude, float $endLongitude): float {
+        $earthRadiusKm = 6371.0;
+        $deltaLatitude = deg2rad($endLatitude - $startLatitude);
+        $deltaLongitude = deg2rad($endLongitude - $startLongitude);
+
+        $a = sin($deltaLatitude / 2) ** 2
+            + cos(deg2rad($startLatitude)) * cos(deg2rad($endLatitude)) * sin($deltaLongitude / 2) ** 2;
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+        return $earthRadiusKm * $c;
+    }
+
+    private function resolveShippingPricing(string $deliveryMethod, ?array $shippingAddress, bool $allowMissingLocation = false): array {
+        $config = $this->getShippingConfig();
+        $storeAddress = (string)$config['store_address'];
+        $storeLatitude = $this->normalizeCoordinate($config['store_latitude'] ?? null);
+        $storeLongitude = $this->normalizeCoordinate($config['store_longitude'] ?? null);
+        $freeRadiusKm = max(0, (float)($config['free_shipping_radius_km'] ?? 0));
+        $flatRateLimitKm = max(0, (float)($config['shipping_km_flat_rate_limit'] ?? 0));
+        $perKmRate = max(0, (float)($config['shipping_per_km_rate'] ?? 0));
+        $flatRate = (float)($config['delivery'] ?? 0);
+
+        if ($deliveryMethod === 'pickup') {
+            return [
+                'shipping_base' => (float)($config['pickup'] ?? 0),
+                'distance_km' => null,
+                'shipping_rule' => 'pickup',
+                'is_free_shipping' => (float)($config['pickup'] ?? 0) <= 0,
+                'store_address' => $storeAddress,
+            ];
+        }
+
+        if (
+            $storeLatitude === null || $storeLongitude === null
+            || $storeLatitude < -90 || $storeLatitude > 90
+            || $storeLongitude < -180 || $storeLongitude > 180
+        ) {
+            throw new \Exception('Configura la ubicación base del local antes de cotizar envíos a domicilio.');
+        }
+
+        $normalizedAddress = $this->normalizeCheckoutAddress($shippingAddress ?? []);
+        if (($normalizedAddress['country'] ?? 'Ecuador') !== 'Ecuador') {
+            throw new \Exception('Solo realizamos envíos dentro de Ecuador.');
+        }
+
+        $latitude = $this->normalizeCoordinate($normalizedAddress['latitude'] ?? null);
+        $longitude = $this->normalizeCoordinate($normalizedAddress['longitude'] ?? null);
+        if ($latitude === null || $longitude === null) {
+            if (!$allowMissingLocation) {
+                throw new \Exception('Selecciona tu ubicación exacta en el mapa para calcular el envío.');
+            }
+
+            return [
+                'shipping_base' => $flatRate,
+                'distance_km' => null,
+                'shipping_rule' => 'standard_delivery',
+                'is_free_shipping' => false,
+                'store_address' => $storeAddress,
+            ];
+        }
+        if ($latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180) {
+            throw new \Exception('La ubicación seleccionada en el mapa es inválida.');
+        }
+
+        $distanceKm = round($this->calculateDistanceKm($storeLatitude, $storeLongitude, $latitude, $longitude), 2);
+
+        if ($distanceKm <= $freeRadiusKm) {
+            $shippingBase = 0.0;
+            $shippingRule = 'free_radius';
+            $isFreeShipping = true;
+        } elseif ($distanceKm <= $flatRateLimitKm || $perKmRate <= 0) {
+            $shippingBase = $flatRate;
+            $shippingRule = 'km_flat_rate';
+            $isFreeShipping = false;
+        } else {
+            $extraKm = $distanceKm - $flatRateLimitKm;
+            $shippingBase = $flatRate + ($extraKm * $perKmRate);
+            $shippingRule = 'km_per_km_rate';
+            $isFreeShipping = false;
+        }
+
+        $normalizedAddress['distanceKm'] = $distanceKm;
+        $normalizedAddress['shippingZone'] = $shippingRule;
+        $normalizedAddress['shippingRule'] = $shippingRule;
+        $normalizedAddress['isFreeShipping'] = $isFreeShipping;
+        $normalizedAddress['storeAddress'] = $storeAddress;
+        $normalizedAddress['storeLatitude'] = $storeLatitude;
+        $normalizedAddress['storeLongitude'] = $storeLongitude;
+        $normalizedAddress['freeShippingRadiusKm'] = $freeRadiusKm;
+        $normalizedAddress['flatRateLimitKm'] = $flatRateLimitKm;
+        $normalizedAddress['perKmRate'] = $perKmRate;
+
+        return [
+            'shipping_base' => round($shippingBase, 2),
+            'distance_km' => $distanceKm,
+            'shipping_rule' => $shippingRule,
+            'is_free_shipping' => $isFreeShipping,
+            'store_address' => $storeAddress,
+            'shipping_address' => $normalizedAddress,
+        ];
     }
 
     private function getTaxRate() {
@@ -779,6 +1001,7 @@ class OrderRepository {
                 $shippingAddress = isset($data['shipping_address']) && is_array($data['shipping_address'])
                     ? $data['shipping_address']
                     : [];
+                $shippingAddress = $this->normalizeCheckoutAddress($shippingAddress);
                 $shippingCountry = $this->normalizeCountryName($shippingAddress['country'] ?? null);
                 if ($shippingCountry !== 'Ecuador') {
                     throw new \Exception('Solo realizamos envíos dentro de Ecuador.');
@@ -808,8 +1031,22 @@ class OrderRepository {
                     'bypass_stock_check' => $isHistoricalImport && $skipInventoryImpact,
                     'bypass_lot_allocation' => $isHistoricalImport && $skipInventoryImpact,
                     'allow_price_overrides' => $isHistoricalImport && filter_var($data['allow_historical_pricing'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                    'shipping_address' => is_array($data['shipping_address'] ?? null) ? $data['shipping_address'] : null,
+                    'allow_missing_shipping_location' => $channel === 'local_pos' || $isHistoricalImport,
                 ]
             );
+            if ($deliveryMethod === 'delivery' && isset($data['shipping_address']) && is_array($data['shipping_address'])) {
+                $data['shipping_address'] = array_merge($data['shipping_address'], [
+                    'distanceKm' => $quote['distance_km'] ?? null,
+                    'shippingZone' => $quote['shipping_rule'] ?? 'standard_delivery',
+                    'shippingRule' => $quote['shipping_rule'] ?? 'standard_delivery',
+                    'isFreeShipping' => (bool)($quote['is_free_shipping'] ?? false),
+                    'storeAddress' => $quote['store_address'] ?? null,
+                    'storeLatitude' => $this->getShippingConfig()['store_latitude'] ?? null,
+                    'storeLongitude' => $this->getShippingConfig()['store_longitude'] ?? null,
+                    'freeShippingRadiusKm' => $this->getShippingConfig()['free_shipping_radius_km'] ?? null,
+                ]);
+            }
             $orderStatus = strtolower(trim((string)($data['status'] ?? 'pending')));
             
             $stmt = $this->db->prepare('INSERT INTO "Order" ("id", "tenant_id", "user_id", "total", "status", "created_at", "shipping_address", "billing_address", "payment_method", "delivery_method", "payment_details", "items_subtotal", "vat_subtotal", "vat_rate", "vat_amount", "shipping", "shipping_base", "shipping_tax_rate", "shipping_tax_amount", "discount_code", "discount_total", "discount_snapshot", "order_notes") VALUES (:id, :tenant_id, :user_id, :total, :status, ' . $createdAtExpression . ', :shipping_address, :billing_address, :payment_method, :delivery_method, :payment_details, :items_subtotal, :vat_subtotal, :vat_rate, :vat_amount, :shipping, :shipping_base, :shipping_tax_rate, :shipping_tax_amount, :discount_code, :discount_total, :discount_snapshot, :order_notes)');

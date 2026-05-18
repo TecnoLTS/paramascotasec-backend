@@ -10,6 +10,14 @@ use App\Core\Response;
 use App\Core\Auth;
 
 class SettingsController {
+    private const DEFAULT_SHIPPING_STORE_ADDRESS = 'Av. de la Prensa y Juan Paz y Miño, 170104 Quito';
+    private const DEFAULT_SHIPPING_STORE_LATITUDE = -0.148306;
+    private const DEFAULT_SHIPPING_STORE_LONGITUDE = -78.490870;
+    private const PREVIOUS_SHIPPING_STORE_LATITUDE = -0.12231;
+    private const PREVIOUS_SHIPPING_STORE_LONGITUDE = -78.49375;
+    private const LEGACY_SHIPPING_STORE_LATITUDE = -0.117371;
+    private const LEGACY_SHIPPING_STORE_LONGITUDE = -78.494256;
+
     private function getDefaultProductReferenceData() {
         return [
             'categories' => [],
@@ -41,6 +49,36 @@ class SettingsController {
     private function getNumericSetting(SettingsRepository $settings, $key, $default) {
         $value = $settings->get($key);
         return is_numeric($value) ? floatval($value) : $default;
+    }
+
+    private function normalizeShippingStoreAddress(?string $value): string {
+        $address = trim((string)($value ?? ''));
+        return $address !== '' ? $address : self::DEFAULT_SHIPPING_STORE_ADDRESS;
+    }
+
+    private function normalizeShippingStoreKey(?string $value): string {
+        $normalized = function_exists('mb_strtolower')
+            ? mb_strtolower(trim((string)($value ?? '')), 'UTF-8')
+            : strtolower(trim((string)($value ?? '')));
+        $normalized = preg_replace('/[^a-z0-9]+/i', ' ', $normalized ?? '');
+        return trim((string)$normalized);
+    }
+
+    private function isLegacyShippingStoreLocation(string $address, float $latitude, float $longitude): bool {
+        $matchesLegacyPoint = (
+            abs($latitude - self::LEGACY_SHIPPING_STORE_LATITUDE) < 0.00001
+            && abs($longitude - self::LEGACY_SHIPPING_STORE_LONGITUDE) < 0.00001
+        ) || (
+            abs($latitude - self::PREVIOUS_SHIPPING_STORE_LATITUDE) < 0.00001
+            && abs($longitude - self::PREVIOUS_SHIPPING_STORE_LONGITUDE) < 0.00001
+        );
+        if (!$matchesLegacyPoint) {
+            return false;
+        }
+
+        $normalizedAddress = $this->normalizeShippingStoreKey($address);
+        $defaultAddress = $this->normalizeShippingStoreKey(self::DEFAULT_SHIPPING_STORE_ADDRESS);
+        return $normalizedAddress === '' || $normalizedAddress === $defaultAddress;
     }
 
     private function sanitizeReferenceOptionList($value, ?string $catalogKey = null) {
@@ -417,9 +455,33 @@ class SettingsController {
         $delivery = $settings->get('shipping_delivery');
         $pickup = $settings->get('shipping_pickup');
         $taxRate = $settings->get('shipping_tax_rate');
+        $storeAddress = $settings->get('shipping_store_address');
+        $storeLatitude = $settings->get('shipping_store_latitude');
+        $storeLongitude = $settings->get('shipping_store_longitude');
+        $freeRadius = $settings->get('free_shipping_radius_km');
+        $kmFlatRateLimit = $settings->get('shipping_km_flat_rate_limit');
+        $perKmRate = $settings->get('shipping_per_km_rate');
+        $mapMinSearchChars = $settings->get('shipping_map_min_search_chars');
+        $mapLookupCooldownSeconds = $settings->get('shipping_map_lookup_cooldown_seconds');
+        $mapSessionLookupLimit = $settings->get('shipping_map_session_lookup_limit');
         $deliveryValue = is_numeric($delivery) ? floatval($delivery) : 5.0;
         $pickupValue = is_numeric($pickup) ? floatval($pickup) : 0.0;
         $taxValue = is_numeric($taxRate) ? floatval($taxRate) : 0.0;
+        $storeAddressValue = $this->normalizeShippingStoreAddress(is_string($storeAddress) ? $storeAddress : null);
+        $storeLatitudeValue = is_numeric($storeLatitude) ? floatval($storeLatitude) : self::DEFAULT_SHIPPING_STORE_LATITUDE;
+        $storeLongitudeValue = is_numeric($storeLongitude) ? floatval($storeLongitude) : self::DEFAULT_SHIPPING_STORE_LONGITUDE;
+        $migratedLegacyStore = $this->isLegacyShippingStoreLocation($storeAddressValue, $storeLatitudeValue, $storeLongitudeValue);
+        if ($migratedLegacyStore) {
+            $storeLatitudeValue = self::DEFAULT_SHIPPING_STORE_LATITUDE;
+            $storeLongitudeValue = self::DEFAULT_SHIPPING_STORE_LONGITUDE;
+            $storeAddressValue = self::DEFAULT_SHIPPING_STORE_ADDRESS;
+        }
+        $freeRadiusValue = is_numeric($freeRadius) ? max(0, floatval($freeRadius)) : 5.0;
+        $kmFlatRateLimitValue = is_numeric($kmFlatRateLimit) ? max(0, floatval($kmFlatRateLimit)) : 7.0;
+        $perKmRateValue = is_numeric($perKmRate) ? max(0, floatval($perKmRate)) : 1.0;
+        $mapMinSearchCharsValue = is_numeric($mapMinSearchChars) ? max(3, (int)$mapMinSearchChars) : 6;
+        $mapLookupCooldownSecondsValue = is_numeric($mapLookupCooldownSeconds) ? max(0, (int)$mapLookupCooldownSeconds) : 3;
+        $mapSessionLookupLimitValue = is_numeric($mapSessionLookupLimit) ? max(1, (int)$mapSessionLookupLimit) : 12;
         if ($delivery === null) {
             $settings->set('shipping_delivery', (string)$deliveryValue);
         }
@@ -429,10 +491,46 @@ class SettingsController {
         if ($taxRate === null) {
             $settings->set('shipping_tax_rate', (string)$taxValue);
         }
+        if ($storeAddress === null || $migratedLegacyStore) {
+            $settings->set('shipping_store_address', $storeAddressValue);
+        }
+        if ($storeLatitude === null || $migratedLegacyStore) {
+            $settings->set('shipping_store_latitude', (string)$storeLatitudeValue);
+        }
+        if ($storeLongitude === null || $migratedLegacyStore) {
+            $settings->set('shipping_store_longitude', (string)$storeLongitudeValue);
+        }
+        if ($freeRadius === null) {
+            $settings->set('free_shipping_radius_km', (string)$freeRadiusValue);
+        }
+        if ($kmFlatRateLimit === null) {
+            $settings->set('shipping_km_flat_rate_limit', (string)$kmFlatRateLimitValue);
+        }
+        if ($perKmRate === null) {
+            $settings->set('shipping_per_km_rate', (string)$perKmRateValue);
+        }
+        if ($mapMinSearchChars === null) {
+            $settings->set('shipping_map_min_search_chars', (string)$mapMinSearchCharsValue);
+        }
+        if ($mapLookupCooldownSeconds === null) {
+            $settings->set('shipping_map_lookup_cooldown_seconds', (string)$mapLookupCooldownSecondsValue);
+        }
+        if ($mapSessionLookupLimit === null) {
+            $settings->set('shipping_map_session_lookup_limit', (string)$mapSessionLookupLimitValue);
+        }
         Response::json([
             'delivery' => $deliveryValue,
             'pickup' => $pickupValue,
-            'tax_rate' => $taxValue
+            'tax_rate' => $taxValue,
+            'store_address' => $storeAddressValue,
+            'store_latitude' => $storeLatitudeValue,
+            'store_longitude' => $storeLongitudeValue,
+            'free_shipping_radius_km' => $freeRadiusValue,
+            'shipping_km_flat_rate_limit' => $kmFlatRateLimitValue,
+            'shipping_per_km_rate' => $perKmRateValue,
+            'map_min_search_chars' => $mapMinSearchCharsValue,
+            'map_lookup_cooldown_seconds' => $mapLookupCooldownSecondsValue,
+            'map_session_lookup_limit' => $mapSessionLookupLimitValue,
         ]);
     }
 
@@ -440,21 +538,67 @@ class SettingsController {
         $user = $this->authenticate();
         $this->requireAdmin($user);
         $data = json_decode(file_get_contents('php://input'), true);
-        if (!isset($data['delivery']) || !is_numeric($data['delivery']) || !isset($data['pickup']) || !is_numeric($data['pickup']) || !isset($data['tax_rate']) || !is_numeric($data['tax_rate'])) {
+        if (
+            !isset($data['delivery']) || !is_numeric($data['delivery'])
+            || !isset($data['pickup']) || !is_numeric($data['pickup'])
+            || !isset($data['tax_rate']) || !is_numeric($data['tax_rate'])
+            || !isset($data['store_address']) || trim((string)$data['store_address']) === ''
+            || !isset($data['store_latitude']) || !is_numeric($data['store_latitude'])
+            || !isset($data['store_longitude']) || !is_numeric($data['store_longitude'])
+            || !isset($data['free_shipping_radius_km']) || !is_numeric($data['free_shipping_radius_km'])
+            || !isset($data['map_min_search_chars']) || !is_numeric($data['map_min_search_chars'])
+            || !isset($data['map_lookup_cooldown_seconds']) || !is_numeric($data['map_lookup_cooldown_seconds'])
+            || !isset($data['map_session_lookup_limit']) || !is_numeric($data['map_session_lookup_limit'])
+        ) {
             Response::error('Costos de envío inválidos', 400, 'SETTINGS_SHIPPING_INVALID');
             return;
         }
         $delivery = max(0, floatval($data['delivery']));
         $pickup = max(0, floatval($data['pickup']));
         $taxRate = max(0, floatval($data['tax_rate']));
+        $storeAddress = trim((string)$data['store_address']);
+        $storeLatitude = floatval($data['store_latitude']);
+        $storeLongitude = floatval($data['store_longitude']);
+        $freeRadius = max(0, floatval($data['free_shipping_radius_km']));
+        $kmFlatRateLimit = isset($data['shipping_km_flat_rate_limit']) && is_numeric($data['shipping_km_flat_rate_limit'])
+            ? max(0, floatval($data['shipping_km_flat_rate_limit']))
+            : max(0, floatval($freeRadius));
+        $perKmRate = isset($data['shipping_per_km_rate']) && is_numeric($data['shipping_per_km_rate'])
+            ? max(0, floatval($data['shipping_per_km_rate']))
+            : 0.0;
+        $mapMinSearchCharsValue = max(3, (int)$data['map_min_search_chars']);
+        $mapLookupCooldownSecondsValue = max(0, (int)$data['map_lookup_cooldown_seconds']);
+        $mapSessionLookupLimitValue = max(1, (int)$data['map_session_lookup_limit']);
+        if ($storeLatitude < -90 || $storeLatitude > 90 || $storeLongitude < -180 || $storeLongitude > 180) {
+            Response::error('Coordenadas del local inválidas', 400, 'SETTINGS_SHIPPING_COORDINATES_INVALID');
+            return;
+        }
         $settings = new SettingsRepository();
         $settings->set('shipping_delivery', (string)$delivery);
         $settings->set('shipping_pickup', (string)$pickup);
         $settings->set('shipping_tax_rate', (string)$taxRate);
+        $settings->set('shipping_store_address', $storeAddress);
+        $settings->set('shipping_store_latitude', (string)$storeLatitude);
+        $settings->set('shipping_store_longitude', (string)$storeLongitude);
+        $settings->set('free_shipping_radius_km', (string)$freeRadius);
+        $settings->set('shipping_km_flat_rate_limit', (string)$kmFlatRateLimit);
+        $settings->set('shipping_per_km_rate', (string)$perKmRate);
+        $settings->set('shipping_map_min_search_chars', (string)$mapMinSearchCharsValue);
+        $settings->set('shipping_map_lookup_cooldown_seconds', (string)$mapLookupCooldownSecondsValue);
+        $settings->set('shipping_map_session_lookup_limit', (string)$mapSessionLookupLimitValue);
         Response::json([
             'delivery' => $delivery,
             'pickup' => $pickup,
-            'tax_rate' => $taxRate
+            'tax_rate' => $taxRate,
+            'store_address' => $storeAddress,
+            'store_latitude' => $storeLatitude,
+            'store_longitude' => $storeLongitude,
+            'free_shipping_radius_km' => $freeRadius,
+            'shipping_km_flat_rate_limit' => $kmFlatRateLimit,
+            'shipping_per_km_rate' => $perKmRate,
+            'map_min_search_chars' => $mapMinSearchCharsValue,
+            'map_lookup_cooldown_seconds' => $mapLookupCooldownSecondsValue,
+            'map_session_lookup_limit' => $mapSessionLookupLimitValue,
         ]);
     }
 
