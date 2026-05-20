@@ -2040,8 +2040,8 @@ class OrderRepository {
             ) items ON true
             WHERE o.tenant_id = :tenant_id
               AND $realizedSales
-              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:start_date AS date)
-              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:end_exclusive AS date)
+              AND o.created_at >= CAST(:start_date AS timestamp)
+              AND o.created_at < CAST(:end_exclusive AS timestamp)
             ORDER BY o.created_at DESC
         ");
         $ordersStmt->execute([
@@ -2106,8 +2106,8 @@ class OrderRepository {
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
                 WHERE o.tenant_id = :tenant_id
                   AND $realizedSales
-                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:start_date AS date)
-                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:end_exclusive AS date)
+                  AND o.created_at >= CAST(:start_date AS timestamp)
+                  AND o.created_at < CAST(:end_exclusive AS timestamp)
             ),
             distributed_lines AS (
                 SELECT

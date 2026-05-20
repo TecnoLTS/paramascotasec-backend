@@ -31,6 +31,8 @@ class DashboardController {
                 ? (string)$_GET['date']
                 : null;
             $scope = isset($_GET['scope']) && in_array($_GET['scope'], ['historical'], true) ? (string)$_GET['scope'] : null;
+            $includeReportRaw = strtolower(trim((string)($_GET['include_report'] ?? '1')));
+            $includeReport = !in_array($includeReportRaw, ['0', 'false', 'no', 'off'], true);
             
             if ($scope === 'historical' || $selectedDate) {
                 $report = $this->orderRepo->getReportPeriodSummary($selectedMonth, $selectedDate, $scope);
@@ -71,7 +73,7 @@ class DashboardController {
                 ];
             } else {
                 $biService = new \App\Services\BusinessIntelligenceService();
-                $response = $biService->getFullDashboardStats($selectedMonth, $selectedDate, $scope);
+                $response = $biService->getFullDashboardStats($selectedMonth, $selectedDate, $scope, $includeReport);
             }
             Response::json($response);
         } catch (\Exception $e) {

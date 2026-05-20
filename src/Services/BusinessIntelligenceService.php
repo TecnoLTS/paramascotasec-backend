@@ -16,7 +16,7 @@ class BusinessIntelligenceService {
         $this->userRepo = new UserRepository();
     }
 
-    public function getFullDashboardStats(?string $selectedMonth = null, ?string $selectedDate = null, ?string $scope = null) {
+    public function getFullDashboardStats(?string $selectedMonth = null, ?string $selectedDate = null, ?string $scope = null, bool $includeReport = true) {
         $settings = new SettingsRepository();
         $vatRate = $settings->get('vat_rate');
         $vatRate = is_numeric($vatRate) ? floatval($vatRate) : 0;
@@ -33,8 +33,27 @@ class BusinessIntelligenceService {
         $salesSummary = $this->orderRepo->getSalesSummary();
         $traceability = $this->orderRepo->getKpiTraceability();
         $productSalesRanking = $this->orderRepo->getProductSalesRanking($selectedMonth, $selectedDate);
-        $periodReport = $this->orderRepo->getReportPeriodSummary($selectedMonth, $selectedDate, $scope);
+        $periodReport = $includeReport
+            ? $this->orderRepo->getReportPeriodSummary($selectedMonth, $selectedDate, $scope)
+            : null;
         $financialTrends = $this->orderRepo->getFinancialTrends();
+        $businessMetrics = [
+            'averageOrderValue' => $this->orderRepo->getAverageOrderValue(),
+            'profitStats' => $profitStats,
+            'inventoryValue' => $this->orderRepo->getInventoryValue(),
+            'ordersByStatus' => $ordersByStatus,
+            'recentOrders' => $recentOrders,
+            'salesDeepDive' => $salesDeepDive,
+            'inventoryDeepDive' => $inventoryDeepDive,
+            'aovDeepDive' => $aovDeepDive,
+            'salesSummary' => $salesSummary,
+            'financialTrends' => $financialTrends,
+            'traceability' => $traceability,
+            'productSalesRanking' => $productSalesRanking,
+        ];
+        if ($includeReport) {
+            $businessMetrics['report'] = $periodReport;
+        }
 
         return [
             'tax' => [
@@ -58,21 +77,7 @@ class BusinessIntelligenceService {
             'topProducts' => $this->orderRepo->getTopProducts(),
             'salesByCategory' => $this->orderRepo->getSalesByCategory(),
             'productAnalysis' => $productAnalysis,
-            'businessMetrics' => [
-                'averageOrderValue' => $this->orderRepo->getAverageOrderValue(),
-                'profitStats' => $profitStats,
-                'inventoryValue' => $this->orderRepo->getInventoryValue(),
-                'ordersByStatus' => $ordersByStatus,
-                'recentOrders' => $recentOrders,
-                'salesDeepDive' => $salesDeepDive,
-                'inventoryDeepDive' => $inventoryDeepDive,
-                'aovDeepDive' => $aovDeepDive,
-                'salesSummary' => $salesSummary,
-                'financialTrends' => $financialTrends,
-                'traceability' => $traceability,
-                'productSalesRanking' => $productSalesRanking,
-                'report' => $periodReport
-            ],
+            'businessMetrics' => $businessMetrics,
             'strategicAlerts' => $this->generateAlerts($inventoryDeepDive, $salesProgress, $productAnalysis, $ordersByStatus)
         ];
     }
