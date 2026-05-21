@@ -60,6 +60,59 @@ class PurchaseInvoiceRepository {
         return $stmt->fetchAll() ?: [];
     }
 
+    public function summarizePeriod(string $startDate, string $endExclusive): array {
+        $stmt = $this->db->prepare("
+            WITH scoped_invoices AS (
+                SELECT
+                    id,
+                    supplier_name,
+                    COALESCE(subtotal, 0) AS subtotal,
+                    COALESCE(tax_total, 0) AS tax_total,
+                    COALESCE(total, 0) AS total
+                FROM \"PurchaseInvoice\"
+                WHERE tenant_id = :tenant_id
+                  AND issued_at >= CAST(:start_date AS date)
+                  AND issued_at < CAST(:end_exclusive AS date)
+            ),
+            item_totals AS (
+                SELECT
+                    pii.purchase_invoice_id,
+                    COALESCE(SUM(pii.quantity), 0)::int AS units_total,
+                    COUNT(DISTINCT pii.product_id)::int AS products_count
+                FROM \"PurchaseInvoiceItem\" pii
+                JOIN scoped_invoices si ON si.id = pii.purchase_invoice_id
+                WHERE pii.tenant_id = :tenant_id
+                GROUP BY pii.purchase_invoice_id
+            )
+            SELECT
+                COUNT(si.id)::int AS invoices_count,
+                COALESCE(SUM(si.subtotal), 0) AS subtotal,
+                COALESCE(SUM(si.tax_total), 0) AS tax_total,
+                COALESCE(SUM(si.total), 0) AS total,
+                COALESCE(SUM(it.units_total), 0)::int AS units_total,
+                COALESCE(SUM(it.products_count), 0)::int AS products_count,
+                COUNT(DISTINCT NULLIF(TRIM(UPPER(si.supplier_name)), ''))::int AS suppliers_count
+            FROM scoped_invoices si
+            LEFT JOIN item_totals it ON it.purchase_invoice_id = si.id
+        ");
+        $stmt->execute([
+            'tenant_id' => $this->getTenantId(),
+            'start_date' => $startDate,
+            'end_exclusive' => $endExclusive,
+        ]);
+        $row = $stmt->fetch() ?: [];
+
+        return [
+            'invoices_count' => (int)($row['invoices_count'] ?? 0),
+            'subtotal' => round((float)($row['subtotal'] ?? 0), 2),
+            'tax_total' => round((float)($row['tax_total'] ?? 0), 2),
+            'total' => round((float)($row['total'] ?? 0), 2),
+            'units_total' => (int)($row['units_total'] ?? 0),
+            'products_count' => (int)($row['products_count'] ?? 0),
+            'suppliers_count' => (int)($row['suppliers_count'] ?? 0),
+        ];
+    }
+
     public function getById(string $id): ?array {
         $stmt = $this->db->prepare("
             SELECT

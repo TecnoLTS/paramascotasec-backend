@@ -1981,7 +1981,9 @@ class OrderRepository {
             $period = $this->resolveReportPeriod($selectedMonth);
         }
         $financialPeriods = new FinancialPeriodRepository($this->db);
+        $purchaseInvoices = new PurchaseInvoiceRepository($this->db);
         $snapshot = $financialPeriods->buildSnapshot($period['start_date'], $period['end_date'], $period['period_key']);
+        $purchaseInvoiceSummary = $purchaseInvoices->summarizePeriod($period['start_date'], $period['end_exclusive']);
         $realizedSales = $this->realizedSalesCondition('o');
         $netExpr = $this->netSalesSql('o');
         $vatExpr = $this->vatAmountSql('o');
@@ -2212,6 +2214,7 @@ class OrderRepository {
             'profit' => $snapshot['profit'] ?? [],
             'expenses' => $snapshot['expenses'] ?? [],
             'adjustments' => $snapshot['adjustments'] ?? [],
+            'purchase_invoices' => $purchaseInvoiceSummary,
             'orders' => $orders,
             'products' => $products,
             'categories' => $categories,

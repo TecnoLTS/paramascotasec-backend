@@ -20,6 +20,10 @@ class BusinessIntelligenceService {
         $settings = new SettingsRepository();
         $vatRate = $settings->get('vat_rate');
         $vatRate = is_numeric($vatRate) ? floatval($vatRate) : 0;
+        $creditCurrentRate = $settings->get('sri_purchase_vat_credit_current_rate');
+        $creditCarryforwardRate = $settings->get('sri_purchase_vat_credit_carryforward_rate');
+        $creditCurrentRate = is_numeric($creditCurrentRate) ? max(0, min(100, floatval($creditCurrentRate))) : 60.0;
+        $creditCarryforwardRate = is_numeric($creditCarryforwardRate) ? max(0, min(100, floatval($creditCarryforwardRate))) : 40.0;
         $salesProgress = $this->orderRepo->getSalesProgress();
         $ordersProgress = $this->orderRepo->getOrdersProgress();
         $clientsProgress = $this->userRepo->getClientsProgress();
@@ -58,7 +62,9 @@ class BusinessIntelligenceService {
         return [
             'tax' => [
                 'rate' => $vatRate,
-                'multiplier' => round(1 + ($vatRate / 100), 4)
+                'multiplier' => round(1 + ($vatRate / 100), 4),
+                'credit_current_rate' => $creditCurrentRate,
+                'credit_carryforward_rate' => $creditCarryforwardRate
             ],
             'totalSales' => [
                 'amount' => (float)$this->orderRepo->getTotalSales(),

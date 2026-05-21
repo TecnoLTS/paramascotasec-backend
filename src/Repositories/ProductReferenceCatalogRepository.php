@@ -99,19 +99,29 @@ class ProductReferenceCatalogRepository {
                     if (!is_array($featuredImages)) {
                         $featuredImages = [];
                     }
+                    $legacyVisible = array_key_exists('showInImageSection', $payload)
+                        ? filter_var($payload['showInImageSection'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== false
+                        : true;
+                    $showInTopSection = array_key_exists('showInTopSection', $payload)
+                        ? filter_var($payload['showInTopSection'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== false
+                        : $legacyVisible;
+                    $showInFeaturedSection = array_key_exists('showInFeaturedSection', $payload)
+                        ? filter_var($payload['showInFeaturedSection'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== false
+                        : $legacyVisible;
+
                     $result['categoryImages'][] = [
-    'name' => $name,
-    'topImageUrl' => trim((string)($payload['topImageUrl'] ?? ($payload['imageUrl'] ?? ''))),
-    'featuredImages' => [
-        'mobilePrimary' => trim((string)($featuredImages['mobilePrimary'] ?? '')),
-        'mobileSecondary' => trim((string)($featuredImages['mobileSecondary'] ?? '')),
-        'desktopPrimary' => trim((string)($featuredImages['desktopPrimary'] ?? '')),
-        'desktopSecondary' => trim((string)($featuredImages['desktopSecondary'] ?? '')),
-    ],
-    'showInImageSection' => array_key_exists('showInImageSection', $payload)
-        ? filter_var($payload['showInImageSection'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== false
-        : true,
-];
+                        'name' => $name,
+                        'topImageUrl' => trim((string)($payload['topImageUrl'] ?? ($payload['imageUrl'] ?? ''))),
+                        'featuredImages' => [
+                            'mobilePrimary' => trim((string)($featuredImages['mobilePrimary'] ?? '')),
+                            'mobileSecondary' => trim((string)($featuredImages['mobileSecondary'] ?? '')),
+                            'desktopPrimary' => trim((string)($featuredImages['desktopPrimary'] ?? '')),
+                            'desktopSecondary' => trim((string)($featuredImages['desktopSecondary'] ?? '')),
+                        ],
+                        'showInTopSection' => $showInTopSection,
+                        'showInFeaturedSection' => $showInFeaturedSection,
+                        'showInImageSection' => $showInTopSection || $showInFeaturedSection,
+                    ];
                 }
                 continue;
             }
@@ -244,19 +254,29 @@ class ProductReferenceCatalogRepository {
                         if (!is_array($featuredImages)) {
                             $featuredImages = [];
                         }
+                        $legacyVisible = array_key_exists('showInImageSection', $value)
+                            ? filter_var($value['showInImageSection'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== false
+                            : true;
+                        $showInTopSection = array_key_exists('showInTopSection', $value)
+                            ? filter_var($value['showInTopSection'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== false
+                            : $legacyVisible;
+                        $showInFeaturedSection = array_key_exists('showInFeaturedSection', $value)
+                            ? filter_var($value['showInFeaturedSection'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== false
+                            : $legacyVisible;
+
                         $payload = [
-    'name' => $categoryName,
-    'topImageUrl' => trim((string)($value['topImageUrl'] ?? ($value['imageUrl'] ?? ($value['image'] ?? '')))),
-    'featuredImages' => [
-        'mobilePrimary' => trim((string)($featuredImages['mobilePrimary'] ?? '')),
-        'mobileSecondary' => trim((string)($featuredImages['mobileSecondary'] ?? '')),
-        'desktopPrimary' => trim((string)($featuredImages['desktopPrimary'] ?? '')),
-        'desktopSecondary' => trim((string)($featuredImages['desktopSecondary'] ?? '')),
-    ],
-    'showInImageSection' => array_key_exists('showInImageSection', $value)
-        ? filter_var($value['showInImageSection'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== false
-        : true,
-];
+                            'name' => $categoryName,
+                            'topImageUrl' => trim((string)($value['topImageUrl'] ?? ($value['imageUrl'] ?? ($value['image'] ?? '')))),
+                            'featuredImages' => [
+                                'mobilePrimary' => trim((string)($featuredImages['mobilePrimary'] ?? '')),
+                                'mobileSecondary' => trim((string)($featuredImages['mobileSecondary'] ?? '')),
+                                'desktopPrimary' => trim((string)($featuredImages['desktopPrimary'] ?? '')),
+                                'desktopSecondary' => trim((string)($featuredImages['desktopSecondary'] ?? '')),
+                            ],
+                            'showInTopSection' => $showInTopSection,
+                            'showInFeaturedSection' => $showInFeaturedSection,
+                            'showInImageSection' => $showInTopSection || $showInFeaturedSection,
+                        ];
 
                         $insertStmt->execute([
                             'id' => $this->buildRowId($catalogKey, $categoryName, $index + 1),

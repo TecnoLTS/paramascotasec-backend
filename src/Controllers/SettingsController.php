@@ -181,19 +181,29 @@ class SettingsController {
                 $featuredImages = [];
             }
 
+            $legacyVisible = array_key_exists('showInImageSection', $item)
+                ? $this->parseBool($item['showInImageSection'], true)
+                : true;
+            $showInTopSection = array_key_exists('showInTopSection', $item)
+                ? $this->parseBool($item['showInTopSection'], $legacyVisible)
+                : $legacyVisible;
+            $showInFeaturedSection = array_key_exists('showInFeaturedSection', $item)
+                ? $this->parseBool($item['showInFeaturedSection'], $legacyVisible)
+                : $legacyVisible;
+
             $normalized[] = [
-    'name' => $name,
-    'topImageUrl' => $this->sanitizeAssetUrlValue($item['topImageUrl'] ?? ($item['imageUrl'] ?? ($item['image'] ?? ''))),
-    'featuredImages' => [
-        'mobilePrimary' => $this->sanitizeAssetUrlValue($featuredImages['mobilePrimary'] ?? ''),
-        'mobileSecondary' => $this->sanitizeAssetUrlValue($featuredImages['mobileSecondary'] ?? ''),
-        'desktopPrimary' => $this->sanitizeAssetUrlValue($featuredImages['desktopPrimary'] ?? ''),
-        'desktopSecondary' => $this->sanitizeAssetUrlValue($featuredImages['desktopSecondary'] ?? ''),
-    ],
-    'showInImageSection' => array_key_exists('showInImageSection', $item)
-        ? $this->parseBool($item['showInImageSection'], true)
-        : true,
-];
+                'name' => $name,
+                'topImageUrl' => $this->sanitizeAssetUrlValue($item['topImageUrl'] ?? ($item['imageUrl'] ?? ($item['image'] ?? ''))),
+                'featuredImages' => [
+                    'mobilePrimary' => $this->sanitizeAssetUrlValue($featuredImages['mobilePrimary'] ?? ''),
+                    'mobileSecondary' => $this->sanitizeAssetUrlValue($featuredImages['mobileSecondary'] ?? ''),
+                    'desktopPrimary' => $this->sanitizeAssetUrlValue($featuredImages['desktopPrimary'] ?? ''),
+                    'desktopSecondary' => $this->sanitizeAssetUrlValue($featuredImages['desktopSecondary'] ?? ''),
+                ],
+                'showInTopSection' => $showInTopSection,
+                'showInFeaturedSection' => $showInFeaturedSection,
+                'showInImageSection' => $showInTopSection || $showInFeaturedSection,
+            ];
         }
 
         return array_values($normalized);
@@ -433,7 +443,21 @@ class SettingsController {
         $this->requireAdmin($user);
         $settings = new SettingsRepository();
         $rate = $settings->get('vat_rate');
-        Response::json(['rate' => $rate !== null ? floatval($rate) : 0]);
+        $creditCurrentRate = $settings->get('sri_purchase_vat_credit_current_rate');
+        $creditCarryforwardRate = $settings->get('sri_purchase_vat_credit_carryforward_rate');
+        $creditCurrentValue = is_numeric($creditCurrentRate) ? max(0, min(100, floatval($creditCurrentRate))) : 60.0;
+        $creditCarryforwardValue = is_numeric($creditCarryforwardRate) ? max(0, min(100, floatval($creditCarryforwardRate))) : 40.0;
+        if ($creditCurrentRate === null) {
+            $settings->set('sri_purchase_vat_credit_current_rate', (string)$creditCurrentValue);
+        }
+        if ($creditCarryforwardRate === null) {
+            $settings->set('sri_purchase_vat_credit_carryforward_rate', (string)$creditCarryforwardValue);
+        }
+        Response::json([
+            'rate' => $rate !== null ? floatval($rate) : 0,
+            'credit_current_rate' => $creditCurrentValue,
+            'credit_carryforward_rate' => $creditCarryforwardValue,
+        ]);
     }
 
     public function updateVat() {
@@ -445,9 +469,21 @@ class SettingsController {
             return;
         }
         $rate = max(0, floatval($data['rate']));
+        $creditCurrentRate = isset($data['credit_current_rate']) && is_numeric($data['credit_current_rate'])
+            ? max(0, min(100, floatval($data['credit_current_rate'])))
+            : 60.0;
+        $creditCarryforwardRate = isset($data['credit_carryforward_rate']) && is_numeric($data['credit_carryforward_rate'])
+            ? max(0, min(100, floatval($data['credit_carryforward_rate'])))
+            : 40.0;
         $settings = new SettingsRepository();
         $settings->set('vat_rate', (string)$rate);
-        Response::json(['rate' => $rate]);
+        $settings->set('sri_purchase_vat_credit_current_rate', (string)$creditCurrentRate);
+        $settings->set('sri_purchase_vat_credit_carryforward_rate', (string)$creditCarryforwardRate);
+        Response::json([
+            'rate' => $rate,
+            'credit_current_rate' => $creditCurrentRate,
+            'credit_carryforward_rate' => $creditCarryforwardRate,
+        ]);
     }
 
     public function getShipping() {
@@ -1009,19 +1045,27 @@ $seenCategories = [];
                 }
             }
             $featuredImages = is_array($imageReference['featuredImages'] ?? null) ? $imageReference['featuredImages'] : [];
+            $legacyVisible = ($imageReference['showInImageSection'] ?? true) !== false;
+            $showInTopSection = array_key_exists('showInTopSection', $imageReference)
+                ? $this->parseBool($imageReference['showInTopSection'], $legacyVisible)
+                : $legacyVisible;
+            $showInFeaturedSection = array_key_exists('showInFeaturedSection', $imageReference)
+                ? $this->parseBool($imageReference['showInFeaturedSection'], $legacyVisible)
+                : $legacyVisible;
 
-            $featuredImages = is_array($imageReference['featuredImages'] ?? null) ? $imageReference['featuredImages'] : [];
             $references[] = [
-    'name' => $name,
-    'topImageUrl' => trim((string)($imageReference['topImageUrl'] ?? '')),
-    'featuredImages' => [
-        'mobilePrimary' => trim((string)($featuredImages['mobilePrimary'] ?? '')),
-        'mobileSecondary' => trim((string)($featuredImages['mobileSecondary'] ?? '')),
-        'desktopPrimary' => trim((string)($featuredImages['desktopPrimary'] ?? '')),
-        'desktopSecondary' => trim((string)($featuredImages['desktopSecondary'] ?? '')),
-    ],
-    'showInImageSection' => ($imageReference['showInImageSection'] ?? true) !== false,
-];
+                'name' => $name,
+                'topImageUrl' => trim((string)($imageReference['topImageUrl'] ?? '')),
+                'featuredImages' => [
+                    'mobilePrimary' => trim((string)($featuredImages['mobilePrimary'] ?? '')),
+                    'mobileSecondary' => trim((string)($featuredImages['mobileSecondary'] ?? '')),
+                    'desktopPrimary' => trim((string)($featuredImages['desktopPrimary'] ?? '')),
+                    'desktopSecondary' => trim((string)($featuredImages['desktopSecondary'] ?? '')),
+                ],
+                'showInTopSection' => $showInTopSection,
+                'showInFeaturedSection' => $showInFeaturedSection,
+                'showInImageSection' => $showInTopSection || $showInFeaturedSection,
+            ];
         }
 
         Response::json($references);
