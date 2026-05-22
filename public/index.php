@@ -168,8 +168,8 @@ if ($origin) {
     }
 }
 header('Content-Type: application/json');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Tenant');
+header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Tenant, X-CSRF-Token');
 header('Access-Control-Max-Age: 600');
 header('Vary: Origin');
 Response::noStore();
@@ -302,6 +302,8 @@ $router = new Router();
 
 // Product Routes
 $router->add('GET', '/api/products', 'ProductController@index');
+$router->add('GET', '/api/products/{id}/reviews', 'ProductReviewController@indexForProduct');
+$router->add('POST', '/api/products/{id}/reviews', 'ProductReviewController@storeForProduct');
 $router->add('GET', '/api/products/{id}', 'ProductController@show');
 $router->add('POST', '/api/products', 'ProductController@store');
 $router->add('PUT', '/api/products/{id}', 'ProductController@update');
@@ -341,6 +343,8 @@ $router->add('POST', '/api/admin/historical-sales', 'OrderController@storeHistor
 // Admin Dashboard Routes
 $router->add('GET', '/api/admin/dashboard/stats', 'DashboardController@stats');
 $router->add('GET', '/api/admin/report', 'DashboardController@report');
+$router->add('GET', '/api/admin/reviews', 'ProductReviewController@adminIndex');
+$router->add('PATCH', '/api/admin/reviews/{id}', 'ProductReviewController@adminUpdate');
 $router->add('GET', '/api/admin/settings/tax', 'SettingsController@getVat');
 $router->add('PUT', '/api/admin/settings/tax', 'SettingsController@updateVat');
 $router->add('GET', '/api/settings/shipping', 'SettingsController@getShipping');

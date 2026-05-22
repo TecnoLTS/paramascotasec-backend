@@ -89,7 +89,8 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
             product_id text,
             kind text,
             width integer,
-            height integer
+            height integer,
+            alt_text text
         )',
         'CREATE TABLE IF NOT EXISTS "Variation" (
             id text PRIMARY KEY,
@@ -290,6 +291,21 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
             created_at timestamp without time zone DEFAULT NOW() NOT NULL,
             updated_at timestamp without time zone DEFAULT NOW() NOT NULL
         )',
+        'CREATE TABLE IF NOT EXISTS "ProductReview" (
+            id text PRIMARY KEY,
+            tenant_id text NOT NULL,
+            product_id text NOT NULL,
+            order_id text NOT NULL,
+            order_item_id text NOT NULL,
+            user_id text NOT NULL,
+            rating integer NOT NULL,
+            title text,
+            body text NOT NULL,
+            author_name text NOT NULL,
+            status text DEFAULT \'pending\' NOT NULL,
+            created_at timestamp without time zone DEFAULT NOW() NOT NULL,
+            updated_at timestamp without time zone DEFAULT NOW() NOT NULL
+        )',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS addresses jsonb',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS profile jsonb',
         'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS document_type text',
@@ -311,6 +327,7 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS kind text',
         'ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS width integer',
         'ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS height integer',
+        'ALTER TABLE "Image" ADD COLUMN IF NOT EXISTS alt_text text',
         'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS tenant_id text',
         'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS invoice_number text',
         'ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS invoice_html text',
@@ -450,6 +467,10 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
         'CREATE INDEX IF NOT EXISTS "PurchaseInvoiceItem_tenant_invoice_idx" ON "PurchaseInvoiceItem" (tenant_id, purchase_invoice_id, created_at ASC)',
         'CREATE INDEX IF NOT EXISTS "PurchaseInvoiceItem_tenant_product_idx" ON "PurchaseInvoiceItem" (tenant_id, product_id, created_at DESC)',
         'CREATE INDEX IF NOT EXISTS "Image_product_id_idx" ON "Image" (product_id)',
+        'CREATE INDEX IF NOT EXISTS "ProductReview_tenant_product_status_idx" ON "ProductReview" (tenant_id, product_id, status, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "ProductReview_tenant_status_created_idx" ON "ProductReview" (tenant_id, status, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS "ProductReview_tenant_user_idx" ON "ProductReview" (tenant_id, user_id, created_at DESC)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS "ProductReview_tenant_order_item_uidx" ON "ProductReview" (tenant_id, order_item_id)',
         'CREATE INDEX IF NOT EXISTS "Variation_product_id_idx" ON "Variation" (product_id)',
         'CREATE INDEX IF NOT EXISTS "Setting_tenant_id_idx" ON "Setting" (tenant_id)',
         'CREATE INDEX IF NOT EXISTS "ProductReferenceCatalog_tenant_id_idx" ON "ProductReferenceCatalog" (tenant_id)',

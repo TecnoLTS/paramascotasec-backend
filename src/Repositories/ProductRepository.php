@@ -141,7 +141,8 @@ class ProductRepository {
               \'url\', i.url,
               \'width\', i.width,
               \'height\', i.height,
-              \'kind\', COALESCE(i.kind, \'gallery\')
+              \'kind\', COALESCE(i.kind, \'gallery\'),
+              \'altText\', i.alt_text
             ) ORDER BY i.id) AS image_meta
           FROM "Image" i
           WHERE i.product_id = p.id
@@ -738,7 +739,8 @@ class ProductRepository {
                     'url' => $url,
                     'width' => null,
                     'height' => null,
-                    'kind' => $defaultKind
+                    'kind' => $defaultKind,
+                    'altText' => null
                 ];
                 continue;
             }
@@ -750,11 +752,13 @@ class ProductRepository {
                 $kind = $item['kind'] ?? $defaultKind;
                 $width = isset($item['width']) && is_numeric($item['width']) ? intval($item['width']) : null;
                 $height = isset($item['height']) && is_numeric($item['height']) ? intval($item['height']) : null;
+                $altText = trim((string)($item['altText'] ?? $item['alt_text'] ?? ''));
                 $entries[] = [
                     'url' => $url,
                     'width' => $width,
                     'height' => $height,
-                    'kind' => $kind
+                    'kind' => $kind,
+                    'altText' => $altText !== '' ? $altText : null
                 ];
             }
         }
@@ -775,7 +779,10 @@ class ProductRepository {
         if (count($entries) === 0) {
             return;
         }
-        $stmt = $this->db->prepare('INSERT INTO "Image" (id, url, product_id, kind, width, height) VALUES (:id, :url, :product_id, :kind, :width, :height)');
+        $stmt = $this->db->prepare('
+            INSERT INTO "Image" (id, url, product_id, kind, width, height, alt_text)
+            VALUES (:id, :url, :product_id, :kind, :width, :height, :alt_text)
+        ');
         foreach ($entries as $entry) {
             $stmt->execute([
                 'id' => uniqid('img_'),
@@ -783,7 +790,8 @@ class ProductRepository {
                 'product_id' => $productId,
                 'kind' => $entry['kind'] ?? $kind,
                 'width' => $entry['width'],
-                'height' => $entry['height']
+                'height' => $entry['height'],
+                'alt_text' => $entry['altText'] ?? null
             ]);
         }
     }

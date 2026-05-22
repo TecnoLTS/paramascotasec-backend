@@ -168,6 +168,7 @@ class ProductController {
     }
 
     private function enforcePublicationEligibility(array &$data, ?array $currentProduct = null): void {
+        $requestedPublish = array_key_exists('published', $data) && $data['published'] === true;
         $effectivePrice = array_key_exists('price', $data)
             ? (float)($data['price'] ?? 0)
             : (float)($currentProduct['price'] ?? 0);
@@ -181,6 +182,82 @@ class ProductController {
         } elseif (!array_key_exists('published', $data) && $currentProduct === null) {
             $data['published'] = false;
         }
+
+        if ($requestedPublish) {
+            $missing = $this->publicationSeoGaps($data, $currentProduct, $effectivePrice);
+            if ($missing !== []) {
+                Response::error('No se puede publicar: faltan mínimos SEO del producto.', 400, 'PRODUCT_SEO_PUBLICATION_REQUIRED', ['fields' => $missing]);
+                exit;
+            }
+        }
+    }
+
+    private function publicationSeoGaps(array $data, ?array $currentProduct, float $effectivePrice): array {
+        $attributes = $data['attributes'] ?? ($currentProduct['attributes'] ?? []);
+        if (!is_array($attributes)) {
+            $attributes = [];
+        }
+
+        $description = trim((string)($data['description'] ?? ($currentProduct['description'] ?? '')));
+        $fields = [
+            'brand' => trim((string)($data['brand'] ?? ($currentProduct['brand'] ?? ''))),
+            'sku' => trim((string)($attributes['sku'] ?? '')),
+            'species' => trim((string)($attributes['species'] ?? '')),
+            'category' => trim((string)($data['category'] ?? ($currentProduct['category'] ?? ''))),
+        ];
+
+        $missing = [];
+        foreach ($fields as $field => $value) {
+            if ($value === '') {
+                $missing[] = $field;
+            }
+        }
+        if ($description === '' || mb_strlen($description) < 50) {
+            $missing[] = 'description';
+        }
+        if ($effectivePrice <= 0) {
+            $missing[] = 'price';
+        }
+        if (!$this->hasEffectiveImageSet($data, $currentProduct, 'thumb')) {
+            $missing[] = 'thumbnail';
+        }
+        if (!$this->hasEffectiveImageSet($data, $currentProduct, 'gallery')) {
+            $missing[] = 'product_image';
+        }
+
+        return array_values(array_unique($missing));
+    }
+
+    private function hasEffectiveImageSet(array $data, ?array $currentProduct, string $kind): bool {
+        if ($kind === 'thumb') {
+            if (array_key_exists('thumbImages', $data) || array_key_exists('thumbImage', $data)) {
+                return $this->hasAnyImage($data['thumbImages'] ?? $data['thumbImage'] ?? []);
+            }
+            return $this->hasAnyImage($currentProduct['thumbImage'] ?? []);
+        }
+
+        if (array_key_exists('images', $data) || array_key_exists('galleryImages', $data) || array_key_exists('image', $data)) {
+            return $this->hasAnyImage($data['images'] ?? $data['galleryImages'] ?? $data['image'] ?? []);
+        }
+        return $this->hasAnyImage($currentProduct['images'] ?? []);
+    }
+
+    private function hasAnyImage($value): bool {
+        if (is_string($value)) {
+            return trim($value) !== '';
+        }
+        if (!is_array($value)) {
+            return false;
+        }
+        foreach ($value as $item) {
+            if (is_string($item) && trim($item) !== '') {
+                return true;
+            }
+            if (is_array($item) && trim((string)($item['url'] ?? '')) !== '') {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function normalizeAudienceFields(array &$data, ?array $currentProduct = null): void {
