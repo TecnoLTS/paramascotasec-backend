@@ -148,6 +148,54 @@ class FacturadorApiService {
         ));
     }
 
+    public function cancelAndReissueInvoice(string $accessKey, string $reason = '', ?string $ambiente = null): array {
+        $normalizedAccessKey = preg_replace('/[^0-9]/', '', $accessKey);
+        if (!is_string($normalizedAccessKey) || $normalizedAccessKey === '') {
+            throw new \InvalidArgumentException('Clave de acceso inválida');
+        }
+
+        $invoiceEndpoint = $this->invoiceEndpointForAmbiente($ambiente);
+        $endpoint = $invoiceEndpoint . '/' . rawurlencode($normalizedAccessKey) . '/cancel-and-reissue';
+        $requestBody = json_encode([
+            'reason' => trim($reason) !== '' ? trim($reason) : 'Reemision manual solicitada desde panel administrativo.',
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($requestBody === false) {
+            throw new \RuntimeException('No se pudo serializar la solicitud de reemision');
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => implode("\r\n", [
+                    'Content-Type: application/json',
+                    'Accept: application/json',
+                    'X-API-Key: ' . $this->apiKey,
+                    'Content-Length: ' . strlen($requestBody),
+                ]),
+                'content' => $requestBody,
+                'timeout' => max($this->timeoutSeconds, 60),
+                'ignore_errors' => true,
+            ],
+        ]);
+
+        $responseBody = @file_get_contents($endpoint, false, $context);
+        $responseHeaders = $http_response_header ?? [];
+        $statusCode = $this->extractStatusCode($responseHeaders);
+        $decoded = is_string($responseBody) && $responseBody !== '' ? json_decode($responseBody, true) : null;
+
+        if ($statusCode >= 200 && $statusCode < 300 && is_array($decoded) && ($decoded['success'] ?? false) === true && is_array($decoded['data'] ?? null)) {
+            return $decoded['data'];
+        }
+
+        $message = is_array($decoded) ? ($decoded['error']['message'] ?? $decoded['message'] ?? null) : null;
+        throw new \RuntimeException(sprintf(
+            'No se pudo anular y reemitir la factura (%d) en %s: %s',
+            $statusCode ?: 500,
+            $endpoint,
+            is_string($message) && trim($message) !== '' ? $message : 'respuesta inválida'
+        ));
+    }
+
     private function extractStatusCode(array $headers): int {
         foreach ($headers as $header) {
             if (preg_match('#^HTTP/\S+\s+(\d{3})#', (string)$header, $matches) === 1) {
@@ -172,5 +220,18 @@ class FacturadorApiService {
         }
 
         return '/api/production/v1/invoices';
+    }
+
+    private function invoiceEndpointForAmbiente(?string $ambiente): string
+    {
+        $normalized = strtolower(trim((string)($ambiente ?? '')));
+        if ($normalized === 'produccion' || $normalized === 'production') {
+            return $this->baseUrl . '/api/production/v1/invoices';
+        }
+        if ($normalized === 'pruebas' || $normalized === 'test' || $normalized === 'testing') {
+            return $this->baseUrl . '/api/test/v1/invoices';
+        }
+
+        return $this->invoiceEndpoint;
     }
 }

@@ -394,6 +394,7 @@ $router->add('GET', '/api/admin/purchase-invoices', 'PurchaseInvoiceController@i
 $router->add('GET', '/api/admin/purchase-invoices/{id}', 'PurchaseInvoiceController@show');
 $router->add('GET', '/api/admin/billing/rides', 'BillingDocumentController@rides');
 $router->add('GET', '/api/admin/billing/rides/{accessKey}/pdf', 'BillingDocumentController@ridePdf');
+$router->add('POST', '/api/admin/billing/rides/{accessKey}/cancel-and-reissue', 'BillingDocumentController@cancelAndReissue');
 $router->add('GET', '/api/admin/pos/shift/active', 'PosController@activeShift');
 $router->add('GET', '/api/admin/pos/shifts', 'PosController@shifts');
 $router->add('GET', '/api/admin/pos/movements', 'PosController@movements');

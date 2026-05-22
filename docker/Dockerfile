@@ -33,7 +33,8 @@ RUN mkdir -p /var/www/html/public/uploads/products \
     && chmod -R 775 /var/www/html/public/uploads
 
 # Force correct ownership for all storage directories
-RUN chown -R www-data:www-data /var/www/html/storage \
+RUN mkdir -p /var/www/html/storage/logs \
+    && chown -R www-data:www-data /var/www/html/storage \
     && chmod -R 755 /var/www/html/storage \
     && chmod -R 775 /var/www/html/storage/logs
 
