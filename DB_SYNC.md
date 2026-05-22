@@ -1,15 +1,12 @@
-# DB sync (versionar datos)
+# DB sync (respaldos fuera de Git)
 
-Este repo guarda un dump de la BD en `db/backup.sql` para que los datos viajen con Git.
+Los dumps de base de datos pueden contener PII de clientes, pedidos, direcciones y tokens operativos. No deben viajar con Git.
 
-## 1) Configura el hook de Git (solo una vez)
+## 1) Hook de Git
 
-```bash
-cd /home/admincenter/contenedores/paramascotasec-backend
-git config core.hooksPath .githooks
-```
+El hook `.githooks/pre-commit` bloquea commits que intenten incluir `db/backup.sql` o `db/backups/`.
 
-## 2) Configura conexión a la BD (recomendado)
+## 2) Configura conexión a la BD
 
 Si usas Docker:
 
@@ -31,16 +28,14 @@ export DB_PASSWORD=change-this-to-a-strong-password
 
 Usa la misma clave definida en `paramascotas-DB/.env`. Si mantienes `POSTGRES_BIND_IP=127.0.0.1`, para acceso remoto usa tunel SSH.
 
-## 3) Dump manual (si quieres)
+## 3) Dump manual
 
 ```bash
-./scripts/db_dump.sh
+OUT_FILE=/home/admincenter/secure-backups/paramascotasec-backend/db-$(date +%Y%m%d-%H%M%S).sql ./scripts/db_dump.sh
 ```
 
 ## 4) Restaurar en otro entorno
 
 ```bash
-./scripts/db_restore.sh
+IN_FILE=/home/admincenter/secure-backups/paramascotasec-backend/db-YYYYMMDD-HHMMSS.sql ./scripts/db_restore.sh
 ```
-
-Al hacer `git commit`, el hook ejecuta el dump y agrega `db/backup.sql` automáticamente.

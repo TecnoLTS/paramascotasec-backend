@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Auto-dump DB so data changes are versioned with code.
-# Configure DB_DOCKER_CONTAINER or rely on local pg_dump.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts"
-"$SCRIPT_DIR/db_dump.sh"
-
-git add db/backup.sql
+# Database dumps may contain customer PII and must not be versioned.
+# Run scripts/db_dump.sh manually and store the output outside the repo.
+if git diff --cached --name-only | grep -Eq '(^|/)db/(backup\\.sql|backups/)'; then
+  echo "Blocked: database backup files must not be committed." >&2
+  echo "Use scripts/db_dump.sh and keep backups outside the repository." >&2
+  exit 1
+fi

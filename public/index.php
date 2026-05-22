@@ -85,10 +85,14 @@ register_shutdown_function(static function (): void {
     respond_with_json_error('Error interno del servidor', 500, 'INTERNAL_SERVER_ERROR');
 });
 
-// Load .env
-if (file_exists(__DIR__ . '/../.env')) {
+// Load .env when it is readable. Docker also injects the required environment
+// variables, so an unreadable local file should not break every request.
+$envPath = __DIR__ . '/../.env';
+if (is_readable($envPath)) {
     $dotenv = Dotenv::createImmutable(__DIR__ . '/..');
     $dotenv->load();
+} elseif (file_exists($envPath)) {
+    error_log('[ENV_WARNING] .env exists but is not readable; using process environment only.');
 }
 
 header_remove('X-Powered-By');
@@ -273,6 +277,9 @@ if (!function_exists('client_ip_matches_allowlist')) {
             return array_values(array_unique(array_merge(private_ip_rules(), $rules)));
         }
         if ($normalizedMode === 'custom') {
+            return $rules;
+        }
+        if ($rules !== []) {
             return $rules;
         }
         return [];

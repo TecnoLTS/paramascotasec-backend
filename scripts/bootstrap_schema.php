@@ -410,6 +410,33 @@ function executeSchemaBootstrap(PDO $pdo, string $defaultTenant): void {
                 (COALESCE(oi.quantity, 0) * COALESCE(oi.price, 0)) - COALESCE(oi.net_total, 0)
             )::numeric, 4)
           WHERE oi.tax_amount IS NULL',
+        'UPDATE "Order"
+            SET shipping_address = CASE
+                    WHEN jsonb_typeof(shipping_address) = \'object\'
+                    THEN shipping_address - \'password\' - \'confirmPassword\'
+                    ELSE shipping_address
+                END,
+                billing_address = CASE
+                    WHEN jsonb_typeof(billing_address) = \'object\'
+                    THEN billing_address - \'password\' - \'confirmPassword\'
+                    ELSE billing_address
+                END,
+                invoice_data = CASE
+                    WHEN jsonb_typeof(invoice_data) = \'object\'
+                    THEN jsonb_set(
+                        invoice_data,
+                        ARRAY[\'billing_address\'],
+                        COALESCE(invoice_data->\'billing_address\', \'{}\'::jsonb) - \'password\' - \'confirmPassword\',
+                        true
+                    )
+                    ELSE invoice_data
+                END
+          WHERE (shipping_address ? \'password\')
+             OR (shipping_address ? \'confirmPassword\')
+             OR (billing_address ? \'password\')
+             OR (billing_address ? \'confirmPassword\')
+             OR ((invoice_data->\'billing_address\') ? \'password\')
+             OR ((invoice_data->\'billing_address\') ? \'confirmPassword\')',
         'UPDATE "Product" SET is_published = true WHERE is_published IS NULL',
         'ALTER TABLE "Product" ALTER COLUMN is_published SET DEFAULT true',
         'ALTER TABLE "Product" ALTER COLUMN is_published SET NOT NULL',

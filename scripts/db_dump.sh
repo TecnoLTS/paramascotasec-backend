@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_FILE="${OUT_FILE:-$ROOT_DIR/db/backup.sql}"
+DEFAULT_BACKUP_DIR="${ROOT_DIR}/../secure-backups/paramascotasec-backend"
+OUT_FILE="${OUT_FILE:-$DEFAULT_BACKUP_DIR/db-$(date +%Y%m%d-%H%M%S).sql}"
 
 DB_NAME="${DB_DATABASE:-paramascotasec}"
 DB_USER="${DB_USERNAME:-postgres}"

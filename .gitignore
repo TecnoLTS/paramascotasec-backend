@@ -9,6 +9,7 @@ node_modules/
 logs/
 *.log
 db/backup.sql
+db/backups/
 
 # SRI certificates and sensitive files
 storage/sri/certs/*.p12

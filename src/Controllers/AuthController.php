@@ -183,6 +183,11 @@ class AuthController {
         $clientIp = \get_client_ip();
         $mode = trim((string)($_ENV['ADMIN_IP_MODE'] ?? 'off'));
         $allowlist = trim((string)($_ENV['ADMIN_IP_ALLOWLIST'] ?? ''));
+        $normalizedMode = \normalize_ip_access_mode($mode);
+
+        if ($normalizedMode === 'off' && $allowlist === '') {
+            return false;
+        }
 
         return \client_ip_matches_allowlist($clientIp, $allowlist, $mode);
     }
@@ -556,9 +561,14 @@ class AuthController {
         try {
             $data['document_type'] = $docType;
             $data['document_number'] = $docNumber;
+            $data['role'] = 'customer';
+            unset($data['email_verified'], $data['emailVerified']);
             $data['business_name'] = $data['businessName'] ?? ($data['business_name'] ?? null);
             $skipVerificationEmail = (bool)($data['skipVerificationEmail'] ?? ($data['skip_verification_email'] ?? false));
             $sendOtpOnCreate = (bool)($data['sendOtpOnCreate'] ?? ($data['send_otp_on_create'] ?? false));
+            if ($skipVerificationEmail && !$sendOtpOnCreate) {
+                $skipVerificationEmail = false;
+            }
             $existingUser = $this->userRepository->getByEmail($data['email']);
             $existingByDocument = $this->userRepository->getByDocumentNumber($docNumber);
             $replaceUserId = null;
@@ -614,15 +624,14 @@ class AuthController {
 
             if (!$skipVerificationEmail) {
                 if (!$this->sendVerificationEmail($data['email'], $data['name'], $result['token'])) {
-                    $this->userRepository->markEmailVerifiedById($result['id']);
                     $payload = [
                         'id' => $result['id'],
-                        'email_verified' => true
+                        'email_verified' => false
                     ];
                     if ($this->isDevelopment()) {
                         $payload['debug_token'] = $result['token'];
                     }
-                    Response::json($payload, 201, null, 'Cuenta creada. No se pudo enviar el correo de verificación, pero tu cuenta quedó activa. Inicia sesión para continuar.');
+                    Response::json($payload, 201, null, 'Cuenta creada. No se pudo enviar el correo de verificación; solicita un nuevo código antes de iniciar sesión.');
                     return;
                 }
             }

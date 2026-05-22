@@ -710,16 +710,26 @@ class OrderRepository {
     }
 
     private function normalizeCheckoutAddress(array $address): array {
-        $normalized = $address;
-        $normalized['country'] = $this->normalizeCountryName($address['country'] ?? null);
-        $normalized['street'] = trim((string)($address['street'] ?? $address['address'] ?? ''));
-        $normalized['city'] = trim((string)($address['city'] ?? ''));
-        $normalized['state'] = trim((string)($address['state'] ?? $address['province'] ?? ''));
-        $normalized['zip'] = trim((string)($address['zip'] ?? $address['postalCode'] ?? $address['postal_code'] ?? ''));
-        $normalized['formattedAddress'] = trim((string)($address['formattedAddress'] ?? $address['formatted_address'] ?? ''));
-        $normalized['placeId'] = trim((string)($address['placeId'] ?? $address['place_id'] ?? ''));
-        $normalized['latitude'] = $this->normalizeCoordinate($address['latitude'] ?? $address['lat'] ?? null);
-        $normalized['longitude'] = $this->normalizeCoordinate($address['longitude'] ?? $address['lng'] ?? null);
+        $normalized = [
+            'firstName' => trim((string)($address['firstName'] ?? $address['first_name'] ?? '')),
+            'lastName' => trim((string)($address['lastName'] ?? $address['last_name'] ?? '')),
+            'name' => trim((string)($address['name'] ?? '')),
+            'email' => trim((string)($address['email'] ?? '')),
+            'phone' => trim((string)($address['phone'] ?? '')),
+            'documentType' => trim((string)($address['documentType'] ?? $address['document_type'] ?? '')),
+            'documentNumber' => trim((string)($address['documentNumber'] ?? $address['document_number'] ?? '')),
+            'company' => trim((string)($address['company'] ?? $address['businessName'] ?? $address['business_name'] ?? '')),
+            'country' => $this->normalizeCountryName($address['country'] ?? null),
+            'street' => trim((string)($address['street'] ?? $address['address'] ?? '')),
+            'city' => trim((string)($address['city'] ?? '')),
+            'state' => trim((string)($address['state'] ?? $address['province'] ?? '')),
+            'zip' => trim((string)($address['zip'] ?? $address['postalCode'] ?? $address['postal_code'] ?? '')),
+            'formattedAddress' => trim((string)($address['formattedAddress'] ?? $address['formatted_address'] ?? '')),
+            'placeId' => trim((string)($address['placeId'] ?? $address['place_id'] ?? '')),
+            'latitude' => $this->normalizeCoordinate($address['latitude'] ?? $address['lat'] ?? null),
+            'longitude' => $this->normalizeCoordinate($address['longitude'] ?? $address['lng'] ?? null),
+        ];
+
         return $normalized;
     }
 
@@ -1011,12 +1021,12 @@ class OrderRepository {
             }
 
             if (isset($data['billing_address']) && is_array($data['billing_address'])) {
-                $billingAddress = $data['billing_address'];
+                $billingAddress = $this->normalizeCheckoutAddress($data['billing_address']);
                 $billingCountry = $this->normalizeCountryName($billingAddress['country'] ?? null);
                 if ($billingCountry === 'Ecuador' || $billingCountry === '') {
                     $billingAddress['country'] = 'Ecuador';
-                    $data['billing_address'] = $billingAddress;
                 }
+                $data['billing_address'] = $billingAddress;
             }
 
             // Inteligencia de Negocio: El Backend recalcula y valida TODO.
