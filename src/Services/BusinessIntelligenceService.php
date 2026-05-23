@@ -27,7 +27,9 @@ class BusinessIntelligenceService {
         $salesProgress = $this->orderRepo->getSalesProgress();
         $ordersProgress = $this->orderRepo->getOrdersProgress();
         $clientsProgress = $this->userRepo->getClientsProgress();
-        $inventoryDeepDive = $this->inventoryHealthCheck();
+        $inventoryService = new InventoryIntelligenceService();
+        $inventoryIntelligence = $inventoryService->getIntelligence();
+        $inventoryDeepDive = $inventoryService->toInventoryDeepDive($inventoryIntelligence);
         $productAnalysis = $this->productAnalytics();
         $profitStats = $this->profitAnalysis();
         $ordersByStatus = $this->orderRepo->getOrdersByStatus();
@@ -44,11 +46,12 @@ class BusinessIntelligenceService {
         $businessMetrics = [
             'averageOrderValue' => $this->orderRepo->getAverageOrderValue(),
             'profitStats' => $profitStats,
-            'inventoryValue' => $this->orderRepo->getInventoryValue(),
+            'inventoryValue' => $inventoryService->toInventoryValue($inventoryIntelligence),
             'ordersByStatus' => $ordersByStatus,
             'recentOrders' => $recentOrders,
             'salesDeepDive' => $salesDeepDive,
             'inventoryDeepDive' => $inventoryDeepDive,
+            'inventoryIntelligence' => $inventoryIntelligence,
             'aovDeepDive' => $aovDeepDive,
             'salesSummary' => $salesSummary,
             'financialTrends' => $financialTrends,

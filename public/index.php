@@ -350,6 +350,7 @@ $router->add('POST', '/api/admin/historical-sales', 'OrderController@storeHistor
 // Admin Dashboard Routes
 $router->add('GET', '/api/admin/dashboard/stats', 'DashboardController@stats');
 $router->add('GET', '/api/admin/report', 'DashboardController@report');
+$router->add('GET', '/api/admin/inventory/intelligence', 'InventoryController@intelligence');
 $router->add('GET', '/api/admin/reviews', 'ProductReviewController@adminIndex');
 $router->add('PATCH', '/api/admin/reviews/{id}', 'ProductReviewController@adminUpdate');
 $router->add('GET', '/api/admin/settings/tax', 'SettingsController@getVat');

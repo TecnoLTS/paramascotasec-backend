@@ -425,8 +425,13 @@ class FinancialPeriodRepository {
         $salesStmt->execute(['tenant_id' => $this->getTenantId(), 'start_date' => $startDate, 'end_date' => $endDate]);
         $sales = $salesStmt->fetch() ?: [];
 
+        $lineCostExpr = "CASE
+            WHEN COALESCE(oi.cost_total, 0) > 0 THEN oi.cost_total
+            WHEN COALESCE(oi.unit_cost, 0) > 0 THEN COALESCE(oi.quantity, 0) * oi.unit_cost
+            ELSE COALESCE(oi.quantity, 0) * COALESCE(p.cost, 0)
+        END";
         $costStmt = $this->db->prepare("
-            SELECT COALESCE(SUM(COALESCE(oi.cost_total, (COALESCE(oi.quantity, 0) * COALESCE(oi.unit_cost, p.cost, 0)), 0)), 0) AS cost
+            SELECT COALESCE(SUM($lineCostExpr), 0) AS cost
             FROM \"OrderItem\" oi
             JOIN \"Order\" o ON oi.order_id = o.id
             LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id

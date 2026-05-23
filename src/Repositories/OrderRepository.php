@@ -1217,11 +1217,18 @@ class OrderRepository {
     }
 
     private function orderItemCostExpression(string $orderItemAlias = 'oi', string $productAlias = 'p'): string {
-        return "COALESCE({$orderItemAlias}.cost_total, (COALESCE({$orderItemAlias}.quantity, 0) * COALESCE({$orderItemAlias}.unit_cost, {$productAlias}.cost, 0)), 0)";
+        return "CASE
+            WHEN COALESCE({$orderItemAlias}.cost_total, 0) > 0 THEN {$orderItemAlias}.cost_total
+            WHEN COALESCE({$orderItemAlias}.unit_cost, 0) > 0 THEN COALESCE({$orderItemAlias}.quantity, 0) * {$orderItemAlias}.unit_cost
+            ELSE COALESCE({$orderItemAlias}.quantity, 0) * COALESCE({$productAlias}.cost, 0)
+        END";
     }
 
     private function orderItemUnitCostExpression(string $orderItemAlias = 'oi', string $productAlias = 'p'): string {
-        return "COALESCE({$orderItemAlias}.unit_cost, {$productAlias}.cost, 0)";
+        return "CASE
+            WHEN COALESCE({$orderItemAlias}.unit_cost, 0) > 0 THEN {$orderItemAlias}.unit_cost
+            ELSE COALESCE({$productAlias}.cost, 0)
+        END";
     }
 
     private function rawOrderItemGrossTotalExpression(string $orderItemAlias = 'oi'): string {
