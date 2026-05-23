@@ -3,9 +3,11 @@
 namespace App\Controllers;
 
 use App\Repositories\ProductRepository;
+use App\Repositories\ProductReferenceCatalogRepository;
 use App\Core\Auth;
 use App\Core\Response;
 use App\Support\ProductAudience;
+use App\Support\ProductFieldValueNormalizer;
 use App\Support\ProductVariantMetadata;
 
 class ProductController {
@@ -81,10 +83,14 @@ class ProductController {
             'invoiceNumber' => trim((string)($invoice['invoiceNumber'] ?? $invoice['invoice_number'] ?? '')),
             'supplierName' => trim((string)($invoice['supplierName'] ?? $invoice['supplier_name'] ?? '')),
             'supplierDocument' => trim((string)($invoice['supplierDocument'] ?? $invoice['supplier_document'] ?? '')),
+            'purchaseTaxRate' => trim((string)($invoice['purchaseTaxRate'] ?? $invoice['purchase_tax_rate'] ?? ($metadata['purchase_tax_rate'] ?? ($metadata['purchaseTaxRate'] ?? '')))),
             'issuedAt' => trim((string)($invoice['issuedAt'] ?? $invoice['issued_at'] ?? '')),
             'notes' => trim((string)($invoice['notes'] ?? '')),
             'metadata' => $metadata,
         ];
+        if ($normalized['purchaseTaxRate'] !== '' && !isset($normalized['metadata']['purchase_tax_rate'])) {
+            $normalized['metadata']['purchase_tax_rate'] = $normalized['purchaseTaxRate'];
+        }
 
         $hasValue = false;
         foreach ($normalized as $key => $value) {
@@ -98,6 +104,59 @@ class ProductController {
         }
 
         $data['purchaseInvoice'] = $hasValue ? $normalized : null;
+    }
+
+    private function normalizeInventoryActionField(array &$data): void {
+        $rawAction = $data['inventoryAction'] ?? ($data['inventory_action'] ?? null);
+        unset($data['inventory_action']);
+
+        if ($rawAction === null || trim((string)$rawAction) === '') {
+            unset($data['inventoryAction']);
+            return;
+        }
+
+        $action = strtolower(trim((string)$rawAction));
+        $allowed = ['initial_stock', 'adjustment', 'restock'];
+        if (!in_array($action, $allowed, true)) {
+            Response::error('Acción de inventario inválida.', 400, 'PRODUCT_INVENTORY_ACTION_INVALID');
+            exit;
+        }
+
+        $data['inventoryAction'] = $action;
+    }
+
+    private function validateInventoryIntent(array &$data, int $stockDelta): void {
+        if ($stockDelta === 0) {
+            return;
+        }
+
+        $action = strtolower(trim((string)($data['inventoryAction'] ?? '')));
+        if ($action === '') {
+            Response::error('Indica si el cambio de stock es una compra o un ajuste de inventario.', 400, 'PRODUCT_INVENTORY_ACTION_REQUIRED');
+            exit;
+        }
+
+        if ($action === 'restock') {
+            if ($stockDelta <= 0) {
+                Response::error('Registrar compra solo puede aumentar el stock.', 400, 'PRODUCT_RESTOCK_QUANTITY_INVALID');
+                exit;
+            }
+            return;
+        }
+
+        if ($action === 'adjustment') {
+            $reason = trim((string)($data['inventoryAdjustmentReason'] ?? $data['inventory_adjustment_reason'] ?? ''));
+            unset($data['inventory_adjustment_reason']);
+            if ($reason === '') {
+                Response::error('Indica el motivo del ajuste de inventario.', 400, 'PRODUCT_INVENTORY_ADJUSTMENT_REASON_REQUIRED');
+                exit;
+            }
+            $data['inventoryAdjustmentReason'] = $reason;
+            return;
+        }
+
+        Response::error('Acción de inventario no válida para actualizar stock.', 400, 'PRODUCT_INVENTORY_ACTION_INVALID');
+        exit;
     }
 
     private function normalizeBooleanFlag(mixed $value, bool $default = false): bool {
@@ -164,6 +223,132 @@ class ProductController {
         if ($issuedAt === '' || preg_match('/^\d{4}-\d{2}-\d{2}$/', $issuedAt) !== 1) {
             Response::error('La fecha de la factura de compra es obligatoria y debe usar formato YYYY-MM-DD.', 400, 'PURCHASE_INVOICE_DATE_INVALID');
             exit;
+        }
+        $metadata = is_array($purchaseInvoice['metadata'] ?? null) ? $purchaseInvoice['metadata'] : [];
+        $taxRateRaw = $purchaseInvoice['purchaseTaxRate'] ?? ($purchaseInvoice['purchase_tax_rate'] ?? ($metadata['purchase_tax_rate'] ?? ($metadata['purchaseTaxRate'] ?? null)));
+        $taxRateText = trim(str_replace(',', '.', (string)$taxRateRaw));
+        if ($taxRateText === '') {
+            Response::error('El IVA de compra es obligatorio.', 400, 'PURCHASE_INVOICE_TAX_RATE_REQUIRED');
+            exit;
+        }
+        if (!is_numeric($taxRateText) || floatval($taxRateText) < 0 || floatval($taxRateText) > 100) {
+            Response::error('El IVA de compra debe estar entre 0% y 100%.', 400, 'PURCHASE_INVOICE_TAX_RATE_INVALID');
+            exit;
+        }
+    }
+
+    private function validatePurchaseUnitCost(array $data, ?array $currentProduct = null): void {
+        $rawCost = array_key_exists('cost', $data) ? $data['cost'] : ($currentProduct['cost'] ?? null);
+        if (!is_numeric($rawCost) || floatval($rawCost) <= 0) {
+            Response::error('El costo de compra es obligatorio para ingresar stock.', 400, 'PRODUCT_PURCHASE_COST_REQUIRED');
+            exit;
+        }
+    }
+
+    private function referenceCatalogIdentity(string $value): string {
+        $normalized = trim(preg_replace('/\s+/', ' ', $value));
+        if (class_exists('\Normalizer')) {
+            $normalized = \Normalizer::normalize($normalized, \Normalizer::FORM_D) ?: $normalized;
+            $normalized = preg_replace('/\p{Mn}+/u', '', $normalized) ?: $normalized;
+        }
+        return function_exists('mb_strtolower')
+            ? mb_strtolower($normalized, 'UTF-8')
+            : strtolower($normalized);
+    }
+
+    private function normalizeReferenceCatalogValue(string $catalogKey, string $value): string {
+        $text = trim(preg_replace('/\s+/', ' ', $value));
+        if ($text === '') {
+            return '';
+        }
+        if (in_array($catalogKey, ['sizes', 'weights', 'presentations', 'dosages'], true)) {
+            return ProductFieldValueNormalizer::normalizeDisplayValue($text);
+        }
+        return $text;
+    }
+
+    private function parseProductCatalogCategories(mixed $value): array {
+        if (is_array($value)) {
+            return $value;
+        }
+        if (!is_string($value) || trim($value) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($value, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        return preg_split('/\s*,\s*/', $value) ?: [];
+    }
+
+    private function isContentMeasurementValue(string $value): bool {
+        return preg_match('/\d+(?:[.,]\d+)?\s*(?:KGS?|KG|K|GR|G|ML|L|MG|LB|OZ)\b/iu', trim($value)) === 1;
+    }
+
+    private function syncProductReferenceCatalog(array $data): void {
+        $repository = new ProductReferenceCatalogRepository();
+        $catalog = $repository->getAll();
+        $changed = false;
+        $addValue = function (string $catalogKey, mixed $rawValue) use (&$catalog, &$changed): string {
+            if (!isset($catalog[$catalogKey]) || !is_array($catalog[$catalogKey])) {
+                return '';
+            }
+
+            $value = $this->normalizeReferenceCatalogValue($catalogKey, (string)$rawValue);
+            if ($value === '') {
+                return '';
+            }
+
+            $valueIdentity = $this->referenceCatalogIdentity($value);
+            foreach ($catalog[$catalogKey] as $existingValue) {
+                if ($this->referenceCatalogIdentity((string)$existingValue) === $valueIdentity) {
+                    return (string)$existingValue;
+                }
+            }
+
+            $catalog[$catalogKey][] = $value;
+            usort($catalog[$catalogKey], fn($left, $right) => strcasecmp((string)$left, (string)$right));
+            $changed = true;
+            return $value;
+        };
+
+        $addValue('categories', $data['category'] ?? '');
+
+        $attributes = is_array($data['attributes'] ?? null) ? $data['attributes'] : [];
+        foreach ($this->parseProductCatalogCategories($attributes['catalogCategories'] ?? []) as $category) {
+            $addValue('categories', $category);
+        }
+
+        $attributeCatalogMap = [
+            'size' => 'sizes',
+            'weight' => 'weights',
+            'volume' => 'weights',
+            'presentation' => 'presentations',
+            'packaging' => 'presentations',
+            'dosage' => 'dosages',
+            'material' => 'materials',
+            'color' => 'colors',
+            'usage' => 'usages',
+            'activeIngredient' => 'activeIngredients',
+            'storageLocation' => 'storageLocations',
+            'tag' => 'tags',
+            'flavor' => 'flavors',
+            'age' => 'ageRanges',
+        ];
+
+        foreach ($attributeCatalogMap as $attributeKey => $catalogKey) {
+            if (isset($attributes[$attributeKey])) {
+                if ($attributeKey === 'size' && $this->isContentMeasurementValue((string)$attributes[$attributeKey])) {
+                    $catalogKey = 'weights';
+                }
+                $addValue($catalogKey, $attributes[$attributeKey]);
+            }
+        }
+
+        if ($changed) {
+            $repository->replaceAll($catalog);
         }
     }
 
@@ -310,9 +495,15 @@ class ProductController {
         }
 
         $effectiveProduct = [
+            'id' => $data['id'] ?? ($currentProduct['id'] ?? ''),
+            'internalId' => $data['internalId'] ?? ($currentProduct['internalId'] ?? ''),
+            'legacyId' => $data['legacyId'] ?? ($currentProduct['legacyId'] ?? ''),
             'name' => $data['name'] ?? ($currentProduct['name'] ?? ''),
+            'description' => $data['description'] ?? ($currentProduct['description'] ?? ''),
             'brand' => $data['brand'] ?? ($currentProduct['brand'] ?? ''),
             'category' => $data['category'] ?? ($currentProduct['category'] ?? ''),
+            'productType' => $data['productType'] ?? ($data['product_type'] ?? ($currentProduct['productType'] ?? ($currentProduct['product_type'] ?? ''))),
+            'product_type' => $data['product_type'] ?? ($data['productType'] ?? ($currentProduct['product_type'] ?? ($currentProduct['productType'] ?? ''))),
             'gender' => $data['gender'] ?? ($currentProduct['gender'] ?? ''),
             'variantLabel' => $data['variantLabel'] ?? ($currentProduct['variantLabel'] ?? ''),
             'variantBaseName' => $data['variantBaseName'] ?? '',
@@ -329,9 +520,15 @@ class ProductController {
         }
 
         $effectiveProduct = [
+            'id' => $data['id'] ?? ($currentProduct['id'] ?? ''),
+            'internalId' => $data['internalId'] ?? ($currentProduct['internalId'] ?? ''),
+            'legacyId' => $data['legacyId'] ?? ($currentProduct['legacyId'] ?? ''),
             'name' => $data['name'] ?? ($currentProduct['name'] ?? ''),
+            'description' => $data['description'] ?? ($currentProduct['description'] ?? ''),
             'brand' => $data['brand'] ?? ($currentProduct['brand'] ?? ''),
             'category' => $data['category'] ?? ($currentProduct['category'] ?? ''),
+            'productType' => $data['productType'] ?? ($data['product_type'] ?? ($currentProduct['productType'] ?? ($currentProduct['product_type'] ?? ''))),
+            'product_type' => $data['product_type'] ?? ($data['productType'] ?? ($currentProduct['product_type'] ?? ($currentProduct['productType'] ?? ''))),
             'gender' => $data['gender'] ?? ($currentProduct['gender'] ?? ''),
             'variantLabel' => $data['variantLabel'] ?? ($currentProduct['variantLabel'] ?? ''),
             'variantBaseName' => $data['variantBaseName'] ?? '',
@@ -352,7 +549,16 @@ class ProductController {
 
         $variantLabel = ProductVariantMetadata::resolveVariantLabel($effectiveProduct, $effectiveAttributes);
         if ($variantLabel === '') {
-            Response::error('La variante necesita una talla, color, presentación o medida válida.', 400, 'PRODUCT_VARIANT_LABEL_REQUIRED');
+            $normalizedType = ProductAudience::normalizeProductType(
+                (string)($effectiveProduct['productType'] ?? $effectiveProduct['product_type'] ?? ''),
+                (string)($effectiveProduct['category'] ?? '')
+            );
+            $message = match ($normalizedType) {
+                'cuidado' => 'Selecciona o crea el peso/contenido, la presentación, la dosis o el rango recomendado del producto.',
+                'Alimento' => 'Selecciona o crea el peso neto o contenido del alimento.',
+                default => 'Selecciona o crea la talla, color, presentación o medida que diferencia la variante.',
+            };
+            Response::error($message, 400, 'PRODUCT_VARIANT_LABEL_REQUIRED');
             exit;
         }
     }
@@ -395,8 +601,10 @@ class ProductController {
         Auth::requireAdmin();
         try {
             $data = json_decode(file_get_contents('php://input'), true) ?: [];
+            $data['id'] = uniqid('prod_');
             $this->normalizePublishedField($data);
             $this->normalizePurchaseInvoiceField($data);
+            $this->normalizeInventoryActionField($data);
             $this->normalizeAudienceFields($data, null);
             $this->normalizeTaxSettings($data, null);
             $productType = ProductAudience::normalizeProductType((string)($data['productType'] ?? $data['product_type'] ?? ''), (string)($data['category'] ?? ''));
@@ -434,6 +642,16 @@ class ProductController {
                 return;
             }
             $quantity = isset($data['quantity']) && is_numeric($data['quantity']) ? intval($data['quantity']) : 0;
+            if ($quantity > 0 && !isset($data['inventoryAction'])) {
+                $data['inventoryAction'] = 'initial_stock';
+            }
+            if ($quantity > 0 && (($data['inventoryAction'] ?? 'initial_stock') !== 'initial_stock')) {
+                Response::error('El stock inicial de un producto nuevo debe registrarse como stock inicial.', 400, 'PRODUCT_INITIAL_STOCK_ACTION_INVALID');
+                return;
+            }
+            if ($quantity > 0) {
+                $this->validatePurchaseUnitCost($data);
+            }
             $this->validatePurchaseInvoice($data['purchaseInvoice'] ?? null, $quantity > 0);
             if (!isset($data['description']) || trim((string)$data['description']) === '') {
                 Response::error('Descripción requerida', 400, 'PRODUCT_DESCRIPTION_REQUIRED');
@@ -487,6 +705,7 @@ class ProductController {
             $this->normalizeAudienceFields($data, null);
             $this->validateVariantMetadata($data, null);
             $this->applyVariantMetadata($data, null);
+            $this->syncProductReferenceCatalog($data);
             $this->enforcePublicationEligibility($data, null);
             $product = $this->productRepository->create($data);
             Response::json($product, 201);
@@ -501,6 +720,7 @@ class ProductController {
             $data = json_decode(file_get_contents('php://input'), true) ?: [];
             $this->normalizePublishedField($data);
             $this->normalizePurchaseInvoiceField($data);
+            $this->normalizeInventoryActionField($data);
             $productType = isset($data['productType']) || isset($data['product_type'])
                 ? ProductAudience::normalizeProductType(
                     (string)($data['productType'] ?? $data['product_type'] ?? ''),
@@ -616,8 +836,12 @@ class ProductController {
                     unset($attributes['expirationDate'], $attributes['expiryDate'], $attributes['expirationAlertDays'], $attributes['expiryAlertDays']);
                 }
                 $currentQuantity = intval($currentProduct['quantity'] ?? 0);
-                $stockIncrease = max(0, $effectiveQuantity - $currentQuantity);
-                $this->validatePurchaseInvoice($data['purchaseInvoice'] ?? null, $stockIncrease > 0);
+                $stockDelta = $effectiveQuantity - $currentQuantity;
+                $this->validateInventoryIntent($data, $stockDelta);
+                if ($stockDelta > 0 && (($data['inventoryAction'] ?? '') === 'restock')) {
+                    $this->validatePurchaseUnitCost($data, $currentProduct);
+                }
+                $this->validatePurchaseInvoice($data['purchaseInvoice'] ?? null, $stockDelta > 0 && (($data['inventoryAction'] ?? '') === 'restock'));
                 if (empty($attributes['supplier']) && !empty($data['purchaseInvoice']['supplierName'])) {
                     $attributes['supplier'] = trim((string)$data['purchaseInvoice']['supplierName']);
                 }
@@ -626,6 +850,7 @@ class ProductController {
                 $this->normalizeTaxSettings($data, $currentProduct);
                 $this->validateVariantMetadata($data, $currentProduct);
                 $this->applyVariantMetadata($data, $currentProduct);
+                $this->syncProductReferenceCatalog($data);
                 $this->enforcePublicationEligibility($data, $currentProduct);
             } else {
                 $currentProduct = $this->productRepository->getById($id, ['includeUnpublished' => true]);
@@ -637,11 +862,17 @@ class ProductController {
                 $effectiveQuantity = isset($data['quantity']) && is_numeric($data['quantity'])
                     ? intval($data['quantity'])
                     : $currentQuantity;
-                $this->validatePurchaseInvoice($data['purchaseInvoice'] ?? null, $effectiveQuantity > $currentQuantity);
+                $stockDelta = $effectiveQuantity - $currentQuantity;
+                $this->validateInventoryIntent($data, $stockDelta);
+                if ($stockDelta > 0 && (($data['inventoryAction'] ?? '') === 'restock')) {
+                    $this->validatePurchaseUnitCost($data, $currentProduct);
+                }
+                $this->validatePurchaseInvoice($data['purchaseInvoice'] ?? null, $stockDelta > 0 && (($data['inventoryAction'] ?? '') === 'restock'));
                 $this->normalizeAudienceFields($data, $currentProduct);
                 $this->normalizeTaxSettings($data, $currentProduct);
                 $this->validateVariantMetadata($data, $currentProduct);
                 $this->applyVariantMetadata($data, $currentProduct);
+                $this->syncProductReferenceCatalog($data);
                 $this->enforcePublicationEligibility($data, $currentProduct);
             }
             $product = $this->productRepository->update($id, $data);

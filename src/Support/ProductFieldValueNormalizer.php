@@ -24,6 +24,13 @@ final class ProductFieldValueNormalizer
             return $upper;
         }
 
+        if (preg_match('/^(\d+(?:\.\d+)?)\s*(?:(KGS?|KG|K|GR|G|LB|L|ML|MG|OZ)\s*)?(?:A|HASTA|-)\s*(\d+(?:\.\d+)?)\s*(KGS?|KG|K|GR|G|LB|L|ML|MG|OZ)$/i', $upper, $matches) === 1) {
+            $unit = $matches[4];
+            $fromUnit = trim((string)($matches[2] ?? ''));
+            $from = self::normalizeAmount($matches[1]) . ($fromUnit !== '' ? ' ' . self::normalizeUnit($fromUnit) : '');
+            return $from . ' a ' . self::normalizeAmount($matches[3]) . ' ' . self::normalizeUnit($unit);
+        }
+
         if (preg_match('/^(\d+(?:\.\d+)?)\s*(KGS?|KG|K)$/i', $upper, $matches) === 1) {
             return self::normalizeAmount($matches[1]) . ' kg';
         }
@@ -54,7 +61,7 @@ final class ProductFieldValueNormalizer
     public static function normalizeVariantAttributeMap(array $attributes): array
     {
         $normalized = $attributes;
-        foreach (['size', 'weight', 'presentation', 'packaging', 'dosage', 'volume'] as $key) {
+        foreach (['size', 'weight', 'range', 'presentation', 'packaging', 'dosage', 'volume'] as $key) {
             if (!array_key_exists($key, $normalized)) {
                 continue;
             }
@@ -90,5 +97,20 @@ final class ProductFieldValueNormalizer
 
         $formatted = number_format((float)$numeric, 3, '.', '');
         return rtrim(rtrim($formatted, '0'), '.');
+    }
+
+    private static function normalizeUnit(string $unit): string
+    {
+        $upper = strtoupper(trim($unit));
+        return match (true) {
+            in_array($upper, ['KGS', 'KG', 'K'], true) => 'kg',
+            in_array($upper, ['GR', 'G'], true) => 'gr',
+            $upper === 'LB' => 'lb',
+            $upper === 'L' => 'l',
+            $upper === 'ML' => 'ml',
+            $upper === 'MG' => 'mg',
+            $upper === 'OZ' => 'oz',
+            default => strtolower($upper),
+        };
     }
 }

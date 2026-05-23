@@ -26,10 +26,12 @@ class SettingsController {
             'brands' => [],
             'suppliers' => [],
             'sizes' => [],
+            'weights' => [],
             'materials' => [],
             'colors' => [],
             'usages' => [],
             'presentations' => [],
+            'dosages' => [],
             'activeIngredients' => [],
             'storageLocations' => [],
             'tags' => [],
@@ -96,7 +98,7 @@ class SettingsController {
                 continue;
             }
 
-            if (in_array($catalogKey, ['sizes', 'presentations'], true)) {
+            if (in_array($catalogKey, ['sizes', 'weights', 'presentations', 'dosages'], true)) {
                 $text = ProductFieldValueNormalizer::normalizeDisplayValue($text);
                 if ($text === '') {
                     continue;
@@ -116,6 +118,43 @@ class SettingsController {
         }
 
         return array_values($normalized);
+    }
+
+    private function isWeightOrContentReference(string $value): bool {
+        return preg_match('/\d+(?:[.,]\d+)?\s*(?:kgs?|kg|k|gr|g|lb|lbs|l|lt|lts|ml|oz|un|uni|und|unidad(?:es)?)\b/iu', $value) === 1;
+    }
+
+    private function isDosageReference(string $value): bool {
+        return preg_match('/\d+(?:[.,]\d+)?\s*(?:mg|mcg|ug|µg|ui|iu)\b|(?:^|\s)\d+\s*(?:dosis|dose|tabletas?|tabs?|comprimidos?|capsulas?|cápsulas?)\b/iu', $value) === 1;
+    }
+
+    private function mergeReferenceOptionLists(array ...$lists): array {
+        return $this->sanitizeReferenceOptionList(array_merge(...$lists));
+    }
+
+    private function normalizeMeasuredReferenceList(array $values): array {
+        return $this->sanitizeReferenceOptionList($values, 'weights');
+    }
+
+    private function migrateMeasuredOptions(array &$data): void {
+        $sizes = $this->normalizeMeasuredReferenceList($data['sizes'] ?? []);
+        $weights = [];
+        $dosages = [];
+        $remainingSizes = [];
+
+        foreach ($sizes as $size) {
+            if ($this->isDosageReference($size)) {
+                $dosages[] = $size;
+            } elseif ($this->isWeightOrContentReference($size)) {
+                $weights[] = $size;
+            } else {
+                $remainingSizes[] = $size;
+            }
+        }
+
+        $data['sizes'] = $remainingSizes;
+        $data['weights'] = $this->normalizeMeasuredReferenceList(array_merge($data['weights'] ?? [], $weights));
+        $data['dosages'] = $this->normalizeMeasuredReferenceList(array_merge($data['dosages'] ?? [], $dosages));
     }
 
     private function sanitizeTextValue($value, $maxLength = 255) {
@@ -394,6 +433,8 @@ class SettingsController {
 
             $defaults[$key] = $this->sanitizeReferenceOptionList($source[$key] ?? [], $key);
         }
+
+        $this->migrateMeasuredOptions($defaults);
 
         return $defaults;
     }

@@ -24,18 +24,22 @@ final class ProductAudience
     public static function normalizeProductType(?string $value, ?string $fallbackCategory = null): string
     {
         $type = self::normalizeProductTypeToken((string)$value);
-        if ($type !== '') {
-            return $type;
-        }
-
         $category = self::normalizeCategoryToken((string)$fallbackCategory);
-        return match ($category) {
+        $categoryType = match ($category) {
             'Alimento' => 'Alimento',
             'ropa' => 'ropa',
             'salud' => 'cuidado',
             'accesorios' => 'accesorios',
             default => '',
         };
+        if ($categoryType === 'cuidado' && $type === 'accesorios') {
+            return 'cuidado';
+        }
+        if ($type !== '') {
+            return $type;
+        }
+
+        return $categoryType;
     }
 
     public static function categoryForProductType(?string $productType): string

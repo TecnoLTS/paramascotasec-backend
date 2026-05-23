@@ -6,10 +6,13 @@ namespace App\Support;
 
 final class ProductVariantMetadata
 {
+    private const CARE_VARIANT_FIELDS = ['range', 'weight', 'presentation', 'dosage', 'volume', 'packaging'];
+
     private const ATTRIBUTE_LABEL_KEYS = [
         'variantLabel',
         'size',
         'weight',
+        'range',
         'presentation',
         'packaging',
         'dosage',
@@ -32,20 +35,71 @@ final class ProductVariantMetadata
     public static function apply(array $product, array $attributes): array
     {
         $attributes = ProductFieldValueNormalizer::normalizeVariantAttributeMap($attributes);
+        $normalizedType = self::normalizeProductType(
+            (string)($product['productType'] ?? $product['product_type'] ?? ''),
+            (string)($product['category'] ?? '')
+        );
+        if ($normalizedType === 'cuidado') {
+            $attributes = self::normalizeLegacyCareAttributes($attributes);
+            unset($attributes['size']);
+            $variantAxis = trim((string)($attributes['variantAxis'] ?? $attributes['variantDefinitionField'] ?? ''));
+            if ($variantAxis !== '' && !in_array($variantAxis, self::CARE_VARIANT_FIELDS, true)) {
+                unset($attributes['variantAxis'], $attributes['variantDefinitionField']);
+            }
+        }
+        if ($normalizedType === 'alimento') {
+            $attributes = self::normalizeFoodMeasurementAttributes($attributes);
+        }
+        $displayAxis = self::resolveDisplayAxisByType($normalizedType, $attributes);
+        $requestedCatalogDisplayMode = self::normalizeCatalogDisplayMode(
+            $attributes['catalogDisplayMode'] ?? ($attributes['variantDisplayMode'] ?? '')
+        );
+        if ($displayAxis !== '') {
+            $attributes['displayAxis'] = $displayAxis;
+            if (in_array($displayAxis, ['size', 'color'], true)) {
+                $attributes['variantAxis'] = $displayAxis;
+                $attributes['variantDefinitionField'] = $displayAxis;
+            }
+            if (
+                in_array($normalizedType, ['ropa', 'accesorios'], true)
+                && $displayAxis === 'size'
+                && trim((string)($attributes['color'] ?? '')) !== ''
+                && self::isAccessorySizeVariantValue((string)($attributes['size'] ?? ''))
+            ) {
+                $attributes['catalogDisplayMode'] = $requestedCatalogDisplayMode === 'separate' ? 'separate' : 'grouped';
+            } elseif ($displayAxis === 'color') {
+                $attributes['catalogDisplayMode'] = $requestedCatalogDisplayMode !== '' ? $requestedCatalogDisplayMode : 'grouped';
+            } elseif ($requestedCatalogDisplayMode !== '') {
+                $attributes['catalogDisplayMode'] = $requestedCatalogDisplayMode;
+            }
+        } else {
+            unset($attributes['displayAxis']);
+        }
+
         $label = self::resolveVariantLabel($product, $attributes);
         if ($label === '') {
             unset($attributes['variantLabel'], $attributes['variantBaseName'], $attributes['variantGroupKey']);
             return $attributes;
         }
 
+        $catalogDisplayMode = self::normalizeCatalogDisplayMode(
+            $attributes['catalogDisplayMode'] ?? ($attributes['variantDisplayMode'] ?? '')
+        );
+        $productId = trim((string)($product['id'] ?? $product['internalId'] ?? $product['legacyId'] ?? ''));
         $baseName = self::resolveVariantBaseName($product, $attributes, $label);
         $groupKey = self::buildGroupKey($product, $attributes, $baseName);
+        if ($catalogDisplayMode === 'separate' && $productId !== '') {
+            $baseName = self::cleanWhitespace((string)($product['name'] ?? '')) ?: $baseName;
+            $groupKey = 'single:' . $productId;
+        }
 
         $attributes['variantLabel'] = ProductFieldValueNormalizer::normalizeVariantLabelValue($label);
         $attributes['variantBaseName'] = $baseName;
         $attributes['variantGroupKey'] = $groupKey;
 
-        if (self::isMeasurementLikeLabel($label) && trim((string)($attributes['size'] ?? '')) === '') {
+        if ($normalizedType === 'alimento' && self::isContentMeasurementValue($label) && trim((string)($attributes['weight'] ?? '')) === '') {
+            $attributes['weight'] = ProductFieldValueNormalizer::normalizeDisplayValue($label);
+        } elseif ($normalizedType !== 'cuidado' && $normalizedType !== 'alimento' && self::isMeasurementLikeLabel($label) && trim((string)($attributes['size'] ?? '')) === '') {
             $attributes['size'] = ProductFieldValueNormalizer::normalizeDisplayValue($label);
         }
 
@@ -54,9 +108,27 @@ final class ProductVariantMetadata
 
     public static function resolveVariantLabel(array $product, array $attributes): string
     {
+        $normalizedType = self::normalizeProductType(
+            (string)($product['productType'] ?? $product['product_type'] ?? ''),
+            (string)($product['category'] ?? '')
+        );
+        if ($normalizedType === 'cuidado') {
+            $attributes = self::normalizeLegacyCareAttributes(
+                ProductFieldValueNormalizer::normalizeVariantAttributeMap($attributes)
+            );
+        }
+        if ($normalizedType === 'alimento') {
+            $attributes = self::normalizeFoodMeasurementAttributes(
+                ProductFieldValueNormalizer::normalizeVariantAttributeMap($attributes)
+            );
+        }
         $canonicalLabel = self::resolveCanonicalLabelByType($product, $attributes);
         if ($canonicalLabel !== '') {
             return $canonicalLabel;
+        }
+
+        if ($normalizedType === 'cuidado') {
+            return '';
         }
 
         $explicit = trim((string)($product['variantLabel'] ?? ''));
@@ -64,7 +136,7 @@ final class ProductVariantMetadata
             return self::normalizeLabel($explicit);
         }
 
-        foreach (self::ATTRIBUTE_LABEL_KEYS as $key) {
+        foreach (self::attributeLabelKeysForType($normalizedType) as $key) {
             $value = trim((string)($attributes[$key] ?? ''));
             if ($value !== '') {
                 return self::normalizeLabel($value);
@@ -76,7 +148,9 @@ final class ProductVariantMetadata
             return '';
         }
 
-        $patterns = [
+        $rangePattern = '/(\d+(?:[.,]\d+)?\s*(?:(?:KGS?|KG|K|GR|G|LB|L|ML|MG|OZ)\s*)?(?:a|hasta|-)\s*\d+(?:[.,]\d+)?\s*(?:KGS?|KG|K|GR|G|LB|L|ML|MG|OZ))$/iu';
+        $patterns = $normalizedType === 'cuidado' ? [$rangePattern] : [
+            $rangePattern,
             '/((?:\d+(?:[.,]\d+)?\s?(?:KGS?|KG|K|GR|G|LB|L|ML|MG|OZ))(?:\s*-\s*(?:\d+(?:[.,]\d+)?\s?(?:KGS?|KG|K|GR|G|LB|L|ML|MG|OZ)))?)$/iu',
             '/((?:\d+\s*x\s*\d+\s*(?:TABS?|DS|UN|UNI|PACK|PZA|PZ))|(?:x\s*\d+)|(?:\d+\s*(?:TABS?|DS|UN|UNI|PACK|PZA|PZ)))$/iu',
             '/((?:XXS|XS|S|M|L|XL|XXL|STANDARD))$/iu',
@@ -97,15 +171,45 @@ final class ProductVariantMetadata
             (string)($product['productType'] ?? $product['product_type'] ?? ''),
             (string)($product['category'] ?? '')
         );
+        if ($normalizedType === 'cuidado') {
+            $attributes = self::normalizeLegacyCareAttributes($attributes);
+        }
+        if ($normalizedType === 'alimento') {
+            $attributes = self::normalizeFoodMeasurementAttributes($attributes);
+        }
 
         $size = self::normalizeLabel((string)($attributes['size'] ?? ''));
         $weight = self::normalizeLabel((string)($attributes['weight'] ?? ''));
+        $range = self::normalizeLabel((string)($attributes['range'] ?? ''));
         $presentation = self::normalizeLabel((string)($attributes['presentation'] ?? ''));
+        $dosage = self::normalizeLabel((string)($attributes['dosage'] ?? ''));
+        $volume = self::normalizeLabel((string)($attributes['volume'] ?? ''));
+        $packaging = self::normalizeLabel((string)($attributes['packaging'] ?? ''));
         $color = self::cleanWhitespace((string)($attributes['color'] ?? ''));
         $normalizedColor = self::normalizeLabel($color);
         $explicit = self::normalizeLabel((string)($attributes['variantLabel'] ?? $product['variantLabel'] ?? ''));
-        $variantAxis = trim((string)($attributes['variantAxis'] ?? $attributes['variantDefinitionField'] ?? ''));
-        if ($variantAxis !== '') {
+        $variantAxis = strtolower(trim((string)(
+            in_array($normalizedType, ['ropa', 'accesorios'], true)
+                ? ($attributes['displayAxis'] ?? $attributes['variantAxis'] ?? $attributes['variantDefinitionField'] ?? '')
+                : ($attributes['variantAxis'] ?? $attributes['variantDefinitionField'] ?? '')
+        )));
+        if ($normalizedType === 'ropa' && $variantAxis === 'size' && $size !== '') {
+            return $size;
+        }
+        if ($normalizedType === 'ropa' && $size !== '' && $normalizedColor !== '') {
+            return trim($size . ' ' . $normalizedColor);
+        }
+        if ($normalizedType === 'accesorios' && $variantAxis === 'size' && $size !== '') {
+            return $size;
+        }
+        if ($normalizedType === 'accesorios' && $normalizedColor !== '' && $size !== '') {
+            return trim($normalizedColor . ' ' . $size);
+        }
+        if ($normalizedType === 'accesorios' && $variantAxis === 'color' && $normalizedColor !== '') {
+            return $normalizedColor;
+        }
+
+        if ($variantAxis !== '' && ($normalizedType !== 'cuidado' || in_array($variantAxis, self::CARE_VARIANT_FIELDS, true))) {
             $axisValue = self::normalizeLabel((string)($attributes[$variantAxis] ?? ''));
             if ($axisValue !== '') {
                 return $axisValue;
@@ -119,9 +223,173 @@ final class ProductVariantMetadata
             'accesorios' => self::shouldPreserveDetailedExplicitLabel($explicit, $size, $normalizedColor)
                 ? $explicit
                 : ($normalizedColor !== '' ? $normalizedColor : ($size !== '' ? $size : ($presentation !== '' ? $presentation : $explicit))),
-            'cuidado' => $presentation !== '' ? $presentation : ($size !== '' ? $size : $explicit),
-            'alimento' => $weight !== '' ? $weight : ($size !== '' ? $size : ($presentation !== '' ? $presentation : $explicit)),
+            'cuidado' => $weight !== ''
+                ? $weight
+                : ($volume !== ''
+                    ? $volume
+                    : ($dosage !== ''
+                        ? $dosage
+                        : ($presentation !== ''
+                            ? $presentation
+                            : ($packaging !== ''
+                                ? $packaging
+                                : $range)))),
+            'alimento' => $weight !== '' ? $weight : ($presentation !== '' ? $presentation : $explicit),
             default => $explicit,
+        };
+    }
+
+    private static function attributeLabelKeysForType(string $normalizedType): array
+    {
+        if ($normalizedType === 'cuidado') {
+            return ['weight', 'volume', 'dosage', 'presentation', 'packaging', 'range'];
+        }
+        if ($normalizedType === 'alimento') {
+            return ['weight', 'presentation', 'packaging', 'volume', 'flavor'];
+        }
+
+        return self::ATTRIBUTE_LABEL_KEYS;
+    }
+
+    private static function normalizeLegacyCareAttributes(array $attributes): array
+    {
+        $variantAxis = trim((string)($attributes['variantAxis'] ?? $attributes['variantDefinitionField'] ?? ''));
+        if ($variantAxis !== '' && !in_array($variantAxis, self::CARE_VARIANT_FIELDS, true)) {
+            unset($attributes['variantAxis'], $attributes['variantDefinitionField']);
+        }
+
+        unset($attributes['size']);
+
+        return $attributes;
+    }
+
+    private static function normalizeFoodMeasurementAttributes(array $attributes): array
+    {
+        if (isset($attributes['presentation']) && self::isGenericPresentationValue((string)$attributes['presentation'])) {
+            unset($attributes['presentation']);
+        }
+
+        $size = trim((string)($attributes['size'] ?? ''));
+        if ($size !== '') {
+            if (self::isContentMeasurementValue($size) && trim((string)($attributes['weight'] ?? '')) === '') {
+                $attributes['weight'] = ProductFieldValueNormalizer::normalizeDisplayValue($size);
+            }
+            unset($attributes['size']);
+        }
+
+        $volume = trim((string)($attributes['volume'] ?? ''));
+        if ($volume !== '' && self::isContentMeasurementValue($volume)) {
+            if (trim((string)($attributes['weight'] ?? '')) === '') {
+                $attributes['weight'] = ProductFieldValueNormalizer::normalizeDisplayValue($volume);
+            }
+            unset($attributes['volume']);
+        }
+
+        if (
+            trim((string)($attributes['presentation'] ?? '')) === ''
+            && trim((string)($attributes['packaging'] ?? '')) !== ''
+        ) {
+            $attributes['presentation'] = ProductFieldValueNormalizer::normalizeDisplayValue((string)$attributes['packaging']);
+        }
+
+        return $attributes;
+    }
+
+    private static function isGenericPresentationValue(string $value): bool
+    {
+        return in_array(self::slugify($value), [
+            'selecciona-presentacion',
+            'crear-o-seleccionar-presentacion',
+        ], true);
+    }
+
+    private static function resolveDisplayAxisByType(string $normalizedType, array $attributes): string
+    {
+        $hasValue = static fn(string $key): bool => trim((string)($attributes[$key] ?? '')) !== '';
+        $requestedAxis = self::resolveRequestedDisplayAxis($attributes, $normalizedType);
+        if ($requestedAxis !== '') {
+            return $requestedAxis;
+        }
+
+        if ($normalizedType === 'ropa') {
+            if ($hasValue('size')) {
+                return 'size';
+            }
+            if ($hasValue('color')) {
+                return 'color';
+            }
+        }
+
+        if ($normalizedType === 'accesorios') {
+            if ($hasValue('color')) {
+                return 'color';
+            }
+            if ($hasValue('size')) {
+                return 'size';
+            }
+            if ($hasValue('presentation') || $hasValue('packaging')) {
+                return 'presentation';
+            }
+        }
+
+        if ($normalizedType === 'cuidado') {
+            if ($hasValue('weight') || $hasValue('volume') || $hasValue('presentation') || $hasValue('packaging')) {
+                return 'presentation';
+            }
+            if ($hasValue('dosage')) {
+                return 'dosage';
+            }
+            if ($hasValue('range')) {
+                return 'range';
+            }
+        }
+
+        if ($normalizedType === 'alimento') {
+            if ($hasValue('weight') || $hasValue('presentation') || $hasValue('packaging') || $hasValue('volume')) {
+                return 'presentation';
+            }
+        }
+
+        return '';
+    }
+
+    private static function resolveRequestedDisplayAxis(array $attributes, string $normalizedType): string
+    {
+        $rawAxis = '';
+        foreach (['displayAxis', 'publicVariantAxis', 'catalogDisplayAxis', 'variantAxis', 'variantDefinitionField'] as $key) {
+            $candidate = trim((string)($attributes[$key] ?? ''));
+            if ($candidate !== '') {
+                $rawAxis = $candidate;
+                break;
+            }
+        }
+
+        $rawAxis = strtolower($rawAxis);
+        $axis = match ($rawAxis) {
+            'weight', 'volume', 'packaging' => 'presentation',
+            'presentation', 'size', 'color', 'range', 'dosage' => $rawAxis,
+            default => '',
+        };
+        if ($axis === '') {
+            return '';
+        }
+
+        if ($normalizedType === 'cuidado' && !in_array($axis, ['presentation', 'range', 'dosage'], true)) {
+            return '';
+        }
+        if ($normalizedType === 'alimento' && $axis !== 'presentation') {
+            return '';
+        }
+
+        $hasValue = static fn(string $key): bool => trim((string)($attributes[$key] ?? '')) !== '';
+
+        return match ($axis) {
+            'color' => $hasValue('color') ? 'color' : '',
+            'size' => $hasValue('size') && !in_array($normalizedType, ['cuidado', 'alimento'], true) ? 'size' : '',
+            'presentation' => ($hasValue('weight') || $hasValue('volume') || $hasValue('presentation') || $hasValue('packaging')) ? 'presentation' : '',
+            'range' => $hasValue('range') ? 'range' : '',
+            'dosage' => $hasValue('dosage') ? 'dosage' : '',
+            default => '',
         };
     }
 
@@ -140,23 +408,36 @@ final class ProductVariantMetadata
 
     private static function normalizeProductType(string $type, string $category = ''): string
     {
-        $value = strtolower(trim($type !== '' ? $type : $category));
-
-        return match ($value) {
+        $normalize = static fn(string $value): string => match (strtolower(trim($value))) {
             'alimento', 'food' => 'alimento',
             'ropa', 'apparel' => 'ropa',
             'accesorios', 'accessories' => 'accesorios',
-            'cuidado', 'care' => 'cuidado',
-            default => $value,
+            'cuidado', 'care', 'salud', 'higiene', 'medicina', 'medicinas', 'farmacia' => 'cuidado',
+            default => strtolower(trim($value)),
         };
+        $typeValue = $normalize($type);
+        $categoryValue = $normalize($category);
+        if ($categoryValue === 'cuidado' && $typeValue === 'accesorios') {
+            return 'cuidado';
+        }
+        return $typeValue !== '' ? $typeValue : $categoryValue;
     }
 
     public static function resolveVariantBaseName(array $product, array $attributes, ?string $label = null): string
     {
         $name = self::cleanWhitespace((string)($product['name'] ?? ''));
         $label = $label ?? self::resolveVariantLabel($product, $attributes);
+        $normalizedType = self::normalizeProductType(
+            (string)($product['productType'] ?? $product['product_type'] ?? ''),
+            (string)($product['category'] ?? '')
+        );
         if ($name === '') {
             return $name;
+        }
+
+        $displayAxisBaseName = self::resolveDisplayAxisBaseName($name, $attributes, $normalizedType);
+        if ($displayAxisBaseName !== '') {
+            return $displayAxisBaseName;
         }
 
         $explicitCandidates = array_values(array_filter([
@@ -195,6 +476,176 @@ final class ProductVariantMetadata
         }
 
         return $base !== '' ? $base : $name;
+    }
+
+    private static function pluralizeSpanishColor(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return $value;
+        }
+
+        return preg_match('/[aeiouáéíóú]$/iu', $value) === 1 ? $value . 's' : $value;
+    }
+
+    private static function displayAxisValueAliases(string $axis, string $value): array
+    {
+        $value = self::cleanWhitespace($value);
+        if ($value === '') {
+            return [];
+        }
+
+        if ($axis !== 'color' || !str_contains($value, '/')) {
+            return self::colorValueAliases($value);
+        }
+
+        $parts = array_values(array_filter(array_map(
+            static fn(string $part): string => trim($part),
+            explode('/', $value)
+        )));
+        if (count($parts) < 2) {
+            return [$value];
+        }
+
+        [$primary, $secondary] = [$parts[0], $parts[1]];
+        $primaryAliases = self::colorValueAliases($primary);
+        $secondaryAliases = self::colorValueAliases($secondary);
+        $secondaryPluralAliases = array_map(
+            static fn(string $alias): string => self::pluralizeSpanishColor($alias),
+            $secondaryAliases
+        );
+
+        $aliases = [
+            $value,
+        ];
+
+        foreach ($primaryAliases as $primaryAlias) {
+            foreach ($secondaryAliases as $secondaryAlias) {
+                $aliases[] = $primaryAlias . ' ' . $secondaryAlias;
+                $aliases[] = $primaryAlias . ' con Detalles ' . $secondaryAlias;
+                $aliases[] = $primaryAlias . ' con detalles ' . $secondaryAlias;
+            }
+            foreach ($secondaryPluralAliases as $secondaryPluralAlias) {
+                $aliases[] = $primaryAlias . ' con Detalles ' . $secondaryPluralAlias;
+                $aliases[] = $primaryAlias . ' con detalles ' . $secondaryPluralAlias;
+            }
+        }
+
+        return array_values(array_unique($aliases));
+    }
+
+    private static function colorValueAliases(string $value): array
+    {
+        $value = self::cleanWhitespace($value);
+        if ($value === '') {
+            return [];
+        }
+
+        $normalized = mb_strtolower($value);
+        $genderPairs = [
+            'amarillo' => 'amarilla',
+            'amarilla' => 'amarillo',
+            'blanco' => 'blanca',
+            'blanca' => 'blanco',
+            'morado' => 'morada',
+            'morada' => 'morado',
+            'negro' => 'negra',
+            'negra' => 'negro',
+            'rosa' => 'rosado',
+            'rosado' => 'rosa',
+            'rosada' => 'rosa',
+            'rojo' => 'roja',
+            'roja' => 'rojo',
+        ];
+
+        $aliases = [$value];
+        if (isset($genderPairs[$normalized])) {
+            $aliases[] = $genderPairs[$normalized];
+            $aliases[] = mb_convert_case($genderPairs[$normalized], MB_CASE_TITLE, 'UTF-8');
+        }
+
+        return array_values(array_unique($aliases));
+    }
+
+    private static function stripSuffixesFromName(string $name, array $labels): string
+    {
+        $base = self::cleanWhitespace($name);
+        $labels = array_values(array_unique(array_filter(array_map(
+            static fn(mixed $label): string => self::cleanWhitespace((string)$label),
+            $labels
+        ), static fn(string $label): bool => $label !== '')));
+        usort($labels, static fn(string $left, string $right): int => strlen($right) <=> strlen($left));
+
+        for ($pass = 0; $pass < 4; $pass++) {
+            $beforePass = $base;
+            foreach ($labels as $label) {
+                $escaped = self::buildFlexibleSuffixPattern($label);
+                if ($escaped === '') {
+                    continue;
+                }
+                $separator = self::requiresSeparatedSuffix($label)
+                    ? '(?:\s+|-)'
+                    : '(?:\s+|-)?';
+                $base = preg_replace('/' . $separator . $escaped . '$/iu', '', $base) ?? $base;
+                $base = self::cleanWhitespace($base);
+            }
+            if ($base === $beforePass) {
+                break;
+            }
+        }
+
+        return $base;
+    }
+
+    private static function resolveDisplayAxisBaseName(string $name, array $attributes, string $normalizedType): string
+    {
+        $displayAxis = trim((string)($attributes['displayAxis'] ?? $attributes['publicVariantAxis'] ?? $attributes['catalogDisplayAxis'] ?? ''));
+        if ($displayAxis === '') {
+            return '';
+        }
+
+        $displayValue = $displayAxis === 'color'
+            ? (string)($attributes['color'] ?? '')
+            : (string)($attributes[$displayAxis] ?? '');
+        $color = self::cleanWhitespace((string)($attributes['color'] ?? ''));
+        $keepColorInBase = in_array($normalizedType, ['ropa', 'accesorios'], true)
+            && $displayAxis === 'size'
+            && $color !== ''
+            && self::isAccessorySizeVariantValue((string)($attributes['size'] ?? ''));
+        $labels = array_merge(
+            [
+                $keepColorInBase ? '' : $color,
+                (string)($attributes['size'] ?? ''),
+                (string)($attributes['weight'] ?? ''),
+                (string)($attributes['presentation'] ?? ''),
+                (string)($attributes['packaging'] ?? ''),
+                (string)($attributes['dosage'] ?? ''),
+                (string)($attributes['volume'] ?? ''),
+                (string)($attributes['range'] ?? ''),
+            ],
+            self::displayAxisValueAliases($displayAxis, $displayValue)
+        );
+        $base = self::stripSuffixesFromName($name, $labels);
+
+        if ($keepColorInBase && $base !== '') {
+            $baseIdentity = self::normalizeLabel($base);
+            $hasColorInBase = false;
+            foreach (self::displayAxisValueAliases('color', $color) as $colorAlias) {
+                $aliasIdentity = self::normalizeLabel($colorAlias);
+                if ($aliasIdentity !== '' && str_contains($baseIdentity, $aliasIdentity)) {
+                    $hasColorInBase = true;
+                    break;
+                }
+            }
+
+            if ($hasColorInBase) {
+                return $base;
+            }
+
+            return self::cleanWhitespace($base . ' ' . $color);
+        }
+
+        return $base !== '' && $base !== self::cleanWhitespace($name) ? $base : '';
     }
 
     private static function resolveVariantBaseNameCandidateLabels(array $product, array $attributes, string $label): array
@@ -325,7 +776,7 @@ final class ProductVariantMetadata
 
     public static function normalizeLabel(string $value): string
     {
-        $normalized = strtoupper(trim($value));
+        $normalized = mb_strtoupper(trim($value), 'UTF-8');
         if ($normalized === '') {
             return '';
         }
@@ -336,6 +787,23 @@ final class ProductVariantMetadata
         $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
 
         return trim($normalized);
+    }
+
+    private static function isAccessorySizeVariantValue(string $value): bool
+    {
+        return preg_match('/^(?:XXS|XS|S|M|L|XL|XXL|STANDARD|\d+(?:[.,]\d+)?\s?CM|X?\d+)$/iu', trim($value)) === 1;
+    }
+
+    private static function normalizeCatalogDisplayMode(mixed $value): string
+    {
+        $normalized = strtolower(trim((string)$value));
+        if (in_array($normalized, ['separate', 'individual', 'standalone', 'true', '1', 'yes', 'si', 'sí'], true)) {
+            return 'separate';
+        }
+        if (in_array($normalized, ['grouped', 'group', 'false', '0', 'no'], true)) {
+            return 'grouped';
+        }
+        return '';
     }
 
     private static function buildGroupKey(array $product, array $attributes, string $baseName): string
@@ -441,6 +909,11 @@ final class ProductVariantMetadata
     {
         $dimension = self::describeLabel($label)['dimension'] ?? 'unknown';
         return in_array($dimension, ['weight', 'volume'], true);
+    }
+
+    private static function isContentMeasurementValue(string $value): bool
+    {
+        return preg_match('/^\d+(?:[.,]\d+)?\s?(?:KGS?|KG|K|GR|G|LB|LBS?|L|ML|MG|OZ)$/iu', trim($value)) === 1;
     }
 
     private static function cleanWhitespace(string $value): string

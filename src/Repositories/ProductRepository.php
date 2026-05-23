@@ -1180,7 +1180,7 @@ class ProductRepository {
             }
 
             $params = [
-                'id' => uniqid('prod_'),
+                'id' => !empty($data['id']) ? (string)$data['id'] : uniqid('prod_'),
                 'legacy_id' => $data['legacyId'] ?? uniqid(),
                 'tenant_id' => $this->getTenantId(),
                 'category' => ProductAudience::normalizeCategory(
@@ -1458,37 +1458,58 @@ class ProductRepository {
                 $increaseQty = $nextQuantity - $currentQuantity;
                 $nextCost = round((float)($data['cost'] ?? $current['cost'] ?? 0), 4);
                 $nextName = (string)($data['name'] ?? $current['name'] ?? '');
-                $purchaseEntry = $this->recordPurchaseInvoiceStockEntry(
-                    $id,
-                    $nextName !== '' ? $nextName : ($data['name'] ?? 'Producto'),
-                    $increaseQty,
-                    $nextCost,
-                    $data,
-                    'manual_stock_increase',
-                    is_array($current['attributes'] ?? null)
-                        ? $current['attributes']
-                        : (json_decode((string)($current['attributes'] ?? '{}'), true) ?: [])
-                );
-                $inventoryLots->recordStockIncrease(
-                    $id,
-                    $increaseQty,
-                    $nextCost,
-                    'purchase_invoice',
-                    (string)($purchaseEntry['item']['id'] ?? $id),
-                    [
-                        'reason' => 'manual_stock_increase',
-                        'purchase_invoice_number' => (string)($purchaseEntry['invoice']['invoice_number'] ?? '')
-                    ],
-                    (string)($purchaseEntry['invoice']['id'] ?? ''),
-                    (string)($purchaseEntry['item']['id'] ?? '')
-                );
+                $inventoryAction = strtolower(trim((string)($data['inventoryAction'] ?? '')));
+                if ($inventoryAction === 'adjustment') {
+                    $adjustmentReason = trim((string)($data['inventoryAdjustmentReason'] ?? 'Ajuste de inventario'));
+                    $inventoryLots->recordStockIncrease(
+                        $id,
+                        $increaseQty,
+                        $nextCost,
+                        'inventory_adjustment',
+                        uniqid('adjustment_'),
+                        [
+                            'reason' => 'manual_stock_adjustment',
+                            'adjustment_reason' => $adjustmentReason,
+                            'direction' => 'increase',
+                        ]
+                    );
+                } else {
+                    $purchaseEntry = $this->recordPurchaseInvoiceStockEntry(
+                        $id,
+                        $nextName !== '' ? $nextName : ($data['name'] ?? 'Producto'),
+                        $increaseQty,
+                        $nextCost,
+                        $data,
+                        'manual_stock_increase',
+                        is_array($current['attributes'] ?? null)
+                            ? $current['attributes']
+                            : (json_decode((string)($current['attributes'] ?? '{}'), true) ?: [])
+                    );
+                    $inventoryLots->recordStockIncrease(
+                        $id,
+                        $increaseQty,
+                        $nextCost,
+                        'purchase_invoice',
+                        (string)($purchaseEntry['item']['id'] ?? $id),
+                        [
+                            'reason' => 'manual_stock_increase',
+                            'purchase_invoice_number' => (string)($purchaseEntry['invoice']['invoice_number'] ?? '')
+                        ],
+                        (string)($purchaseEntry['invoice']['id'] ?? ''),
+                        (string)($purchaseEntry['item']['id'] ?? '')
+                    );
+                }
             } elseif ($nextQuantity < $currentQuantity) {
                 $inventoryLots->consumeAdjustment(
                     $id,
                     $currentQuantity - $nextQuantity,
                     $currentQuantity,
                     round((float)($current['cost'] ?? 0), 4),
-                    ['reason' => 'manual_stock_decrease']
+                    [
+                        'reason' => 'manual_stock_adjustment',
+                        'adjustment_reason' => trim((string)($data['inventoryAdjustmentReason'] ?? 'Ajuste de inventario')),
+                        'direction' => 'decrease',
+                    ]
                 );
             }
 
