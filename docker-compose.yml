@@ -12,7 +12,7 @@ services:
       && chmod -R 775 /var/www/html/public/uploads
       && chown -R www-data:www-data /var/www/html/storage
       && chmod -R 775 /var/www/html/storage /var/www/html/storage/logs
-      && if [ \"${RUN_COMPOSER_INSTALL:-0}\" = \"1\" ] || [ ! -f /var/www/html/vendor/autoload.php ]; then composer install --no-interaction --prefer-dist --optimize-autoloader; fi
+      && if [ \"${RUN_COMPOSER_INSTALL:-0}\" = \"1\" ] || [ ! -f /var/www/html/vendor/autoload.php ]; then composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader; fi
       && if [ \"${RUN_DB_BOOTSTRAP:-0}\" = \"1\" ]; then php /var/www/html/scripts/bootstrap_schema.php; fi
       && php-fpm"
     volumes:
@@ -53,7 +53,7 @@ services:
       edge:
 
   web:
-    image: nginx:alpine
+    image: nginx:1.31-alpine
     container_name: paramascotasec-backend-web
     restart: unless-stopped
     environment:
