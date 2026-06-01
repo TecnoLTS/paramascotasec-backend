@@ -11,9 +11,34 @@ class Response {
         return trim((string)($_ENV['AUTH_CSRF_COOKIE_NAME'] ?? 'pm_csrf')) ?: 'pm_csrf';
     }
 
+    private static function envFlag(string $key, ?bool $default = null): ?bool {
+        $value = strtolower(trim((string)($_ENV[$key] ?? '')));
+        if ($value === '') {
+            return $default;
+        }
+        if (in_array($value, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+        if (in_array($value, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+        return $default;
+    }
+
     private static function isSecureRequest(): bool {
+        $forcedSecure = self::envFlag('AUTH_COOKIE_SECURE');
+        if ($forcedSecure !== null) {
+            return $forcedSecure;
+        }
+
+        $appUrl = trim((string)($_ENV['APP_URL'] ?? ''));
+        if ($appUrl !== '' && strtolower((string)parse_url($appUrl, PHP_URL_SCHEME)) === 'https') {
+            return true;
+        }
+
+        $trustProxyHeaders = (bool)($GLOBALS['trust_proxy_headers'] ?? false);
         $forwardedProto = strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
-        if ($forwardedProto !== '') {
+        if ($trustProxyHeaders && $forwardedProto !== '') {
             return $forwardedProto === 'https';
         }
 

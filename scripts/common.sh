@@ -32,6 +32,18 @@ ensure_docker_ready() {
   if ! docker network inspect edge >/dev/null 2>&1; then
     docker network create edge >/dev/null
   fi
+
+  if ! docker network inspect paramascotasec-web-internal >/dev/null 2>&1; then
+    docker network create --internal paramascotasec-web-internal >/dev/null
+  fi
+
+  if ! docker network inspect paramascotasec-db-internal >/dev/null 2>&1; then
+    docker network create --internal paramascotasec-db-internal >/dev/null
+  fi
+
+  if ! docker network inspect paramascotasec-services-internal >/dev/null 2>&1; then
+    docker network create --internal paramascotasec-services-internal >/dev/null
+  fi
 }
 
 upsert_env_value() {
@@ -100,6 +112,8 @@ resolve_env_file() {
     upsert_env_value "${env_file}" "APP_URL" "${app_url}"
     upsert_env_value "${env_file}" "ADMIN_IP_MODE" "off"
     upsert_env_value "${env_file}" "ADMIN_IP_ALLOWLIST" ""
+    upsert_env_value "${env_file}" "TRUST_PROXY_HEADERS" "false"
+    upsert_env_value "${env_file}" "SRI_ENVIRONMENT" "pruebas"
     upsert_env_value "${env_file}" "FACTURADOR_API_INVOICES_PATH" "/api/test/v1/invoices"
 
     printf '%s\n' "${env_file}"
@@ -107,7 +121,16 @@ resolve_env_file() {
   fi
 
   if [[ -f "${APP_DIR}/.env" ]]; then
+    local app_url
+    app_url="${APP_URL:-$(read_env_value "${APP_DIR}/.env" "APP_URL")}"
+    if [[ -z "${app_url}" || "${app_url}" == http://localhost* || "${app_url}" == http://127.0.0.1* ]]; then
+      app_url="https://paramascotasec.com"
+    fi
+
     upsert_env_value "${APP_DIR}/.env" "APP_ENV" "production"
+    upsert_env_value "${APP_DIR}/.env" "APP_URL" "${app_url%/}"
+    upsert_env_value "${APP_DIR}/.env" "TRUST_PROXY_HEADERS" "false"
+    upsert_env_value "${APP_DIR}/.env" "SRI_ENVIRONMENT" "produccion"
     upsert_env_value "${APP_DIR}/.env" "FACTURADOR_API_INVOICES_PATH" "/api/production/v1/invoices"
     printf '%s\n' "${APP_DIR}/.env"
     return 0
@@ -117,6 +140,9 @@ resolve_env_file() {
     cp "${APP_DIR}/.env.example" "${APP_DIR}/.env"
     echo "Se creo ${APP_DIR}/.env desde .env.example. Ajusta secretos y DB si hace falta."
     upsert_env_value "${APP_DIR}/.env" "APP_ENV" "production"
+    upsert_env_value "${APP_DIR}/.env" "APP_URL" "${APP_URL:-https://paramascotasec.com}"
+    upsert_env_value "${APP_DIR}/.env" "TRUST_PROXY_HEADERS" "false"
+    upsert_env_value "${APP_DIR}/.env" "SRI_ENVIRONMENT" "produccion"
     upsert_env_value "${APP_DIR}/.env" "FACTURADOR_API_INVOICES_PATH" "/api/production/v1/invoices"
     printf '%s\n' "${APP_DIR}/.env"
     return 0
@@ -150,7 +176,7 @@ compose_cmd() {
 
   (
     cd "${APP_DIR}"
-    docker compose --env-file "${env_file}" "$@"
+    BACKEND_ENV_FILE="${env_file}" docker compose --env-file "${env_file}" "$@"
   )
 }
 
@@ -215,6 +241,7 @@ deploy_backend() {
     fi
 
     APP_ENV="${mode}" \
+      BACKEND_ENV_FILE="${env_file}" \
       RUN_DB_SETUP="${run_db_setup}" \
       RUN_DB_BOOTSTRAP="${run_db_setup}" \
       FACTURADOR_API_INVOICES_PATH="${facturador_path}" \

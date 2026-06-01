@@ -11,7 +11,7 @@ DB_PORT="${DB_PORT:-5432}"
 DB_USER="${DB_USERNAME:-postgres}"
 DB_PASS="${DB_PASSWORD:-postgres}"
 BASE_DB="${BASE_DB:-paramascotasec}"
-TENANT_DBS="${TENANT_DBS:-paramascotasec tecnolts}"
+TENANT_DBS="${TENANT_DBS:-paramascotasec}"
 
 tmp_schema="$(mktemp)"
 cleanup() { rm -f "$tmp_schema"; }

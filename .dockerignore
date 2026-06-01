@@ -13,9 +13,14 @@ logs/
 storage/logs/
 storage/imports/
 storage/repairs/
+storage/sri/certs/*.p12
+storage/sri/certs/*.pem
+storage/sri/certs/*.key
+storage/sri/certs/*.crt
 storage/sri/xml/
 storage/sri/signed/
 storage/sri/authorized/
 storage/sri/ride/
+public/uploads/
 scripts/*.sql
 *.log

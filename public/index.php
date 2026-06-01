@@ -85,15 +85,34 @@ register_shutdown_function(static function (): void {
     respond_with_json_error('Error interno del servidor', 500, 'INTERNAL_SERVER_ERROR');
 });
 
-// Load .env when it is readable. Docker also injects the required environment
-// variables, so an unreadable local file should not break every request.
+if (!function_exists('hydrate_process_environment')) {
+    function hydrate_process_environment(): void
+    {
+        $values = getenv();
+        if (!is_array($values)) {
+            return;
+        }
+
+        foreach ($values as $key => $value) {
+            if (is_string($key) && !array_key_exists($key, $_ENV)) {
+                $_ENV[$key] = $value;
+            }
+        }
+    }
+}
+
+hydrate_process_environment();
+
+// Load .env when it is readable. Docker can also inject the required
+// environment variables, so an unreadable local file should not break requests.
 $envPath = __DIR__ . '/../.env';
 if (is_readable($envPath)) {
     $dotenv = Dotenv::createImmutable(__DIR__ . '/..');
-    $dotenv->load();
+    $dotenv->safeLoad();
 } elseif (file_exists($envPath)) {
     error_log('[ENV_WARNING] .env exists but is not readable; using process environment only.');
 }
+hydrate_process_environment();
 
 header_remove('X-Powered-By');
 
@@ -114,8 +133,13 @@ if ($providedInternalProxyToken !== '') {
         }
     }
 }
-$trustProxyHeaders = in_array(strtolower((string)($_ENV['TRUST_PROXY_HEADERS'] ?? 'false')), ['1', 'true', 'yes', 'on'], true)
-    || $hasTrustedInternalProxyToken;
+$appEnv = strtolower((string)($_ENV['APP_ENV'] ?? 'production'));
+$proxyHeaderFlagEnabled = in_array(strtolower((string)($_ENV['TRUST_PROXY_HEADERS'] ?? 'false')), ['1', 'true', 'yes', 'on'], true);
+$isNonProduction = in_array($appEnv, ['development', 'dev', 'local'], true);
+$trustProxyHeaders = $hasTrustedInternalProxyToken || ($proxyHeaderFlagEnabled && $isNonProduction);
+if ($proxyHeaderFlagEnabled && !$trustProxyHeaders) {
+    error_log('[PROXY_HEADER_WARNING] TRUST_PROXY_HEADERS is ignored in production without a valid internal proxy token.');
+}
 $GLOBALS['trust_proxy_headers'] = $trustProxyHeaders;
 $hostCandidates = [$rawHttpHost];
 if ($trustProxyHeaders) {
@@ -159,7 +183,7 @@ if (!$tenant) {
 TenantContext::set($tenant);
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? null;
-$isDev = in_array(strtolower((string)($_ENV['APP_ENV'] ?? 'production')), ['development', 'dev', 'local'], true);
+$isDev = $isNonProduction;
 $localHosts = ['localhost', '127.0.0.1'];
 $normalizedHost = $host ? preg_replace('/:\\d+$/', '', strtolower($host)) : null;
 $isLocalHostRequest = $normalizedHost && (in_array($normalizedHost, $localHosts, true) || (bool)filter_var($normalizedHost, FILTER_VALIDATE_IP));

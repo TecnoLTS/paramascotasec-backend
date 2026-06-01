@@ -8,9 +8,9 @@ set -euo pipefail
 DB_CONTAINER="${DB_CONTAINER:-next-test-db}"
 DB_USER="${DB_USER:-postgres}"
 SOURCE_DB="${1:-paramascotasec}"
-TARGET_DB="${2:-tecnolts}"
+TARGET_DB="${2:-paramascotasec}"
 SOURCE_TENANT="${3:-paramascotasec}"
-TARGET_TENANT="${4:-tecnolts}"
+TARGET_TENANT="${4:-paramascotasec}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then

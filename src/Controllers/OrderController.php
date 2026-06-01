@@ -307,7 +307,11 @@ class OrderController {
 
     private function renderInvoicePdf(string $invoiceHtml): string {
         $options = new Options();
-        $options->set('isRemoteEnabled', true);
+        $remoteEnabled = in_array(strtolower((string)($_ENV['DOMPDF_REMOTE_ENABLED'] ?? 'false')), ['1', 'true', 'yes', 'on'], true);
+        $options->set('isRemoteEnabled', $remoteEnabled);
+        if (!$remoteEnabled) {
+            $options->set('allowedRemoteHosts', []);
+        }
         $options->set('isHtml5ParserEnabled', true);
 
         $dompdf = new Dompdf($options);

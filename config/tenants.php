@@ -10,9 +10,7 @@ return [
         ],
         'domains' => [
             'paramascotasec.com',
-            'www.paramascotasec.com',
-            'api.paramascotasec.com',
-            'paramascotasec.local'
+            'www.paramascotasec.com'
         ],
         'allowed_origins' => [
             'https://paramascotasec.com',
@@ -20,25 +18,5 @@ return [
         ],
         'app_url' => 'https://paramascotasec.com',
         'public_base_url' => 'https://paramascotasec.com'
-    ],
-    'tecnolts' => [
-        'id' => 'tecnolts',
-        'slug' => 'tecnolts',
-        'name' => 'TecnoLTS',
-        'db' => [
-            'database' => 'tecnolts'
-        ],
-        'domains' => [
-            'tecnolts.com',
-            'www.tecnolts.com',
-            'api.tecnolts.com',
-            'tecnolts.local'
-        ],
-        'allowed_origins' => [
-            'https://tecnolts.com',
-            'https://www.tecnolts.com'
-        ],
-        'app_url' => 'https://tecnolts.com',
-        'public_base_url' => 'https://tecnolts.com'
     ]
 ];

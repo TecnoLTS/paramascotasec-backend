@@ -25,7 +25,7 @@ cd /home/admincenter/contenedores/paramascotasec-backend
 
 *(Si la Base de Datos ha sido limpiada en tus desarrollos, recuerda forzar su bootstrapping):*
 ```bash
-RUN_COMPOSER_INSTALL=1 RUN_DB_SETUP=1 ./scripts/deploy-development.sh
+RUN_DB_SETUP=1 ./scripts/deploy-development.sh
 ```
 
 ---

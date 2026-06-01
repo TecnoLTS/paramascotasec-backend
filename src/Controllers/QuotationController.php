@@ -43,7 +43,10 @@ class QuotationController {
             return $baseUrl;
         }
 
-        $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
+        $trustProxyHeaders = (bool)($GLOBALS['trust_proxy_headers'] ?? false);
+        $proto = ($trustProxyHeaders && !empty($_SERVER['HTTP_X_FORWARDED_PROTO']))
+            ? $_SERVER['HTTP_X_FORWARDED_PROTO']
+            : ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
         $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
         return $proto . '://' . $host;
     }
@@ -258,7 +261,11 @@ class QuotationController {
 
     private function generateQuotationPdf(array $quotation): string {
         $options = new Options();
-        $options->set('isRemoteEnabled', true);
+        $remoteEnabled = in_array(strtolower((string)($_ENV['DOMPDF_REMOTE_ENABLED'] ?? 'false')), ['1', 'true', 'yes', 'on'], true);
+        $options->set('isRemoteEnabled', $remoteEnabled);
+        if (!$remoteEnabled) {
+            $options->set('allowedRemoteHosts', []);
+        }
         $options->set('isHtml5ParserEnabled', true);
         if ($this->quotationPdfLogoPath) {
             $options->setChroot(dirname($this->quotationPdfLogoPath));
