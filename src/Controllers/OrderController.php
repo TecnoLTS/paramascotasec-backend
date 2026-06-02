@@ -222,12 +222,12 @@ class OrderController {
                 return;
             }
             if (!$isAdmin && ($order['status'] ?? '') === 'canceled') {
-                Response::error('Factura no disponible para pedidos cancelados', 403, 'ORDER_INVOICE_UNAVAILABLE');
+                Response::error('Comprobante interno no disponible para pedidos cancelados', 403, 'ORDER_INVOICE_UNAVAILABLE');
                 return;
             }
             $invoiceHtml = $this->resolveInvoiceHtml($order);
             if (!$invoiceHtml) {
-                Response::error('Factura no disponible', 404, 'ORDER_INVOICE_UNAVAILABLE');
+                Response::error('Comprobante interno no disponible', 404, 'ORDER_INVOICE_UNAVAILABLE');
                 return;
             }
 
@@ -335,29 +335,48 @@ class OrderController {
         }
 
         try {
-            $payload = $this->buildFacturadorPayload($order);
+            $orderId = (string)$order['id'];
+            $currentBilling = $this->currentFacturadorBillingMetadata($order);
+            $currentStatus = strtolower(trim((string)($currentBilling['status'] ?? '')));
+            $currentAccessKey = trim((string)($currentBilling['access_key'] ?? ''));
+            if (filter_var($currentBilling['operational_error'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                return;
+            }
+            if ($currentAccessKey !== '' && in_array($currentStatus, ['issued', 'reissued'], true)) {
+                return;
+            }
+
             $facturador = new FacturadorApiService();
+            $existingInvoice = $facturador->findRideBySourceReference($orderId);
+            if (is_array($existingInvoice)) {
+                $this->syncFacturadorBillingMetadata(
+                    $orderId,
+                    $existingInvoice,
+                    trim((string)($existingInvoice['replaced_access_key'] ?? '')) !== '' ? 'reissued' : 'issued'
+                );
+
+                error_log(sprintf(
+                    '[FACTURADOR] Factura existente sincronizada para orden %s. Clave=%s',
+                    $orderId,
+                    $existingInvoice['access_key'] ?? 'N/A'
+                ));
+                return;
+            }
+
+            $payload = $this->buildFacturadorPayload($order);
             $invoice = $facturador->emitInvoice($payload);
 
-            $this->orderRepository->updateBillingMetadata((string)$order['id'], [
-                'provider' => 'facturador',
-                'status' => 'issued',
-                'invoice_status' => $invoice['status'] ?? null,
-                'access_key' => $invoice['access_key'] ?? null,
-                'sequential' => $invoice['sequential'] ?? null,
-                'issue_date' => $invoice['issue_date'] ?? null,
-                'total' => $invoice['total'] ?? null,
-                'authorization_number' => $invoice['authorization_number'] ?? null,
-                'authorization_date' => $invoice['authorization_date'] ?? null,
-                'pdf_url' => $invoice['pdf_url'] ?? null,
-                'xml_url' => $invoice['xml_url'] ?? null,
-                'last_attempt_at' => date('c'),
-                'last_error' => null,
-            ]);
+            $this->syncFacturadorBillingMetadata(
+                $orderId,
+                $invoice,
+                'issued',
+                $this->resolveOrderAccountingDate($order['created_at'] ?? null),
+                trim((string)($order['created_at'] ?? '')) ?: null
+            );
 
             error_log(sprintf(
                 '[FACTURADOR] Factura emitida para orden %s. Clave=%s',
-                $order['id'],
+                $orderId,
                 $invoice['access_key'] ?? 'N/A'
             ));
         } catch (\Throwable $e) {
@@ -374,6 +393,81 @@ class OrderController {
                 $e->getMessage()
             ));
         }
+    }
+
+    private function currentFacturadorBillingMetadata(array $order): array {
+        $invoiceData = $order['invoice_data'] ?? null;
+        if (is_string($invoiceData) && trim($invoiceData) !== '') {
+            $decoded = json_decode($invoiceData, true);
+            $invoiceData = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($invoiceData)) {
+            return [];
+        }
+
+        return is_array($invoiceData['billing'] ?? null) ? $invoiceData['billing'] : [];
+    }
+
+    private function syncFacturadorBillingMetadata(
+        string $orderId,
+        array $invoice,
+        string $billingStatus,
+        ?string $accountingDate = null,
+        ?string $orderCreatedAt = null
+    ): void {
+        $metadata = [
+            'provider' => 'facturador',
+            'status' => $billingStatus,
+            'invoice_status' => $invoice['sri_status'] ?? ($invoice['status'] ?? null),
+            'access_key' => $invoice['access_key'] ?? null,
+            'sequential' => $this->formatFacturadorSequential($invoice),
+            'issue_date' => $invoice['issue_date'] ?? null,
+            'total' => $invoice['total'] ?? ($invoice['total_with_tax'] ?? null),
+            'authorization_number' => $invoice['authorization_number'] ?? null,
+            'authorization_date' => $invoice['authorization_date'] ?? null,
+            'pdf_url' => $invoice['pdf_url'] ?? null,
+            'xml_url' => $invoice['xml_url'] ?? null,
+            'reissued_from_access_key' => $invoice['replaced_access_key'] ?? null,
+            'last_attempt_at' => date('c'),
+            'last_error' => null,
+        ];
+
+        if ($accountingDate !== null && $accountingDate !== '') {
+            $metadata['accounting_date'] = $accountingDate;
+        }
+        if ($orderCreatedAt !== null && $orderCreatedAt !== '') {
+            $metadata['order_created_at'] = $orderCreatedAt;
+        }
+        foreach ([
+            'operational_error',
+            'operational_error_code',
+            'operational_error_label',
+            'operational_error_reason',
+            'operational_error_marked_at',
+            'operational_error_actor',
+        ] as $field) {
+            if (array_key_exists($field, $invoice)) {
+                $metadata[$field] = $invoice[$field];
+            }
+        }
+
+        $this->orderRepository->updateBillingMetadata($orderId, $metadata);
+    }
+
+    private function formatFacturadorSequential(array $invoice): ?string {
+        $existing = trim((string)($invoice['sequential'] ?? ''));
+        if ($existing !== '' && str_contains($existing, '-')) {
+            return $existing;
+        }
+
+        $parts = [
+            $invoice['establishment_code'] ?? null,
+            $invoice['emission_point'] ?? null,
+            $existing !== '' ? $existing : null,
+        ];
+        $parts = array_values(array_filter($parts, static fn($value) => is_string($value) && trim($value) !== ''));
+
+        return count($parts) === 3 ? implode('-', $parts) : ($existing !== '' ? $existing : null);
     }
 
     private function resolveCustomerUserId(array $data, array $user): ?string {
@@ -421,6 +515,15 @@ class OrderController {
         $customerIdentification = trim((string)($customerAddressData['documentNumber'] ?? ''));
         if ($customerIdentification === '') {
             $customerIdentification = '9999999999999';
+        }
+        $originalCustomerIdentification = $customerIdentification;
+        $identificationFallbackReason = null;
+        if (!$this->isValidFacturadorCustomerIdentification($customerIdentification)) {
+            $customerIdentification = '9999999999999';
+            $customerName = 'CONSUMIDOR FINAL';
+            $identificationFallbackReason = $originalCustomerIdentification === ''
+                ? 'missing_customer_identification'
+                : 'invalid_customer_identification';
         }
 
         $customerAddress = implode(', ', array_filter([
@@ -496,6 +599,8 @@ class OrderController {
         }
 
         $paymentMethod = $this->resolveSriPaymentMethod((string)($order['payment_method'] ?? ''));
+        $orderCreatedAt = trim((string)($order['created_at'] ?? ''));
+        $accountingDate = $this->resolveOrderAccountingDate($orderCreatedAt);
 
         return [
             'customer_identification' => $customerIdentification,
@@ -508,11 +613,106 @@ class OrderController {
             'additional_info' => array_filter([
                 'order_id' => $order['id'] ?? null,
                 'tenant_id' => TenantContext::id(),
+                'order_created_at' => $orderCreatedAt !== '' ? $orderCreatedAt : null,
+                'accounting_date' => $accountingDate,
                 'payment_method' => $paymentMethod['label'],
                 'payment_method_code' => $paymentMethod['code'],
                 'notes' => $order['order_notes'] ?? null,
+                'original_customer_identification' => $identificationFallbackReason !== null ? $originalCustomerIdentification : null,
+                'identification_fallback_reason' => $identificationFallbackReason,
             ], static fn($value) => $value !== null && $value !== ''),
         ];
+    }
+
+    private function resolveOrderAccountingDate($createdAt): ?string {
+        $value = trim((string)$createdAt);
+        if ($value === '') {
+            return null;
+        }
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}/', $value, $matches) === 1) {
+            return $matches[0];
+        }
+
+        try {
+            return (new \DateTimeImmutable($value, new \DateTimeZone('America/Guayaquil')))->format('Y-m-d');
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function isValidFacturadorCustomerIdentification(string $identification): bool {
+        $value = preg_replace('/\D+/', '', $identification);
+        if (!is_string($value) || $value === '') {
+            return false;
+        }
+
+        if ($value === '9999999999999') {
+            return true;
+        }
+
+        if (strlen($value) === 10) {
+            return $this->validateEcuadorCedula($value);
+        }
+
+        if (strlen($value) === 13) {
+            return $this->validateEcuadorRuc($value);
+        }
+
+        return false;
+    }
+
+    private function validateEcuadorCedula(string $cedula): bool {
+        if (strlen($cedula) !== 10 || !ctype_digit($cedula)) {
+            return false;
+        }
+
+        $coefficients = [2, 1, 2, 1, 2, 1, 2, 1, 2];
+        $sum = 0;
+        for ($i = 0; $i < 9; $i++) {
+            $product = ((int)$cedula[$i]) * $coefficients[$i];
+            $sum += $product >= 10 ? $product - 9 : $product;
+        }
+
+        $checkDigit = (10 - ($sum % 10)) % 10;
+        return $checkDigit === (int)$cedula[9];
+    }
+
+    private function validateEcuadorRuc(string $ruc): bool {
+        if (strlen($ruc) !== 13 || !ctype_digit($ruc)) {
+            return false;
+        }
+
+        $type = (int)$ruc[2];
+        if ($type < 6) {
+            return $this->validateEcuadorCedula(substr($ruc, 0, 10));
+        }
+
+        if ($type === 6) {
+            $coefficients = [3, 2, 7, 6, 5, 4, 3, 2];
+            $sum = 0;
+            for ($i = 0; $i < 8; $i++) {
+                $sum += ((int)$ruc[$i]) * $coefficients[$i];
+            }
+            $checkDigit = 11 - ($sum % 11);
+            if ($checkDigit === 11) $checkDigit = 0;
+            if ($checkDigit === 10) return false;
+            return $checkDigit === (int)$ruc[8];
+        }
+
+        if ($type === 9) {
+            $coefficients = [4, 3, 2, 7, 6, 5, 4, 3, 2];
+            $sum = 0;
+            for ($i = 0; $i < 9; $i++) {
+                $sum += ((int)$ruc[$i]) * $coefficients[$i];
+            }
+            $checkDigit = 11 - ($sum % 11);
+            if ($checkDigit === 11) $checkDigit = 0;
+            if ($checkDigit === 10) return false;
+            return $checkDigit === (int)$ruc[9];
+        }
+
+        return false;
     }
 
     private function resolveShippingTaxRate(array $order): float {

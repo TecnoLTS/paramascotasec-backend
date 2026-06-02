@@ -2,6 +2,24 @@
 
 namespace App\Services;
 
+class FacturadorApiException extends \RuntimeException {
+    public function __construct(
+        string $message,
+        private readonly int $httpStatusCode,
+        private readonly string $endpoint = ''
+    ) {
+        parent::__construct($message, $httpStatusCode);
+    }
+
+    public function httpStatusCode(): int {
+        return $this->httpStatusCode;
+    }
+
+    public function endpoint(): string {
+        return $this->endpoint;
+    }
+}
+
 class FacturadorApiService {
     private string $baseUrl;
     private string $invoiceEndpoint;
@@ -73,11 +91,19 @@ class FacturadorApiService {
             $message = 'Respuesta inválida del facturador';
         }
 
-        throw new \RuntimeException(sprintf('Facturador respondió con error (%d): %s', $statusCode ?: 500, $message));
+        throw new FacturadorApiException(
+            sprintf('Facturador respondió con error (%d): %s', $statusCode ?: 500, $message),
+            $statusCode ?: 500,
+            $this->invoiceEndpoint
+        );
     }
 
-    public function listRidePdfs(int $limit = 100): array {
-        $endpoint = $this->invoiceEndpoint . '/rides?limit=' . max(1, min(300, $limit));
+    public function listRidePdfs(int $limit = 100, bool $includeCancelled = false): array {
+        $query = http_build_query([
+            'limit' => max(1, min(300, $limit)),
+            'include_cancelled' => $includeCancelled ? '1' : '0',
+        ]);
+        $endpoint = $this->invoiceEndpoint . '/rides?' . $query;
         $context = stream_context_create([
             'http' => [
                 'method' => 'GET',
@@ -100,12 +126,53 @@ class FacturadorApiService {
         }
 
         $message = is_array($decoded) ? ($decoded['error']['message'] ?? $decoded['message'] ?? null) : null;
-        throw new \RuntimeException(sprintf(
+        throw new FacturadorApiException(sprintf(
             'No se pudo listar RIDE PDF del facturador (%d) en %s: %s',
             $statusCode ?: 500,
             $endpoint,
             is_string($message) && trim($message) !== '' ? $message : 'respuesta inválida'
-        ));
+        ), $statusCode ?: 500, $endpoint);
+    }
+
+    public function findRideBySourceReference(string $sourceReference): ?array {
+        $normalized = trim($sourceReference);
+        if ($normalized === '') {
+            return null;
+        }
+
+        $endpoint = $this->invoiceEndpoint . '/source/' . rawurlencode($normalized);
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => implode("\r\n", [
+                    'Accept: application/json',
+                    'X-API-Key: ' . $this->apiKey,
+                ]),
+                'timeout' => $this->timeoutSeconds,
+                'ignore_errors' => true,
+            ],
+        ]);
+
+        $responseBody = @file_get_contents($endpoint, false, $context);
+        $responseHeaders = $http_response_header ?? [];
+        $statusCode = $this->extractStatusCode($responseHeaders);
+        $decoded = is_string($responseBody) && $responseBody !== '' ? json_decode($responseBody, true) : null;
+
+        if ($statusCode === 404) {
+            return null;
+        }
+
+        if ($statusCode >= 200 && $statusCode < 300 && is_array($decoded) && ($decoded['success'] ?? false) === true && is_array($decoded['data'] ?? null)) {
+            return $decoded['data'];
+        }
+
+        $message = is_array($decoded) ? ($decoded['error']['message'] ?? $decoded['message'] ?? null) : null;
+        throw new FacturadorApiException(sprintf(
+            'No se pudo consultar factura por referencia en facturador (%d) en %s: %s',
+            $statusCode ?: 500,
+            $endpoint,
+            is_string($message) && trim($message) !== '' ? $message : 'respuesta inválida'
+        ), $statusCode ?: 500, $endpoint);
     }
 
     public function getRidePdf(string $accessKey): array {
@@ -140,12 +207,12 @@ class FacturadorApiService {
 
         $decoded = is_string($body) && $body !== '' ? json_decode($body, true) : null;
         $message = is_array($decoded) ? ($decoded['error']['message'] ?? $decoded['message'] ?? null) : null;
-        throw new \RuntimeException(sprintf(
+        throw new FacturadorApiException(sprintf(
             'No se pudo obtener RIDE PDF del facturador (%d) en %s: %s',
             $statusCode ?: 500,
             $endpoint,
             is_string($message) && trim($message) !== '' ? $message : 'respuesta inválida'
-        ));
+        ), $statusCode ?: 500, $endpoint);
     }
 
     public function cancelAndReissueInvoice(string $accessKey, string $reason = '', ?string $ambiente = null): array {
@@ -188,12 +255,12 @@ class FacturadorApiService {
         }
 
         $message = is_array($decoded) ? ($decoded['error']['message'] ?? $decoded['message'] ?? null) : null;
-        throw new \RuntimeException(sprintf(
+        throw new FacturadorApiException(sprintf(
             'No se pudo anular y reemitir la factura (%d) en %s: %s',
             $statusCode ?: 500,
             $endpoint,
             is_string($message) && trim($message) !== '' ? $message : 'respuesta inválida'
-        ));
+        ), $statusCode ?: 500, $endpoint);
     }
 
     private function extractStatusCode(array $headers): int {

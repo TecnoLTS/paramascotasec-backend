@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Core\Auth;
 use App\Core\Response;
 use App\Repositories\OrderRepository;
+use App\Services\FacturadorApiException;
 use App\Services\FacturadorApiService;
 
 class BillingDocumentController {
@@ -17,8 +18,9 @@ class BillingDocumentController {
 
         try {
             $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 100;
+            $includeCancelled = filter_var($_GET['include_cancelled'] ?? $_GET['includeCancelled'] ?? false, FILTER_VALIDATE_BOOLEAN);
             $facturador = new FacturadorApiService();
-            Response::json($facturador->listRidePdfs($limit));
+            Response::json($this->enrichRidesWithAccountingDates($facturador->listRidePdfs($limit, $includeCancelled)));
         } catch (\Throwable $e) {
             Response::error($e->getMessage(), 500, 'BILLING_RIDES_LIST_FAILED');
         }
@@ -45,6 +47,18 @@ class BillingDocumentController {
             echo $content;
         } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 400, 'BILLING_RIDE_PDF_INVALID_KEY');
+        } catch (FacturadorApiException $e) {
+            $status = $e->httpStatusCode();
+            if ($status === 404) {
+                Response::error($e->getMessage(), 404, 'BILLING_RIDE_PDF_NOT_FOUND');
+                return;
+            }
+            if ($status === 409) {
+                Response::error($e->getMessage(), 409, 'BILLING_RIDE_PDF_NOT_AVAILABLE');
+                return;
+            }
+
+            Response::error($e->getMessage(), 502, 'BILLING_RIDE_PDF_UPSTREAM_FAILED');
         } catch (\Throwable $e) {
             Response::error($e->getMessage(), 500, 'BILLING_RIDE_PDF_FAILED');
         }
@@ -62,6 +76,12 @@ class BillingDocumentController {
             }
 
             $reason = trim((string)($data['reason'] ?? ''));
+            $confirmation = trim((string)($data['confirm_reissue'] ?? ''));
+            if ($confirmation !== 'REEMITIR') {
+                Response::error('Confirmación requerida para anular y reemitir. Esta acción puede generar un nuevo comprobante SRI.', 409, 'BILLING_REISSUE_CONFIRMATION_REQUIRED');
+                return;
+            }
+
             $ambiente = trim((string)($data['ambiente'] ?? ''));
             $facturador = new FacturadorApiService();
             $result = $facturador->cancelAndReissueInvoice($accessKey, $reason, $ambiente !== '' ? $ambiente : null);
@@ -86,7 +106,10 @@ class BillingDocumentController {
         }
 
         $repository = new OrderRepository();
-        $repository->updateBillingMetadata($orderId, [
+        $accountingDates = $repository->getAccountingDatesByOrderIds([$orderId]);
+        $accountingDate = is_array($accountingDates[$orderId] ?? null) ? $accountingDates[$orderId] : [];
+
+        $metadata = [
             'provider' => 'facturador',
             'status' => 'reissued',
             'invoice_status' => $newInvoice['sri_status'] ?? null,
@@ -100,7 +123,69 @@ class BillingDocumentController {
             'reissued_from_access_key' => $oldInvoice['access_key'] ?? null,
             'last_attempt_at' => date('c'),
             'last_error' => null,
-        ]);
+        ];
+
+        foreach (['accounting_date', 'order_created_at', 'financial_period_key'] as $field) {
+            if (!empty($accountingDate[$field])) {
+                $metadata[$field] = $accountingDate[$field];
+            }
+        }
+        foreach ([
+            'operational_error',
+            'operational_error_code',
+            'operational_error_label',
+            'operational_error_reason',
+            'operational_error_marked_at',
+            'operational_error_actor',
+        ] as $field) {
+            if (array_key_exists($field, $newInvoice)) {
+                $metadata[$field] = $newInvoice[$field];
+            }
+        }
+
+        $repository->updateBillingMetadata($orderId, $metadata);
+    }
+
+    private function enrichRidesWithAccountingDates(array $rides): array {
+        $orderIds = [];
+        foreach ($rides as $ride) {
+            if (!is_array($ride)) {
+                continue;
+            }
+
+            $sourceReference = trim((string)($ride['source_reference'] ?? ''));
+            if ($sourceReference !== '') {
+                $orderIds[] = $sourceReference;
+            }
+        }
+
+        if (count($orderIds) === 0) {
+            return $rides;
+        }
+
+        $repository = new OrderRepository();
+        $datesByOrderId = $repository->getAccountingDatesByOrderIds($orderIds);
+        if (count($datesByOrderId) === 0) {
+            return $rides;
+        }
+
+        foreach ($rides as $index => $ride) {
+            if (!is_array($ride)) {
+                continue;
+            }
+
+            $sourceReference = trim((string)($ride['source_reference'] ?? ''));
+            $dates = is_array($datesByOrderId[$sourceReference] ?? null) ? $datesByOrderId[$sourceReference] : null;
+            if ($dates === null) {
+                continue;
+            }
+
+            $rides[$index]['accounting_date'] = $dates['accounting_date'] ?? null;
+            $rides[$index]['order_created_at'] = $dates['order_created_at'] ?? null;
+            $rides[$index]['financial_period_key'] = $dates['financial_period_key'] ?? null;
+        }
+
+        return $rides;
     }
 
     private function formatSequential(array $invoice): ?string {

@@ -2940,6 +2940,52 @@ class OrderRepository {
         ]);
     }
 
+    public function getAccountingDatesByOrderIds(array $orderIds): array {
+        $orderIds = array_values(array_unique(array_filter(array_map(static function ($value): string {
+            return trim((string)$value);
+        }, $orderIds), static fn(string $value): bool => $value !== '')));
+
+        if (count($orderIds) === 0) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = ['tenant_id' => $this->getTenantId()];
+        foreach ($orderIds as $index => $orderId) {
+            $name = 'order_id_' . $index;
+            $placeholders[] = ':' . $name;
+            $params[$name] = $orderId;
+        }
+
+        $stmt = $this->db->prepare('
+            SELECT
+                id,
+                created_at::text AS order_created_at,
+                created_at::date::text AS accounting_date,
+                TO_CHAR(created_at::date, \'YYYY-MM\') AS financial_period_key
+            FROM "Order"
+            WHERE tenant_id = :tenant_id
+              AND id IN (' . implode(', ', $placeholders) . ')
+        ');
+        $stmt->execute($params);
+
+        $dates = [];
+        foreach ($stmt->fetchAll() ?: [] as $row) {
+            $id = trim((string)($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+
+            $dates[$id] = [
+                'order_created_at' => $row['order_created_at'] ?? null,
+                'accounting_date' => $row['accounting_date'] ?? null,
+                'financial_period_key' => $row['financial_period_key'] ?? null,
+            ];
+        }
+
+        return $dates;
+    }
+
     private function getUserDefaultBilling($userId) {
         if (!$userId) return null;
         $stmt = $this->db->prepare('SELECT addresses FROM "User" WHERE id = :id AND tenant_id = :tenant_id');
@@ -3098,7 +3144,7 @@ class OrderRepository {
 <head>
   <!-- invoice_v2_tax_net -->
   <meta charset="utf-8" />
-  <title>Factura ' . $invoiceNumber . '</title>
+  <title>Comprobante interno ' . $invoiceNumber . '</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 32px; color: #1f2937; }
     .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
@@ -3126,7 +3172,7 @@ class OrderRepository {
       <img src="' . htmlspecialchars($logoUrl) . '" alt="Para Mascotas EC" />
     </div>
     <div class="meta">
-      <div>Factura: ' . htmlspecialchars($invoiceNumber) . '</div>
+      <div>Comprobante interno: ' . htmlspecialchars($invoiceNumber) . '</div>
       <div>Fecha: ' . date('d/m/Y') . '</div>
     </div>
   </div>

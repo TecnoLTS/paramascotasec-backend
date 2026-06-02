@@ -257,6 +257,42 @@ class InventoryLotRepository {
         ];
     }
 
+    public function closeOpenLotsForProduct(string $productId, string $reason, array $metadata = []): array {
+        $reason = trim($reason) !== '' ? trim($reason) : 'inventory_lot_closure';
+        $metadata = array_merge([
+            'reason' => $reason,
+            'closed_at' => gmdate('c'),
+        ], $metadata);
+
+        $stmt = $this->db->prepare('
+            UPDATE "InventoryLot"
+            SET metadata = COALESCE(metadata, \'{}\'::jsonb)
+                    || :metadata::jsonb
+                    || jsonb_build_object(
+                        \'previous_remaining_quantity\', remaining_quantity,
+                        \'closure_reason\', :reason
+                    ),
+                remaining_quantity = 0,
+                updated_at = NOW()
+            WHERE tenant_id = :tenant_id
+              AND product_id = :product_id
+              AND remaining_quantity > 0
+            RETURNING id, remaining_quantity AS closed_remaining_quantity
+        ');
+        $stmt->execute([
+            'tenant_id' => $this->getTenantId(),
+            'product_id' => $productId,
+            'reason' => $reason,
+            'metadata' => $this->encodeMetadata($metadata),
+        ]);
+        $rows = $stmt->fetchAll() ?: [];
+
+        return [
+            'closed_lots_count' => count($rows),
+            'closed_lot_ids' => array_map(static fn(array $row): string => (string)($row['id'] ?? ''), $rows),
+        ];
+    }
+
     private function ensureCoverageForAvailableStock(string $productId, int $availableQuantity, float $fallbackUnitCost, array $metadata = []): void {
         $availableQuantity = max(0, $availableQuantity);
         if ($availableQuantity <= 0) {

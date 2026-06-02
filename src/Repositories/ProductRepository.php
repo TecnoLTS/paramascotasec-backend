@@ -1527,56 +1527,88 @@ class ProductRepository {
     }
 
     public function delete($id) {
+        $startedTransaction = !$this->db->inTransaction();
+        if ($startedTransaction) {
+            $this->db->beginTransaction();
+        }
+
         $tenantId = $this->getTenantId();
-        $selectStmt = $this->db->prepare('
-            SELECT id, legacy_id, name, attributes
-            FROM "Product"
-            WHERE (id = :id OR legacy_id = :id)
-              AND tenant_id = :tenant_id
-            LIMIT 1
-        ');
-        $selectStmt->execute([
-            'id' => $id,
-            'tenant_id' => $tenantId,
-        ]);
-        $current = $selectStmt->fetch();
+        try {
+            $selectStmt = $this->db->prepare('
+                SELECT id, legacy_id, name, attributes
+                FROM "Product"
+                WHERE (id = :id OR legacy_id = :id)
+                  AND tenant_id = :tenant_id
+                LIMIT 1
+                FOR UPDATE
+            ');
+            $selectStmt->execute([
+                'id' => $id,
+                'tenant_id' => $tenantId,
+            ]);
+            $current = $selectStmt->fetch();
 
-        if (!$current) {
-            return null;
+            if (!$current) {
+                if ($startedTransaction) {
+                    $this->db->rollBack();
+                }
+                return null;
+            }
+
+            $attributes = json_decode($current['attributes'] ?? '{}', true);
+            if (!is_array($attributes)) {
+                $attributes = [];
+            }
+
+            $attributes['archived'] = 'true';
+            $attributes['archivedAt'] = gmdate('c');
+            $attributes['archivedProductId'] = (string)($current['id'] ?? '');
+            $attributes['archivedLegacyId'] = (string)($current['legacy_id'] ?? '');
+            if (!isset($attributes['archivedName']) || trim((string)$attributes['archivedName']) === '') {
+                $attributes['archivedName'] = trim((string)($current['name'] ?? ''));
+            }
+
+            $updateStmt = $this->db->prepare('
+                UPDATE "Product"
+                SET is_published = false,
+                    quantity = 0,
+                    updated_at = NOW(),
+                    attributes = :attributes::jsonb
+                WHERE id = :product_id
+                  AND tenant_id = :tenant_id
+            ');
+
+            $updateStmt->execute([
+                'attributes' => json_encode($attributes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'product_id' => $current['id'],
+                'tenant_id' => $tenantId,
+            ]);
+
+            $inventoryLots = new InventoryLotRepository($this->db);
+            $lotClosure = $inventoryLots->closeOpenLotsForProduct(
+                (string)$current['id'],
+                'product_archive',
+                [
+                    'archived_product_id' => (string)$current['id'],
+                    'archived_legacy_id' => (string)($current['legacy_id'] ?? ''),
+                    'archived_name' => trim((string)($current['name'] ?? '')),
+                ]
+            );
+
+            if ($startedTransaction) {
+                $this->db->commit();
+            }
+
+            return [
+                'id' => $current['id'],
+                'archived' => true,
+                'deleted' => true,
+                'closed_lots_count' => (int)($lotClosure['closed_lots_count'] ?? 0),
+            ];
+        } catch (\Exception $e) {
+            if ($startedTransaction && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
         }
-
-        $attributes = json_decode($current['attributes'] ?? '{}', true);
-        if (!is_array($attributes)) {
-            $attributes = [];
-        }
-
-        $attributes['archived'] = 'true';
-        $attributes['archivedAt'] = gmdate('c');
-        $attributes['archivedProductId'] = (string)($current['id'] ?? '');
-        $attributes['archivedLegacyId'] = (string)($current['legacy_id'] ?? '');
-        if (!isset($attributes['archivedName']) || trim((string)$attributes['archivedName']) === '') {
-            $attributes['archivedName'] = trim((string)($current['name'] ?? ''));
-        }
-
-        $updateStmt = $this->db->prepare('
-            UPDATE "Product"
-            SET is_published = false,
-                quantity = 0,
-                updated_at = NOW(),
-                attributes = :attributes::jsonb
-            WHERE id = :product_id
-              AND tenant_id = :tenant_id
-        ');
-
-        $updateStmt->execute([
-            'attributes' => json_encode($attributes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'product_id' => $current['id'],
-            'tenant_id' => $tenantId,
-        ]);
-
-        return [
-            'id' => $current['id'],
-            'archived' => true,
-            'deleted' => true,
-        ];
     }}
