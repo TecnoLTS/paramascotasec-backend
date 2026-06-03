@@ -20,44 +20,18 @@ class PosRepository {
             return;
         }
 
-        $this->db->exec('
-            CREATE TABLE IF NOT EXISTS "PosShift" (
-                id varchar(64) PRIMARY KEY,
-                tenant_id varchar(120) NOT NULL,
-                opened_by_user_id varchar(64) NOT NULL,
-                opened_at timestamptz NOT NULL DEFAULT NOW(),
-                opening_cash numeric(12,2) NOT NULL DEFAULT 0,
-                status varchar(20) NOT NULL DEFAULT \'open\',
-                open_notes text NULL,
-                closed_by_user_id varchar(64) NULL,
-                closed_at timestamptz NULL,
-                closing_cash numeric(12,2) NULL,
-                close_notes text NULL,
-                expected_cash numeric(12,2) NULL,
-                difference_cash numeric(12,2) NULL,
-                summary_json text NULL
-            )
-        ');
-        $this->db->exec('CREATE INDEX IF NOT EXISTS idx_pos_shift_tenant_status ON "PosShift"(tenant_id, status)');
-        $this->db->exec('CREATE INDEX IF NOT EXISTS idx_pos_shift_tenant_opened_at ON "PosShift"(tenant_id, opened_at DESC)');
-
-        $this->db->exec('
-            CREATE TABLE IF NOT EXISTS "PosMovement" (
-                id bigserial PRIMARY KEY,
-                tenant_id varchar(120) NOT NULL,
-                shift_id varchar(64) NOT NULL,
-                type varchar(20) NOT NULL,
-                amount numeric(12,2) NOT NULL,
-                description text NULL,
-                created_by_user_id varchar(64) NOT NULL,
-                created_at timestamptz NOT NULL DEFAULT NOW(),
-                CONSTRAINT pos_movement_shift_fk FOREIGN KEY (shift_id) REFERENCES "PosShift"(id) ON DELETE CASCADE
-            )
-        ');
-        $this->db->exec('CREATE INDEX IF NOT EXISTS idx_pos_movement_shift ON "PosMovement"(tenant_id, shift_id, created_at DESC)');
-        $this->db->exec('ALTER TABLE "PosMovement" ADD COLUMN IF NOT EXISTS business_expense_id varchar(64) NULL');
-
+        $this->assertRequiredTables(['PosShift', 'PosMovement']);
         self::$schemaEnsured = true;
+    }
+
+    private function assertRequiredTables(array $tables): void {
+        $stmt = $this->db->prepare('SELECT to_regclass(:table_name)');
+        foreach ($tables as $table) {
+            $stmt->execute(['table_name' => 'public."' . $table . '"']);
+            if (!$stmt->fetchColumn()) {
+                throw new \RuntimeException('Schema POS no inicializado. Ejecuta el bootstrap o migraciones de base de datos antes de usar el módulo POS.');
+            }
+        }
     }
 
     private function getTenantId(): string {

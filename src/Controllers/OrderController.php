@@ -544,7 +544,7 @@ class OrderController {
         foreach ($grossItems as $index => $item) {
             $quantity = max(1, (int)($item['quantity'] ?? 1));
             $grossUnitPrice = (float)($item['price'] ?? 0);
-            $grossLineTotal = round($grossUnitPrice * $quantity, 2);
+            $grossLineTotal = $grossUnitPrice * $quantity;
             $allocatedDiscount = (float)($discountAllocations[$index] ?? 0);
             $discountedGrossLine = max(0, $grossLineTotal - $allocatedDiscount);
             $itemTaxRate = isset($item['tax_rate']) && is_numeric($item['tax_rate'])
@@ -557,22 +557,33 @@ class OrderController {
                 }
             }
             $taxDivisor = 1 + ($itemTaxRate / 100);
+            $storedNetTotal = $this->numericOrNull($item['net_total'] ?? null);
+            $storedTaxAmount = $this->numericOrNull($item['tax_amount'] ?? null);
+            $storedNetUnitPrice = $this->numericOrNull($item['price_net'] ?? null);
             $originalNetUnitPrice = $taxDivisor > 0 ? ($grossUnitPrice / $taxDivisor) : $grossUnitPrice;
-            $lineSubtotalNet = $taxDivisor > 0 ? ($discountedGrossLine / $taxDivisor) : $discountedGrossLine;
-            $discountNetAmount = max(0, round(($originalNetUnitPrice * $quantity) - $lineSubtotalNet, 6));
-            $taxAmount = max(0, round($discountedGrossLine - $lineSubtotalNet, 6));
+            if ($storedNetUnitPrice !== null && ($allocatedDiscount <= 0.000001 || $grossUnitPrice <= 0)) {
+                $originalNetUnitPrice = $storedNetUnitPrice;
+            }
+
+            $lineSubtotalNet = $storedNetTotal !== null
+                ? $storedNetTotal
+                : ($taxDivisor > 0 ? ($discountedGrossLine / $taxDivisor) : $discountedGrossLine);
+            $discountNetAmount = max(0, ($originalNetUnitPrice * $quantity) - $lineSubtotalNet);
+            $taxAmount = $storedTaxAmount !== null
+                ? $storedTaxAmount
+                : max(0, $discountedGrossLine - $lineSubtotalNet);
 
             $items[] = [
                 'code' => (string)($item['product_id'] ?? ('ITEM-' . ($index + 1))),
                 'description' => (string)($item['product_name'] ?? 'Producto'),
-                'quantity' => $quantity,
-                'unit_price' => round($originalNetUnitPrice, 6),
-                'discount' => $discountNetAmount,
-                'line_subtotal_net' => round($lineSubtotalNet, 6),
-                'tax_rate' => round($itemTaxRate, 2),
+                'quantity' => $this->facturadorDecimal($quantity, 6),
+                'unit_price' => $this->facturadorDecimal($originalNetUnitPrice, 6),
+                'discount' => $this->facturadorDecimal($discountNetAmount, 6),
+                'line_subtotal_net' => $this->facturadorDecimal($lineSubtotalNet, 6),
+                'tax_rate' => $this->facturadorDecimal($itemTaxRate, 2),
                 'tax_code' => '2',
                 'tax_percentage_code' => $this->resolveSriVatPercentageCode($itemTaxRate),
-                'tax_amount' => $taxAmount,
+                'tax_amount' => $this->facturadorDecimal($taxAmount, 6),
             ];
         }
 
@@ -587,14 +598,14 @@ class OrderController {
             $items[] = [
                 'code' => 'ENVIO',
                 'description' => 'Servicio de envio',
-                'quantity' => 1,
-                'unit_price' => round($shippingBase, 6),
-                'discount' => 0,
-                'line_subtotal_net' => round($shippingBase, 6),
-                'tax_rate' => round($shippingTaxRate, 2),
+                'quantity' => $this->facturadorDecimal(1, 6),
+                'unit_price' => $this->facturadorDecimal($shippingBase, 6),
+                'discount' => $this->facturadorDecimal(0, 6),
+                'line_subtotal_net' => $this->facturadorDecimal($shippingBase, 6),
+                'tax_rate' => $this->facturadorDecimal($shippingTaxRate, 2),
                 'tax_code' => '2',
                 'tax_percentage_code' => $this->resolveSriVatPercentageCode($shippingTaxRate),
-                'tax_amount' => $shippingTaxAmount,
+                'tax_amount' => $this->facturadorDecimal($shippingTaxAmount, 6),
             ];
         }
 
@@ -622,6 +633,23 @@ class OrderController {
                 'identification_fallback_reason' => $identificationFallbackReason,
             ], static fn($value) => $value !== null && $value !== ''),
         ];
+    }
+
+    private function numericOrNull($value): ?float {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return is_numeric($value) ? (float)$value : null;
+    }
+
+    private function facturadorDecimal($value, int $decimals): string {
+        $number = is_numeric($value) ? (float)$value : 0.0;
+        if (abs($number) < 0.0000005) {
+            $number = 0.0;
+        }
+
+        return number_format($number, $decimals, '.', '');
     }
 
     private function resolveOrderAccountingDate($createdAt): ?string {

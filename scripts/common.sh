@@ -110,7 +110,7 @@ resolve_env_file() {
     upsert_env_value "${env_file}" "BACKEND_PUBLIC_SCHEME" "${backend_public_scheme}"
     upsert_env_value "${env_file}" "BACKEND_PUBLIC_HOST" "${backend_public_host}"
     upsert_env_value "${env_file}" "APP_URL" "${app_url}"
-    upsert_env_value "${env_file}" "ADMIN_IP_MODE" "off"
+    upsert_env_value "${env_file}" "ADMIN_IP_MODE" "private"
     upsert_env_value "${env_file}" "ADMIN_IP_ALLOWLIST" ""
     upsert_env_value "${env_file}" "TRUST_PROXY_HEADERS" "false"
     upsert_env_value "${env_file}" "SRI_ENVIRONMENT" "pruebas"

@@ -33,75 +33,18 @@ class BusinessExpenseRepository {
     private function ensureSchema(): void {
         if (self::$schemaEnsured) return;
 
-        $this->db->exec('
-            CREATE TABLE IF NOT EXISTS "BusinessExpenseRecurrence" (
-                id varchar(64) PRIMARY KEY,
-                tenant_id varchar(120) NOT NULL,
-                category varchar(120) NOT NULL,
-                description text NOT NULL,
-                amount numeric(12,2) NOT NULL DEFAULT 0,
-                tax_amount numeric(12,2) NOT NULL DEFAULT 0,
-                total numeric(12,2) NOT NULL DEFAULT 0,
-                frequency varchar(20) NOT NULL DEFAULT \'monthly\',
-                interval_count integer NOT NULL DEFAULT 1,
-                start_date date NOT NULL,
-                next_due_date date NOT NULL,
-                payment_method varchar(60) NULL,
-                reference varchar(160) NULL,
-                notes text NULL,
-                active boolean NOT NULL DEFAULT TRUE,
-                created_by_user_id varchar(64) NOT NULL,
-                created_at timestamptz NOT NULL DEFAULT NOW(),
-                updated_at timestamptz NOT NULL DEFAULT NOW()
-            )
-        ');
-        $this->db->exec('CREATE INDEX IF NOT EXISTS idx_business_expense_recurrence_tenant_next ON "BusinessExpenseRecurrence"(tenant_id, active, next_due_date)');
-
-        $this->db->exec('
-            CREATE TABLE IF NOT EXISTS "BusinessExpense" (
-                id varchar(64) PRIMARY KEY,
-                tenant_id varchar(120) NOT NULL,
-                recurrence_id varchar(64) NULL REFERENCES "BusinessExpenseRecurrence"(id) ON DELETE SET NULL,
-                category varchar(120) NOT NULL,
-                description text NOT NULL,
-                amount numeric(12,2) NOT NULL DEFAULT 0,
-                tax_amount numeric(12,2) NOT NULL DEFAULT 0,
-                total numeric(12,2) NOT NULL DEFAULT 0,
-                expense_date date NOT NULL,
-                due_date date NULL,
-                paid_at timestamptz NULL,
-                status varchar(20) NOT NULL DEFAULT \'pending\',
-                type varchar(30) NOT NULL DEFAULT \'one_time\',
-                payment_method varchar(60) NULL,
-                reference varchar(160) NULL,
-                notes text NULL,
-                source varchar(40) NULL,
-                source_id varchar(80) NULL,
-                created_by_user_id varchar(64) NOT NULL,
-                created_at timestamptz NOT NULL DEFAULT NOW(),
-                updated_at timestamptz NOT NULL DEFAULT NOW()
-            )
-        ');
-        $this->db->exec('CREATE INDEX IF NOT EXISTS idx_business_expense_tenant_status_date ON "BusinessExpense"(tenant_id, status, expense_date DESC)');
-        $this->db->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_business_expense_recurrence_due_unique ON "BusinessExpense"(tenant_id, recurrence_id, due_date) WHERE recurrence_id IS NOT NULL');
-
-        $this->db->exec('
-            CREATE TABLE IF NOT EXISTS "BusinessExpensePayment" (
-                id bigserial PRIMARY KEY,
-                tenant_id varchar(120) NOT NULL,
-                expense_id varchar(64) NOT NULL REFERENCES "BusinessExpense"(id) ON DELETE CASCADE,
-                amount numeric(12,2) NOT NULL DEFAULT 0,
-                paid_at timestamptz NOT NULL DEFAULT NOW(),
-                payment_method varchar(60) NULL,
-                reference varchar(160) NULL,
-                notes text NULL,
-                created_by_user_id varchar(64) NOT NULL,
-                created_at timestamptz NOT NULL DEFAULT NOW()
-            )
-        ');
-        $this->db->exec('CREATE INDEX IF NOT EXISTS idx_business_expense_payment_expense ON "BusinessExpensePayment"(tenant_id, expense_id, paid_at DESC)');
-
+        $this->assertRequiredTables(['BusinessExpenseRecurrence', 'BusinessExpense', 'BusinessExpensePayment']);
         self::$schemaEnsured = true;
+    }
+
+    private function assertRequiredTables(array $tables): void {
+        $stmt = $this->db->prepare('SELECT to_regclass(:table_name)');
+        foreach ($tables as $table) {
+            $stmt->execute(['table_name' => 'public."' . $table . '"']);
+            if (!$stmt->fetchColumn()) {
+                throw new \RuntimeException('Schema de gastos no inicializado. Ejecuta el bootstrap o migraciones de base de datos antes de usar el módulo de gastos.');
+            }
+        }
     }
 
     private function money($value): float {

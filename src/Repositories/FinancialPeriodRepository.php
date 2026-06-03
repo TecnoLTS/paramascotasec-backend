@@ -33,47 +33,18 @@ class FinancialPeriodRepository {
             return;
         }
 
-        $this->db->exec('
-            CREATE TABLE IF NOT EXISTS "FinancialPeriod" (
-                id varchar(64) PRIMARY KEY,
-                tenant_id varchar(120) NOT NULL,
-                period_key varchar(7) NOT NULL,
-                start_date date NOT NULL,
-                end_date date NOT NULL,
-                status varchar(20) NOT NULL DEFAULT \'open\',
-                snapshot_json jsonb NULL,
-                closed_by_user_id varchar(64) NULL,
-                closed_at timestamptz NULL,
-                notes text NULL,
-                created_at timestamptz NOT NULL DEFAULT NOW(),
-                updated_at timestamptz NOT NULL DEFAULT NOW(),
-                UNIQUE (tenant_id, period_key)
-            )
-        ');
-        $this->db->exec('CREATE INDEX IF NOT EXISTS idx_financial_period_tenant_dates ON "FinancialPeriod"(tenant_id, start_date DESC, status)');
-
-        $this->db->exec('
-            CREATE TABLE IF NOT EXISTS "FinancialAdjustment" (
-                id varchar(64) PRIMARY KEY,
-                tenant_id varchar(120) NOT NULL,
-                period_key varchar(7) NOT NULL,
-                adjustment_date date NOT NULL,
-                type varchar(40) NOT NULL,
-                target_type varchar(60) NULL,
-                target_id varchar(80) NULL,
-                original_period_key varchar(7) NULL,
-                description text NOT NULL,
-                amount numeric(12,2) NOT NULL DEFAULT 0,
-                tax_amount numeric(12,2) NOT NULL DEFAULT 0,
-                total numeric(12,2) NOT NULL DEFAULT 0,
-                reason text NULL,
-                created_by_user_id varchar(64) NOT NULL,
-                created_at timestamptz NOT NULL DEFAULT NOW()
-            )
-        ');
-        $this->db->exec('CREATE INDEX IF NOT EXISTS idx_financial_adjustment_tenant_period ON "FinancialAdjustment"(tenant_id, period_key, created_at DESC)');
-
+        $this->assertRequiredTables(['FinancialPeriod', 'FinancialAdjustment']);
         self::$schemaEnsured = true;
+    }
+
+    private function assertRequiredTables(array $tables): void {
+        $stmt = $this->db->prepare('SELECT to_regclass(:table_name)');
+        foreach ($tables as $table) {
+            $stmt->execute(['table_name' => 'public."' . $table . '"']);
+            if (!$stmt->fetchColumn()) {
+                throw new \RuntimeException('Schema financiero no inicializado. Ejecuta el bootstrap o migraciones de base de datos antes de usar el módulo financiero.');
+            }
+        }
     }
 
     private function cleanDate(?string $date = null): string {
