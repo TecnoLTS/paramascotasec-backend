@@ -544,9 +544,9 @@ class OrderController {
         foreach ($grossItems as $index => $item) {
             $quantity = max(1, (int)($item['quantity'] ?? 1));
             $grossUnitPrice = (float)($item['price'] ?? 0);
-            $grossLineTotal = $grossUnitPrice * $quantity;
-            $allocatedDiscount = (float)($discountAllocations[$index] ?? 0);
-            $discountedGrossLine = max(0, $grossLineTotal - $allocatedDiscount);
+            $grossLineTotal = round($grossUnitPrice * $quantity, 2);
+            $allocatedDiscount = round((float)($discountAllocations[$index] ?? 0), 2);
+            $discountedGrossLine = round(max(0, $grossLineTotal - $allocatedDiscount), 2);
             $itemTaxRate = isset($item['tax_rate']) && is_numeric($item['tax_rate'])
                 ? max(0, (float)$item['tax_rate'])
                 : $fallbackVatRate;
@@ -556,22 +556,21 @@ class OrderController {
                     $itemTaxRate = 0.0;
                 }
             }
-            $taxDivisor = 1 + ($itemTaxRate / 100);
             $storedNetTotal = $this->numericOrNull($item['net_total'] ?? null);
             $storedTaxAmount = $this->numericOrNull($item['tax_amount'] ?? null);
-            $storedNetUnitPrice = $this->numericOrNull($item['price_net'] ?? null);
-            $originalNetUnitPrice = $taxDivisor > 0 ? ($grossUnitPrice / $taxDivisor) : $grossUnitPrice;
-            if ($storedNetUnitPrice !== null && ($allocatedDiscount <= 0.000001 || $grossUnitPrice <= 0)) {
-                $originalNetUnitPrice = $storedNetUnitPrice;
+            $originalBreakdown = $this->splitGrossAmountByTaxRate($grossLineTotal, $itemTaxRate);
+            $discountedBreakdown = $this->splitGrossAmountByTaxRate($discountedGrossLine, $itemTaxRate);
+
+            $lineSubtotalNet = $discountedBreakdown['net'];
+            $taxAmount = $discountedBreakdown['tax'];
+            if ($this->isCentConsistentStoredBreakdown($storedNetTotal, $storedTaxAmount, $discountedGrossLine)) {
+                $lineSubtotalNet = round((float)$storedNetTotal, 2);
+                $taxAmount = round((float)$storedTaxAmount, 2);
             }
 
-            $lineSubtotalNet = $storedNetTotal !== null
-                ? $storedNetTotal
-                : ($taxDivisor > 0 ? ($discountedGrossLine / $taxDivisor) : $discountedGrossLine);
-            $discountNetAmount = max(0, ($originalNetUnitPrice * $quantity) - $lineSubtotalNet);
-            $taxAmount = $storedTaxAmount !== null
-                ? $storedTaxAmount
-                : max(0, $discountedGrossLine - $lineSubtotalNet);
+            $originalNetLine = $originalBreakdown['net'];
+            $originalNetUnitPrice = $quantity > 0 ? round($originalNetLine / $quantity, 6) : 0.0;
+            $discountNetAmount = round(max(0, $originalNetLine - $lineSubtotalNet), 2);
 
             $items[] = [
                 'code' => (string)($item['product_id'] ?? ('ITEM-' . ($index + 1))),
@@ -590,10 +589,9 @@ class OrderController {
         $shipping = max(0, (float)($order['shipping'] ?? 0));
         if ($shipping > 0) {
             $shippingTaxRate = $this->resolveShippingTaxRate($order);
-            $shippingBase = isset($order['shipping_base']) && is_numeric($order['shipping_base'])
-                ? (float)$order['shipping_base']
-                : ($shipping / (1 + ($shippingTaxRate / 100)));
-            $shippingTaxAmount = max(0, round($shipping - $shippingBase, 6));
+            $shippingBreakdown = $this->splitGrossAmountByTaxRate($shipping, $shippingTaxRate);
+            $shippingBase = $shippingBreakdown['net'];
+            $shippingTaxAmount = $shippingBreakdown['tax'];
 
             $items[] = [
                 'code' => 'ENVIO',
@@ -650,6 +648,42 @@ class OrderController {
         }
 
         return number_format($number, $decimals, '.', '');
+    }
+
+    private function splitGrossAmountByTaxRate(float $grossAmount, float $taxRate): array {
+        $grossAmount = round(max(0, $grossAmount), 2);
+        $taxRate = max(0, $taxRate);
+        if ($grossAmount <= 0 || $taxRate <= 0) {
+            return [
+                'gross' => $grossAmount,
+                'net' => $grossAmount,
+                'tax' => 0.0,
+            ];
+        }
+
+        $divisor = 1 + ($taxRate / 100);
+        $net = round($grossAmount / $divisor, 2);
+        $tax = round($grossAmount - $net, 2);
+
+        return [
+            'gross' => $grossAmount,
+            'net' => $net,
+            'tax' => $tax,
+        ];
+    }
+
+    private function isCentConsistentStoredBreakdown(?float $net, ?float $tax, float $gross): bool {
+        if ($net === null || $tax === null) {
+            return false;
+        }
+
+        $netCents = round($net, 2);
+        $taxCents = round($tax, 2);
+        if (abs($net - $netCents) > 0.000001 || abs($tax - $taxCents) > 0.000001) {
+            return false;
+        }
+
+        return abs(round($netCents + $taxCents, 2) - round($gross, 2)) <= 0.000001;
     }
 
     private function resolveOrderAccountingDate($createdAt): ?string {

@@ -383,9 +383,9 @@ class PurchaseInvoiceRepository {
             $taxTotal += $this->resolveItemTaxAmount($row['metadata'] ?? null, $lineTotal);
         }
 
-        $subtotal = round($subtotal, 4);
-        $taxTotal = round($taxTotal, 4);
-        $grandTotal = round($subtotal + $taxTotal, 4);
+        $subtotal = round($subtotal, 2);
+        $taxTotal = round($taxTotal, 2);
+        $grandTotal = round($subtotal + $taxTotal, 2);
 
         $update = $this->db->prepare("
             UPDATE \"PurchaseInvoice\"
@@ -420,7 +420,7 @@ class PurchaseInvoiceRepository {
 
         $metadata['tax_rate'] = $taxRate;
         $metadata['tax_exempt'] = $taxExempt;
-        $metadata['tax_amount'] = $taxExempt ? 0.0 : round($lineTotal * ($taxRate / 100), 4);
+        $metadata['tax_amount'] = $taxExempt ? 0.0 : round($lineTotal * ($taxRate / 100), 2);
 
         return $metadata;
     }
@@ -436,10 +436,10 @@ class PurchaseInvoiceRepository {
         }
 
         if (isset($decoded['tax_amount']) && is_numeric($decoded['tax_amount'])) {
-            return round((float)$decoded['tax_amount'], 4);
+            return round((float)$decoded['tax_amount'], 2);
         }
 
-        return round($lineTotal * ($taxRate / 100), 4);
+        return round($lineTotal * ($taxRate / 100), 2);
     }
 
     private function getHeaderById(string $id): array {

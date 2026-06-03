@@ -529,14 +529,12 @@ class OrderRepository {
         foreach ($itemsWithDetails as $index => &$item) {
             $quantity = max(1, (int)($item['quantity'] ?? 1));
             $itemTaxRate = round((float)($item['tax_rate'] ?? 0), 2);
-            $itemTaxMultiplier = 1 + ($itemTaxRate / 100);
             $grossLineTotal = round((float)($itemGrossLineTotals[$index] ?? 0), 2);
             $allocatedDiscount = round((float)($discountAllocations[$index] ?? 0), 2);
             $discountedGrossLine = round(max(0, $grossLineTotal - $allocatedDiscount), 2);
-            $discountedNetLine = $itemTaxMultiplier > 0
-                ? round($discountedGrossLine / $itemTaxMultiplier, 4)
-                : round($discountedGrossLine, 4);
-            $discountedTaxAmount = round($discountedGrossLine - $discountedNetLine, 4);
+            $taxBreakdown = $this->splitGrossAmountByTaxRate($discountedGrossLine, $itemTaxRate);
+            $discountedNetLine = $taxBreakdown['net'];
+            $discountedTaxAmount = $taxBreakdown['tax'];
 
             $item['discount_total'] = $allocatedDiscount;
             $item['price_net'] = round($quantity > 0 ? ($discountedNetLine / $quantity) : 0, 4);
@@ -582,6 +580,28 @@ class OrderRepository {
             'discount_rejections' => $discountResult['discount_rejections'] ?? [],
             'total' => round($total, 2),
             'items' => $itemsWithDetails
+        ];
+    }
+
+    private function splitGrossAmountByTaxRate(float $grossAmount, float $taxRate): array {
+        $grossAmount = round(max(0, $grossAmount), 2);
+        $taxRate = max(0, $taxRate);
+        if ($grossAmount <= 0 || $taxRate <= 0) {
+            return [
+                'gross' => $grossAmount,
+                'net' => $grossAmount,
+                'tax' => 0.0,
+            ];
+        }
+
+        $divisor = 1 + ($taxRate / 100);
+        $net = round($grossAmount / $divisor, 2);
+        $tax = round($grossAmount - $net, 2);
+
+        return [
+            'gross' => $grossAmount,
+            'net' => $net,
+            'tax' => $tax,
         ];
     }
 
@@ -1792,7 +1812,11 @@ class OrderRepository {
         $productsStmt = $this->db->prepare("
             WITH active_lines AS (
                 SELECT
-                    oi.product_id,
+                    NULLIF(TRIM(oi.product_id), '') AS product_id,
+                    COALESCE(
+                        NULLIF(TRIM(oi.product_id), ''),
+                        'name:' || COALESCE(NULLIF(TRIM(oi.product_name), ''), 'Producto sin nombre')
+                    ) AS product_group_key,
                     COALESCE(NULLIF(TRIM(oi.product_name), ''), 'Producto sin nombre') AS product_name,
                     COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') AS category,
                     o.id AS order_id,
@@ -1812,6 +1836,7 @@ class OrderRepository {
             distributed_lines AS (
                 SELECT
                     product_id,
+                    product_group_key,
                     product_name,
                     category,
                     order_id,
@@ -1831,8 +1856,8 @@ class OrderRepository {
                 FROM active_lines
             )
             SELECT
-                product_id,
-                product_name,
+                COALESCE(NULLIF(MAX(product_id), ''), '') AS product_id,
+                COALESCE(NULLIF(MAX(product_name), ''), 'Producto sin nombre') AS product_name,
                 category,
                 COALESCE(SUM(quantity), 0)::int AS units_sold,
                 COALESCE(SUM(line_net_estimate), 0) AS net_revenue,
@@ -1842,7 +1867,7 @@ class OrderRepository {
                 COALESCE(SUM(line_net_estimate + line_vat + line_shipping), 0) AS gross_revenue,
                 STRING_AGG(DISTINCT order_id, ', ') AS order_refs
             FROM distributed_lines
-            GROUP BY product_id, product_name, category
+            GROUP BY product_group_key, category
             ORDER BY net_revenue DESC, units_sold DESC
             LIMIT $safeProductLimit
         ");
@@ -2059,8 +2084,8 @@ class OrderRepository {
             ) items ON true
             WHERE o.tenant_id = :tenant_id
               AND $realizedSales
-              AND o.created_at >= CAST(:start_date AS timestamp)
-              AND o.created_at < CAST(:end_exclusive AS timestamp)
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:start_date AS date)
+              AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:end_exclusive AS date)
             ORDER BY o.created_at DESC
         ");
         $ordersStmt->execute([
@@ -2107,7 +2132,11 @@ class OrderRepository {
         $metricsStmt = $this->db->prepare("
             WITH active_lines AS (
                 SELECT
-                    oi.product_id,
+                    NULLIF(TRIM(oi.product_id), '') AS product_id,
+                    COALESCE(
+                        NULLIF(TRIM(oi.product_id), ''),
+                        'name:' || COALESCE(NULLIF(TRIM(oi.product_name), ''), NULLIF(TRIM(p.name), ''), 'Producto sin nombre')
+                    ) AS product_group_key,
                     COALESCE(NULLIF(TRIM(oi.product_name), ''), NULLIF(TRIM(p.name), ''), 'Producto sin nombre') AS product_name,
                     COALESCE(NULLIF(TRIM(p.category), ''), 'Sin categoría') AS category,
                     o.id AS order_id,
@@ -2125,12 +2154,13 @@ class OrderRepository {
                 LEFT JOIN \"Product\" p ON oi.product_id = p.id AND p.tenant_id = :tenant_id
                 WHERE o.tenant_id = :tenant_id
                   AND $realizedSales
-                  AND o.created_at >= CAST(:start_date AS timestamp)
-                  AND o.created_at < CAST(:end_exclusive AS timestamp)
+                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:start_date AS date)
+                  AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:end_exclusive AS date)
             ),
             distributed_lines AS (
                 SELECT
                     product_id,
+                    product_group_key,
                     product_name,
                     category,
                     order_id,
@@ -2152,8 +2182,8 @@ class OrderRepository {
             ),
             product_rows AS (
                 SELECT
-                    product_id,
-                    product_name,
+                    COALESCE(NULLIF(MAX(product_id), ''), '') AS product_id,
+                    COALESCE(NULLIF(MAX(product_name), ''), 'Producto sin nombre') AS product_name,
                     category,
                     COUNT(DISTINCT order_id)::int AS orders_count,
                     COALESCE(SUM(quantity), 0)::int AS units_sold,
@@ -2164,7 +2194,7 @@ class OrderRepository {
                     COALESCE(SUM(line_cost), 0) AS cost,
                     STRING_AGG(DISTINCT order_id::text, ', ' ORDER BY order_id::text) AS order_refs
                 FROM distributed_lines
-                GROUP BY product_id, product_name, category
+                GROUP BY product_group_key, category
             ),
             category_rows AS (
                 SELECT
