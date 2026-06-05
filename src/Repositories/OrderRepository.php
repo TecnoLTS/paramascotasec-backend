@@ -2002,16 +2002,29 @@ class OrderRepository {
 
     public function getReportPeriodSummary(?string $selectedMonth = null, ?string $selectedDate = null, ?string $scope = null): array {
         $tenantId = $this->getTenantId();
+        $timezone = new \DateTimeZone('America/Guayaquil');
         if ($scope === 'historical') {
             $period = [
-                'period_key' => (new \DateTimeImmutable('now', new \DateTimeZone('America/Guayaquil')))->format('Y-m'),
+                'period_key' => (new \DateTimeImmutable('now', $timezone))->format('Y-m'),
                 'start_date' => '2000-01-01',
                 'end_date' => '2099-12-31',
                 'end_exclusive' => '2099-12-31',
                 'timezone' => 'America/Guayaquil',
             ];
+        } elseif ($scope === 'week') {
+            $end = $selectedDate
+                ? new \DateTimeImmutable($selectedDate, $timezone)
+                : new \DateTimeImmutable('today', $timezone);
+            $start = $end->modify('-6 days');
+            $period = [
+                'period_key' => 'week:' . $start->format('Y-m-d') . ':' . $end->format('Y-m-d'),
+                'start_date' => $start->format('Y-m-d'),
+                'end_date' => $end->format('Y-m-d'),
+                'end_exclusive' => $end->modify('+1 day')->format('Y-m-d'),
+                'timezone' => 'America/Guayaquil',
+            ];
         } elseif ($selectedDate) {
-            $monthKey = (new \DateTimeImmutable($selectedDate, new \DateTimeZone('America/Guayaquil')))->format('Y-m');
+            $monthKey = (new \DateTimeImmutable($selectedDate, $timezone))->format('Y-m');
             $period = [
                 'period_key' => $monthKey,
                 'start_date' => $selectedDate,

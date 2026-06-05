@@ -597,6 +597,24 @@ class ProductController {
         }
     }
 
+    public function movement($id) {
+        Auth::requireAdmin();
+        $period = strtolower(trim((string)($_GET['period'] ?? 'month')));
+
+        try {
+            $movement = $this->productRepository->getMovementSummary($id, $period);
+            if (!$movement) {
+                Response::error('Producto no encontrado', 404, 'PRODUCT_NOT_FOUND');
+                return;
+            }
+            Response::json($movement);
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 400, 'PRODUCT_MOVEMENT_PERIOD_INVALID');
+        } catch (\Exception $e) {
+            Response::error($e->getMessage(), 500, 'PRODUCT_MOVEMENT_FAILED');
+        }
+    }
+
     public function store() {
         Auth::requireAdmin();
         try {

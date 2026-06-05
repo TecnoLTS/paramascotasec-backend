@@ -30,11 +30,11 @@ class DashboardController {
             $selectedDate = isset($_GET['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$_GET['date']) === 1
                 ? (string)$_GET['date']
                 : null;
-            $scope = isset($_GET['scope']) && in_array($_GET['scope'], ['historical'], true) ? (string)$_GET['scope'] : null;
+            $scope = isset($_GET['scope']) && in_array($_GET['scope'], ['historical', 'week'], true) ? (string)$_GET['scope'] : null;
             $includeReportRaw = strtolower(trim((string)($_GET['include_report'] ?? '1')));
             $includeReport = !in_array($includeReportRaw, ['0', 'false', 'no', 'off'], true);
             
-            if ($scope === 'historical' || $selectedDate) {
+            if ($scope === 'historical' || $scope === 'week' || $selectedDate) {
                 $report = $this->orderRepo->getReportPeriodSummary($selectedMonth, $selectedDate, $scope);
                 $salesData = $report['sales'] ?? [];
                 $profitData = $report['profit'] ?? [];
@@ -91,7 +91,7 @@ class DashboardController {
             $selectedDate = isset($_GET['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$_GET['date']) === 1
                 ? (string)$_GET['date']
                 : null;
-            $scope = isset($_GET['scope']) && in_array($_GET['scope'], ['historical'], true) ? (string)$_GET['scope'] : null;
+            $scope = isset($_GET['scope']) && in_array($_GET['scope'], ['historical', 'week'], true) ? (string)$_GET['scope'] : null;
             $report = $this->orderRepo->getReportPeriodSummary($selectedMonth, $selectedDate, $scope);
             $salesData = $report['sales'] ?? [];
             $profitData = $report['profit'] ?? [];

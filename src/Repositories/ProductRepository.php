@@ -40,6 +40,9 @@ class ProductRepository {
           , open_stock.weighted_remaining_unit_cost AS "weightedRemainingUnitCost"
           , open_stock.min_remaining_unit_cost AS "minRemainingUnitCost"
           , open_stock.max_remaining_unit_cost AS "maxRemainingUnitCost"
+          , sales_stats.sales_orders_count AS "salesOrdersCount"
+          , sales_stats.sales_units_total AS "salesUnitsTotal"
+          , sales_stats.last_sale_at AS "lastSaleAt"
         ';
             $procurementJoin = '
         LEFT JOIN LATERAL (
@@ -102,6 +105,18 @@ class ProductRepository {
             AND il.tenant_id = p.tenant_id
             AND il.remaining_quantity > 0
         ) open_stock ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(DISTINCT o.id)::int AS sales_orders_count,
+            COALESCE(SUM(oi.quantity), 0)::int AS sales_units_total,
+            MAX(o.created_at) AS last_sale_at
+          FROM "OrderItem" oi
+          JOIN "Order" o
+            ON o.id = oi.order_id
+           AND o.tenant_id = p.tenant_id
+          WHERE oi.product_id = p.id
+            AND LOWER(COALESCE(o.status, \'pending\')) IN (\'delivered\', \'completed\')
+        ) sales_stats ON true
         ';
         }
 
@@ -214,6 +229,268 @@ class ProductRepository {
         }
 
         return $formatted;
+    }
+
+    public function getMovementSummary($idOrLegacyOrSlug, string $periodKey = 'month'): ?array {
+        $tenantId = $this->getTenantId();
+        $period = $this->resolveMovementPeriod($periodKey);
+
+        $stmt = $this->db->prepare('
+            SELECT
+                id,
+                legacy_id,
+                name,
+                category,
+                product_type,
+                quantity,
+                sold,
+                price,
+                cost,
+                COALESCE(attributes, \'{}\') AS attributes
+            FROM "Product" p
+            WHERE p.tenant_id = :tenant_id
+              AND (p.id = :id OR p.legacy_id = :id OR p.slug = :id)
+              AND COALESCE(p.attributes->>\'archived\', \'false\') <> \'true\'
+            LIMIT 1
+        ');
+        $stmt->execute([
+            'id' => $idOrLegacyOrSlug,
+            'tenant_id' => $tenantId,
+        ]);
+        $product = $stmt->fetch();
+        if (!$product) {
+            return null;
+        }
+
+        $attributes = json_decode($product['attributes'] ?? '{}', true) ?: [];
+        $productId = (string)$product['id'];
+        $dateFilter = '';
+        $dateParams = [];
+        if ($period['start_date'] !== null && $period['end_exclusive'] !== null) {
+            $dateFilter = " AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date >= CAST(:start_date AS date)
+                            AND (o.created_at AT TIME ZONE 'America/Guayaquil')::date < CAST(:end_exclusive AS date)";
+            $dateParams = [
+                'start_date' => $period['start_date'],
+                'end_exclusive' => $period['end_exclusive'],
+            ];
+        }
+
+        $fallbackCost = (float)($product['cost'] ?? 0);
+        $salesParams = array_merge([
+            'tenant_id' => $tenantId,
+            'product_id' => $productId,
+            'fallback_cost' => $fallbackCost,
+        ], $dateParams);
+        $salesStmt = $this->db->prepare("
+            SELECT
+                COUNT(DISTINCT o.id)::int AS orders_count,
+                COALESCE(SUM(COALESCE(oi.quantity, 0)), 0)::int AS units_sold,
+                COALESCE(SUM(COALESCE(oi.quantity, 0) * COALESCE(oi.price, 0)), 0) AS gross_revenue,
+                COALESCE(SUM(
+                    CASE
+                        WHEN COALESCE(oi.net_total, 0) > 0 THEN oi.net_total
+                        WHEN COALESCE(oi.price_net, 0) > 0 THEN COALESCE(oi.quantity, 0) * oi.price_net
+                        ELSE COALESCE(oi.quantity, 0) * COALESCE(oi.price, 0)
+                    END
+                ), 0) AS net_revenue,
+                COALESCE(SUM(
+                    CASE
+                        WHEN COALESCE(oi.cost_total, 0) > 0 THEN oi.cost_total
+                        WHEN COALESCE(oi.unit_cost, 0) > 0 THEN COALESCE(oi.quantity, 0) * oi.unit_cost
+                        ELSE COALESCE(oi.quantity, 0) * CAST(:fallback_cost AS numeric)
+                    END
+                ), 0) AS cost,
+                MAX(o.created_at) AS last_sale_at
+            FROM \"OrderItem\" oi
+            JOIN \"Order\" o
+              ON o.id = oi.order_id
+             AND o.tenant_id = :tenant_id
+            WHERE oi.product_id = :product_id
+              AND LOWER(COALESCE(o.status, 'pending')) IN ('completed', 'delivered')
+              {$dateFilter}
+        ");
+        $salesStmt->execute($salesParams);
+        $salesRow = $salesStmt->fetch() ?: [];
+
+        $salesRowsStmt = $this->db->prepare("
+            SELECT
+                o.id,
+                o.created_at,
+                o.status,
+                COALESCE(oi.quantity, 0)::int AS quantity,
+                COALESCE(oi.price, 0) AS price,
+                CASE
+                    WHEN COALESCE(oi.net_total, 0) > 0 THEN oi.net_total
+                    WHEN COALESCE(oi.price_net, 0) > 0 THEN COALESCE(oi.quantity, 0) * oi.price_net
+                    ELSE COALESCE(oi.quantity, 0) * COALESCE(oi.price, 0)
+                END AS net_total,
+                CASE
+                    WHEN COALESCE(oi.cost_total, 0) > 0 THEN oi.cost_total
+                    WHEN COALESCE(oi.unit_cost, 0) > 0 THEN COALESCE(oi.quantity, 0) * oi.unit_cost
+                    ELSE COALESCE(oi.quantity, 0) * CAST(:fallback_cost AS numeric)
+                END AS cost_total,
+                u.name AS customer_name,
+                u.email AS customer_email
+            FROM \"OrderItem\" oi
+            JOIN \"Order\" o
+              ON o.id = oi.order_id
+             AND o.tenant_id = :tenant_id
+            LEFT JOIN \"User\" u
+              ON u.id = o.user_id
+             AND u.tenant_id = o.tenant_id
+            WHERE oi.product_id = :product_id
+              AND LOWER(COALESCE(o.status, 'pending')) IN ('completed', 'delivered')
+              {$dateFilter}
+            ORDER BY o.created_at DESC, o.id DESC
+            LIMIT 20
+        ");
+        $salesRowsStmt->execute($salesParams);
+        $salesRows = array_map(static function ($row) {
+            $net = round((float)($row['net_total'] ?? 0), 2);
+            $cost = round((float)($row['cost_total'] ?? 0), 2);
+            return [
+                'id' => (string)($row['id'] ?? ''),
+                'created_at' => $row['created_at'] ?? null,
+                'status' => (string)($row['status'] ?? ''),
+                'quantity' => (int)($row['quantity'] ?? 0),
+                'price' => round((float)($row['price'] ?? 0), 2),
+                'net_total' => $net,
+                'cost_total' => $cost,
+                'profit' => round($net - $cost, 2),
+                'customer_name' => $row['customer_name'] ? (string)$row['customer_name'] : null,
+                'customer_email' => $row['customer_email'] ? (string)$row['customer_email'] : null,
+            ];
+        }, $salesRowsStmt->fetchAll() ?: []);
+
+        $purchaseDateExpr = "COALESCE(pi.issued_at::date, il.received_at::date, il.created_at::date)";
+        $purchaseDateFilter = '';
+        if ($period['start_date'] !== null && $period['end_exclusive'] !== null) {
+            $purchaseDateFilter = " AND {$purchaseDateExpr} >= CAST(:start_date AS date)
+                                    AND {$purchaseDateExpr} < CAST(:end_exclusive AS date)";
+        }
+        $purchaseParams = array_merge([
+            'tenant_id' => $tenantId,
+            'product_id' => $productId,
+        ], $dateParams);
+        $purchaseStmt = $this->db->prepare("
+            SELECT
+                COUNT(*)::int AS entries_count,
+                COUNT(DISTINCT il.purchase_invoice_id)::int AS invoices_count,
+                COALESCE(SUM(il.initial_quantity), 0)::int AS purchased_units,
+                COALESCE(SUM(il.remaining_quantity), 0)::int AS remaining_units,
+                COALESCE(SUM(il.initial_quantity * il.unit_cost), 0) AS purchase_cost,
+                MAX({$purchaseDateExpr}) AS last_purchase_at
+            FROM \"InventoryLot\" il
+            LEFT JOIN \"PurchaseInvoice\" pi
+              ON pi.id = il.purchase_invoice_id
+             AND pi.tenant_id = il.tenant_id
+            WHERE il.product_id = :product_id
+              AND il.tenant_id = :tenant_id
+              AND il.purchase_invoice_id IS NOT NULL
+              {$purchaseDateFilter}
+        ");
+        $purchaseStmt->execute($purchaseParams);
+        $purchaseRow = $purchaseStmt->fetch() ?: [];
+
+        $purchaseRowsStmt = $this->db->prepare("
+            SELECT
+                il.id,
+                il.purchase_invoice_id,
+                pi.invoice_number,
+                pi.supplier_name,
+                pi.supplier_document,
+                {$purchaseDateExpr} AS purchase_date,
+                COALESCE(il.initial_quantity, 0)::int AS purchased_quantity,
+                COALESCE(il.remaining_quantity, 0)::int AS remaining_quantity,
+                COALESCE(il.unit_cost, 0) AS unit_cost,
+                COALESCE(il.initial_quantity * il.unit_cost, 0) AS purchase_total
+            FROM \"InventoryLot\" il
+            LEFT JOIN \"PurchaseInvoice\" pi
+              ON pi.id = il.purchase_invoice_id
+             AND pi.tenant_id = il.tenant_id
+            WHERE il.product_id = :product_id
+              AND il.tenant_id = :tenant_id
+              AND il.purchase_invoice_id IS NOT NULL
+              {$purchaseDateFilter}
+            ORDER BY {$purchaseDateExpr} DESC, il.created_at DESC, il.id DESC
+            LIMIT 20
+        ");
+        $purchaseRowsStmt->execute($purchaseParams);
+        $purchaseRows = array_map(static function ($row) {
+            return [
+                'id' => (string)($row['id'] ?? ''),
+                'purchase_invoice_id' => $row['purchase_invoice_id'] ? (string)$row['purchase_invoice_id'] : null,
+                'invoice_number' => $row['invoice_number'] ? (string)$row['invoice_number'] : null,
+                'supplier_name' => $row['supplier_name'] ? (string)$row['supplier_name'] : null,
+                'supplier_document' => $row['supplier_document'] ? (string)$row['supplier_document'] : null,
+                'purchase_date' => $row['purchase_date'] ?? null,
+                'purchased_quantity' => (int)($row['purchased_quantity'] ?? 0),
+                'remaining_quantity' => (int)($row['remaining_quantity'] ?? 0),
+                'unit_cost' => round((float)($row['unit_cost'] ?? 0), 4),
+                'purchase_total' => round((float)($row['purchase_total'] ?? 0), 2),
+            ];
+        }, $purchaseRowsStmt->fetchAll() ?: []);
+
+        $inventoryStmt = $this->db->prepare('
+            SELECT
+                COUNT(*) FILTER (WHERE il.purchase_invoice_id IS NOT NULL)::int AS purchase_entries_total,
+                COALESCE(SUM(il.initial_quantity) FILTER (WHERE il.purchase_invoice_id IS NOT NULL), 0)::int AS purchased_units_total,
+                COALESCE(SUM(il.remaining_quantity) FILTER (WHERE il.purchase_invoice_id IS NOT NULL), 0)::int AS remaining_purchase_units_total,
+                COALESCE(SUM(il.remaining_quantity), 0)::int AS remaining_lot_units_total,
+                COUNT(*) FILTER (WHERE il.remaining_quantity > 0)::int AS open_lots_count
+            FROM "InventoryLot" il
+            WHERE il.product_id = :product_id
+              AND il.tenant_id = :tenant_id
+        ');
+        $inventoryStmt->execute([
+            'tenant_id' => $tenantId,
+            'product_id' => $productId,
+        ]);
+        $inventoryRow = $inventoryStmt->fetch() ?: [];
+
+        $salesNet = round((float)($salesRow['net_revenue'] ?? 0), 2);
+        $salesCost = round((float)($salesRow['cost'] ?? 0), 2);
+
+        return [
+            'product' => [
+                'id' => $productId,
+                'legacy_id' => $product['legacy_id'] ? (string)$product['legacy_id'] : null,
+                'name' => (string)($product['name'] ?? ''),
+                'category' => (string)($product['category'] ?? ''),
+                'product_type' => $product['product_type'] ? (string)$product['product_type'] : null,
+                'sku' => isset($attributes['sku']) ? trim((string)$attributes['sku']) : '',
+                'quantity' => max(0, (int)($product['quantity'] ?? 0)),
+                'sold_field' => max(0, (int)($product['sold'] ?? 0)),
+            ],
+            'period' => $period,
+            'sales' => [
+                'orders_count' => (int)($salesRow['orders_count'] ?? 0),
+                'units_sold' => (int)($salesRow['units_sold'] ?? 0),
+                'gross_revenue' => round((float)($salesRow['gross_revenue'] ?? 0), 2),
+                'net_revenue' => $salesNet,
+                'cost' => $salesCost,
+                'profit' => round($salesNet - $salesCost, 2),
+                'last_sale_at' => $salesRow['last_sale_at'] ?? null,
+                'orders' => $salesRows,
+            ],
+            'purchases' => [
+                'entries_count' => (int)($purchaseRow['entries_count'] ?? 0),
+                'invoices_count' => (int)($purchaseRow['invoices_count'] ?? 0),
+                'purchased_units' => (int)($purchaseRow['purchased_units'] ?? 0),
+                'remaining_units' => (int)($purchaseRow['remaining_units'] ?? 0),
+                'purchase_cost' => round((float)($purchaseRow['purchase_cost'] ?? 0), 2),
+                'last_purchase_at' => $purchaseRow['last_purchase_at'] ?? null,
+                'lots' => $purchaseRows,
+            ],
+            'inventory' => [
+                'current_stock' => max(0, (int)($product['quantity'] ?? 0)),
+                'purchase_entries_total' => (int)($inventoryRow['purchase_entries_total'] ?? 0),
+                'purchased_units_total' => (int)($inventoryRow['purchased_units_total'] ?? 0),
+                'remaining_purchase_units_total' => (int)($inventoryRow['remaining_purchase_units_total'] ?? 0),
+                'remaining_lot_units_total' => (int)($inventoryRow['remaining_lot_units_total'] ?? 0),
+                'open_lots_count' => (int)($inventoryRow['open_lots_count'] ?? 0),
+            ],
+        ];
     }
 
     public function skuExists(string $sku, ?string $excludeProductId = null): bool {
@@ -512,6 +789,9 @@ class ProductRepository {
             $weightedMargin = $priceNet > 0 ? round((($priceNet - $weightedRemainingUnitCost) / $priceNet) * 100, 1) : 0.0;
             $lastPurchaseProfit = $priceNet > 0 ? round($priceNet - $lastPurchaseUnitCost, 2) : 0.0;
             $lastPurchaseMargin = $priceNet > 0 ? round((($priceNet - $lastPurchaseUnitCost) / $priceNet) * 100, 1) : 0.0;
+            $salesOrdersCount = max(0, (int)($row['salesOrdersCount'] ?? 0));
+            $salesUnitsTotal = max(0, (int)($row['salesUnitsTotal'] ?? $soldHistorical));
+            $lastSaleAt = $row['lastSaleAt'] ?? null;
 
             $row['lastPurchaseInvoice'] = $lastPurchaseInvoice;
             $row['inventory']['purchaseHistory'] = [
@@ -532,6 +812,11 @@ class ProductRepository {
                 'weightedMargin' => $weightedMargin,
                 'lastPurchaseProfit' => $lastPurchaseProfit,
                 'lastPurchaseMargin' => $lastPurchaseMargin,
+            ];
+            $row['inventory']['salesHistory'] = [
+                'ordersCount' => $salesOrdersCount,
+                'soldUnits' => $salesUnitsTotal,
+                'lastSaleAt' => $lastSaleAt ?: null,
             ];
         }
 
@@ -699,6 +984,55 @@ class ProductRepository {
             'max_unit_cost' => count($openUnitCosts) > 0 ? max($openUnitCosts) : 0.0,
             'has_unlinked_stock' => $hasUnlinkedStock,
             'lots' => $lots,
+        ];
+    }
+
+    private function resolveMovementPeriod(string $periodKey): array {
+        $key = strtolower(trim($periodKey));
+        if ($key === '') {
+            $key = 'month';
+        }
+
+        $timezone = new \DateTimeZone('America/Guayaquil');
+        $today = new \DateTimeImmutable('today', $timezone);
+
+        switch ($key) {
+            case 'day':
+                $start = $today;
+                $endExclusive = $today->modify('+1 day');
+                $label = 'Hoy';
+                break;
+            case 'week':
+                $start = $today->modify('-6 days');
+                $endExclusive = $today->modify('+1 day');
+                $label = 'Últimos 7 días';
+                break;
+            case 'all':
+            case 'historical':
+                return [
+                    'key' => 'all',
+                    'label' => 'Histórico completo',
+                    'start_date' => null,
+                    'end_date' => null,
+                    'end_exclusive' => null,
+                    'timezone' => 'America/Guayaquil',
+                ];
+            case 'month':
+                $start = $today->modify('first day of this month');
+                $endExclusive = $start->modify('+1 month');
+                $label = 'Mes actual';
+                break;
+            default:
+                throw new \InvalidArgumentException('Período inválido. Usa day, week, month o all.');
+        }
+
+        return [
+            'key' => $key,
+            'label' => $label,
+            'start_date' => $start->format('Y-m-d'),
+            'end_date' => $endExclusive->modify('-1 day')->format('Y-m-d'),
+            'end_exclusive' => $endExclusive->format('Y-m-d'),
+            'timezone' => 'America/Guayaquil',
         ];
     }
 

@@ -336,6 +336,7 @@ $router = new Router();
 $router->add('GET', '/api/products', 'ProductController@index');
 $router->add('GET', '/api/products/{id}/reviews', 'ProductReviewController@indexForProduct');
 $router->add('POST', '/api/products/{id}/reviews', 'ProductReviewController@storeForProduct');
+$router->add('GET', '/api/products/{id}/movement', 'ProductController@movement');
 $router->add('GET', '/api/products/{id}', 'ProductController@show');
 $router->add('POST', '/api/products', 'ProductController@store');
 $router->add('PUT', '/api/products/{id}', 'ProductController@update');
