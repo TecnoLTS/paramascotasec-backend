@@ -5,7 +5,7 @@ namespace App\Core;
 class Router {
     protected $routes = [];
 
-    public function add($method, $path, $handler) {
+    public function add($method, $path, $handler, ?string $capabilityId = null) {
         // Convert path like /api/products/{id} to regex
         $path = preg_replace('/\{([a-zA-Z0-9_]+)\}/', '(?P<$1>[a-zA-Z0-9_.-]+)', $path);
         $path = '#^' . $path . '$#';
@@ -13,7 +13,8 @@ class Router {
         $this->routes[] = [
             'method' => $method,
             'path' => $path,
-            'handler' => $handler
+            'handler' => $handler,
+            'capability' => $capabilityId
         ];
     }
 

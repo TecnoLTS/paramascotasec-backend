@@ -8,6 +8,7 @@ use App\Core\Auth;
 use App\Core\Response;
 use App\Support\ProductAudience;
 use App\Support\ProductFieldValueNormalizer;
+use App\Support\ProductSeoMetadata;
 use App\Support\ProductVariantMetadata;
 
 class ProductController {
@@ -352,6 +353,10 @@ class ProductController {
         }
     }
 
+    private function applyProductSeoDefaults(array &$data, ?array $currentProduct = null): void {
+        ProductSeoMetadata::applyDefaults($data, $currentProduct);
+    }
+
     private function enforcePublicationEligibility(array &$data, ?array $currentProduct = null): void {
         $requestedPublish = array_key_exists('published', $data) && $data['published'] === true;
         $effectivePrice = array_key_exists('price', $data)
@@ -409,6 +414,7 @@ class ProductController {
         if (!$this->hasEffectiveImageSet($data, $currentProduct, 'gallery')) {
             $missing[] = 'product_image';
         }
+        $missing = array_merge($missing, ProductSeoMetadata::seoFieldGaps($data, $currentProduct));
 
         return array_values(array_unique($missing));
     }
@@ -723,6 +729,7 @@ class ProductController {
             $this->normalizeAudienceFields($data, null);
             $this->validateVariantMetadata($data, null);
             $this->applyVariantMetadata($data, null);
+            $this->applyProductSeoDefaults($data, null);
             $this->syncProductReferenceCatalog($data);
             $this->enforcePublicationEligibility($data, null);
             $product = $this->productRepository->create($data);
@@ -868,6 +875,7 @@ class ProductController {
                 $this->normalizeTaxSettings($data, $currentProduct);
                 $this->validateVariantMetadata($data, $currentProduct);
                 $this->applyVariantMetadata($data, $currentProduct);
+                $this->applyProductSeoDefaults($data, $currentProduct);
                 $this->syncProductReferenceCatalog($data);
                 $this->enforcePublicationEligibility($data, $currentProduct);
             } else {
@@ -890,6 +898,7 @@ class ProductController {
                 $this->normalizeTaxSettings($data, $currentProduct);
                 $this->validateVariantMetadata($data, $currentProduct);
                 $this->applyVariantMetadata($data, $currentProduct);
+                $this->applyProductSeoDefaults($data, $currentProduct);
                 $this->syncProductReferenceCatalog($data);
                 $this->enforcePublicationEligibility($data, $currentProduct);
             }

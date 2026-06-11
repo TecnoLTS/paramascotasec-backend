@@ -331,118 +331,15 @@ $method = $_SERVER['REQUEST_METHOD'];
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
 $router = new Router();
-
-// Product Routes
-$router->add('GET', '/api/products', 'ProductController@index');
-$router->add('GET', '/api/products/{id}/reviews', 'ProductReviewController@indexForProduct');
-$router->add('POST', '/api/products/{id}/reviews', 'ProductReviewController@storeForProduct');
-$router->add('GET', '/api/products/{id}/movement', 'ProductController@movement');
-$router->add('GET', '/api/products/{id}', 'ProductController@show');
-$router->add('POST', '/api/products', 'ProductController@store');
-$router->add('PUT', '/api/products/{id}', 'ProductController@update');
-$router->add('DELETE', '/api/products/{id}', 'ProductController@destroy');
-
-// User Routes
-$router->add('GET', '/api/users', 'UserController@index');
-$router->add('POST', '/api/users', 'UserController@store');
-$router->add('PUT', '/api/users/{id}', 'UserController@update');
-$router->add('POST', '/api/users/{id}/unlock', 'UserController@unlock');
-$router->add('GET', '/api/user/addresses', 'UserController@getAddresses');
-$router->add('PUT', '/api/user/addresses', 'UserController@updateAddresses');
-$router->add('GET', '/api/user/profile', 'UserController@getProfile');
-$router->add('PUT', '/api/user/profile', 'UserController@updateProfile');
-$router->add('PUT', '/api/user/password', 'UserController@updatePassword');
-$router->add('POST', '/api/auth/login', 'AuthController@login');
-$router->add('POST', '/api/auth/logout', 'AuthController@logout');
-$router->add('POST', '/api/auth/register', 'AuthController@register');
-$router->add('POST', '/api/auth/request-otp', 'AuthController@requestOtp');
-$router->add('POST', '/api/auth/verify-otp', 'AuthController@verifyOtp');
-$router->add('POST', '/api/auth/password-reset/request', 'AuthController@requestPasswordReset');
-$router->add('POST', '/api/auth/password-reset/confirm', 'AuthController@confirmPasswordReset');
-$router->add('POST', '/api/contact', 'ContactController@store');
-$router->add('GET', '/api/auth/verify', 'AuthController@verify');
-$router->add('GET', '/api/auth/session', 'AuthController@session');
-
-// Order Routes
-$router->add('GET', '/api/orders', 'OrderController@index');
-$router->add('GET', '/api/orders/my-orders', 'OrderController@myOrders'); // Specific route for user's orders
-$router->add('GET', '/api/orders/{id}', 'OrderController@show');
-$router->add('PATCH', '/api/orders/{id}/status', 'OrderController@updateStatus');
-$router->add('GET', '/api/orders/{id}/invoice', 'OrderController@invoice');
-$router->add('POST', '/api/orders', 'OrderController@store');
-$router->add('POST', '/api/orders/quote', 'OrderController@quote');
-$router->add('POST', '/api/admin/historical-sales', 'OrderController@storeHistoricalSale');
-
-// Admin Dashboard Routes
-$router->add('GET', '/api/admin/dashboard/stats', 'DashboardController@stats');
-$router->add('GET', '/api/admin/report', 'DashboardController@report');
-$router->add('GET', '/api/admin/inventory/intelligence', 'InventoryController@intelligence');
-$router->add('GET', '/api/admin/reviews', 'ProductReviewController@adminIndex');
-$router->add('PATCH', '/api/admin/reviews/{id}', 'ProductReviewController@adminUpdate');
-$router->add('GET', '/api/admin/settings/tax', 'SettingsController@getVat');
-$router->add('PUT', '/api/admin/settings/tax', 'SettingsController@updateVat');
-$router->add('GET', '/api/admin/settings/session', 'SettingsController@getSessionSettings');
-$router->add('PUT', '/api/admin/settings/session', 'SettingsController@updateSessionSettings');
-$router->add('GET', '/api/settings/shipping', 'SettingsController@getShipping');
-$router->add('GET', '/api/settings/store-status', 'SettingsController@getStoreStatus');
-$router->add('GET', '/api/settings/brand-logos', 'SettingsController@getPublicBrandLogos');
-$router->add('GET', '/api/settings/product-categories', 'SettingsController@getPublicProductCategories');
-$router->add('GET', '/api/settings/product-category-references', 'SettingsController@getPublicProductCategoryReferences');
-$router->add('GET', '/api/admin/settings/shipping', 'SettingsController@getShipping');
-$router->add('PUT', '/api/admin/settings/shipping', 'SettingsController@updateShipping');
-$router->add('GET', '/api/admin/settings/store-status', 'SettingsController@getStoreStatus');
-$router->add('PUT', '/api/admin/settings/store-status', 'SettingsController@updateStoreStatus');
-$router->add('GET', '/api/admin/settings/product-page', 'SettingsController@getProductPage');
-$router->add('PUT', '/api/admin/settings/product-page', 'SettingsController@updateProductPage');
-$router->add('GET', '/api/admin/settings/pricing-margins', 'SettingsController@getPricingMargins');
-$router->add('PUT', '/api/admin/settings/pricing-margins', 'SettingsController@updatePricingMargins');
-$router->add('GET', '/api/admin/settings/pricing-calc', 'SettingsController@getPricingCalc');
-$router->add('PUT', '/api/admin/settings/pricing-calc', 'SettingsController@updatePricingCalc');
-$router->add('GET', '/api/admin/settings/pricing-rules', 'SettingsController@getPricingRules');
-$router->add('PUT', '/api/admin/settings/pricing-rules', 'SettingsController@updatePricingRules');
-$router->add('GET', '/api/admin/settings/product-reference-data', 'SettingsController@getProductReferenceData');
-$router->add('PUT', '/api/admin/settings/product-reference-data', 'SettingsController@updateProductReferenceData');
-$router->add('GET', '/api/admin/discounts', 'DiscountController@index');
-$router->add('POST', '/api/admin/discounts', 'DiscountController@store');
-$router->add('GET', '/api/admin/discounts/audit', 'DiscountController@audit');
-$router->add('GET', '/api/admin/discounts/{id}', 'DiscountController@show');
-$router->add('PUT', '/api/admin/discounts/{id}', 'DiscountController@update');
-$router->add('PATCH', '/api/admin/discounts/{id}/status', 'DiscountController@updateStatus');
-$router->add('GET', '/api/admin/expenses', 'BusinessExpenseController@index');
-$router->add('POST', '/api/admin/expenses', 'BusinessExpenseController@store');
-$router->add('GET', '/api/admin/financial-periods', 'FinancialPeriodController@index');
-$router->add('GET', '/api/admin/financial-periods/{period}/preview', 'FinancialPeriodController@preview');
-$router->add('POST', '/api/admin/financial-periods/{period}/close', 'FinancialPeriodController@close');
-$router->add('POST', '/api/admin/financial-adjustments', 'FinancialPeriodController@storeAdjustment');
-$router->add('GET', '/api/admin/expenses/recurrences', 'BusinessExpenseController@recurrences');
-$router->add('POST', '/api/admin/expenses/recurrences', 'BusinessExpenseController@storeRecurrence');
-$router->add('PUT', '/api/admin/expenses/recurrences/{id}', 'BusinessExpenseController@updateRecurrence');
-$router->add('DELETE', '/api/admin/expenses/recurrences/{id}', 'BusinessExpenseController@deleteRecurrence');
-$router->add('PUT', '/api/admin/expenses/{id}', 'BusinessExpenseController@update');
-$router->add('PATCH', '/api/admin/expenses/{id}/status', 'BusinessExpenseController@updateStatus');
-$router->add('GET', '/api/admin/purchase-invoices', 'PurchaseInvoiceController@index');
-$router->add('GET', '/api/admin/purchase-invoices/{id}', 'PurchaseInvoiceController@show');
-$router->add('GET', '/api/admin/billing/rides', 'BillingDocumentController@rides');
-$router->add('GET', '/api/admin/billing/rides/{accessKey}/pdf', 'BillingDocumentController@ridePdf');
-$router->add('POST', '/api/admin/billing/rides/{accessKey}/cancel-and-reissue', 'BillingDocumentController@cancelAndReissue');
-$router->add('GET', '/api/admin/pos/shift/active', 'PosController@activeShift');
-$router->add('GET', '/api/admin/pos/shifts', 'PosController@shifts');
-$router->add('GET', '/api/admin/pos/movements', 'PosController@movements');
-$router->add('GET', '/api/admin/pos/customer-by-document', 'PosController@customerByDocument');
-$router->add('GET', '/api/admin/quotes', 'QuotationController@index');
-$router->add('POST', '/api/admin/quotes', 'QuotationController@store');
-$router->add('POST', '/api/admin/quotes/{id}/convert', 'QuotationController@convert');
-$router->add('POST', '/api/admin/pos/shift/open', 'PosController@openShift');
-$router->add('POST', '/api/admin/pos/shift/close', 'PosController@closeShift');
-$router->add('POST', '/api/admin/pos/movements', 'PosController@addMovement');
-$router->add('GET', '/api/shipments', 'ShippingController@index');
-
-// Reports (guide/example)
-$router->add('GET', '/api/reports/recent-orders', 'ReportController@recentOrders');
-
-// Health Route
-$router->add('GET', '/api/health', 'HealthController@status');
-$router->add('POST', '/api/security/csp-report', 'SecurityController@cspReport');
+$routes = require __DIR__ . '/../config/routes.php';
+foreach ($routes as $route) {
+    $router->add(
+        $route['method'],
+        $route['path'],
+        $route['handler'],
+        $route['capability'] ?? null
+    );
+}
 
 function is_public_api_request(string $uri, string $method): bool {
     $normalizedMethod = strtoupper($method);

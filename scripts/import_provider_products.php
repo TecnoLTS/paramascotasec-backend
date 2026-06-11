@@ -7,6 +7,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use App\Core\Database;
 use App\Core\TenantContext;
 use App\Support\CatalogProductTextNormalizer;
+use App\Support\ProductSeoMetadata;
 use Dotenv\Dotenv;
 
 $envDir = __DIR__ . '/../entorno';
@@ -86,6 +87,7 @@ $normalizeImages = static function ($images, string $fallback): array {
                         'url' => $url,
                         'width' => null,
                         'height' => null,
+                        'altText' => null,
                     ];
                 }
                 continue;
@@ -99,6 +101,7 @@ $normalizeImages = static function ($images, string $fallback): array {
                     'url' => $url,
                     'width' => isset($image['width']) && is_numeric($image['width']) ? (int)$image['width'] : null,
                     'height' => isset($image['height']) && is_numeric($image['height']) ? (int)$image['height'] : null,
+                    'altText' => trim((string)($image['altText'] ?? $image['alt_text'] ?? '')) ?: null,
                 ];
             }
         }
@@ -108,6 +111,7 @@ $normalizeImages = static function ($images, string $fallback): array {
             'url' => $fallback,
             'width' => null,
             'height' => null,
+            'altText' => null,
         ];
     }
     return $entries;
@@ -203,8 +207,8 @@ $updateProduct = $db->prepare('
 
 $deleteImages = $db->prepare('DELETE FROM "Image" WHERE product_id = :product_id');
 $insertImage = $db->prepare('
-    INSERT INTO "Image" (id, url, product_id, kind, width, height, display_order)
-    VALUES (:id, :url, :product_id, :kind, :width, :height, :display_order)
+    INSERT INTO "Image" (id, url, product_id, kind, width, height, alt_text, display_order)
+    VALUES (:id, :url, :product_id, :kind, :width, :height, :alt_text, :display_order)
 ');
 
 $deleteTenantImages = $db->prepare('
@@ -281,6 +285,24 @@ try {
             $cost = $price;
         }
 
+        $seoData = [
+            'name' => $name,
+            'brand' => $brand,
+            'category' => $category,
+            'productType' => $productType,
+            'gender' => $gender,
+            'price' => $price,
+            'quantity' => $quantity,
+            'description' => $description,
+            'attributes' => $attributes,
+            'images' => $galleryImages,
+            'thumbImages' => $thumbImages,
+        ];
+        ProductSeoMetadata::applyDefaults($seoData, null);
+        $attributes = $seoData['attributes'];
+        $galleryImages = $seoData['images'];
+        $thumbImages = $seoData['thumbImages'];
+
         $params = [
             'tenant_id' => $tenantId,
             'legacy_id' => $legacyId,
@@ -332,6 +354,7 @@ try {
                 'kind' => 'gallery',
                 'width' => $image['width'],
                 'height' => $image['height'],
+                'alt_text' => $image['altText'] ?? null,
                 'display_order' => $index,
             ]);
         }
@@ -343,6 +366,7 @@ try {
                 'kind' => 'thumb',
                 'width' => $image['width'],
                 'height' => $image['height'],
+                'alt_text' => $image['altText'] ?? null,
                 'display_order' => $index,
             ]);
         }

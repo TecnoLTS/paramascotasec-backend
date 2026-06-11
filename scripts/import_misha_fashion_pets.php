@@ -8,6 +8,7 @@ use App\Core\Database;
 use App\Core\TenantContext;
 use App\Repositories\InventoryLotRepository;
 use App\Repositories\PurchaseInvoiceRepository;
+use App\Support\ProductSeoMetadata;
 use App\Support\ProductVariantMetadata;
 use Dotenv\Dotenv;
 
@@ -586,6 +587,20 @@ try {
             $lastUnitCost = round((float)($lastLine['unitCost'] ?? 0), 2);
             reset($purchaseLines);
         }
+
+        $seoData = [
+            'name' => $name,
+            'brand' => $brand,
+            'category' => 'ropa',
+            'productType' => 'ropa',
+            'gender' => 'dog',
+            'price' => $priceNet,
+            'quantity' => $currentQuantity,
+            'description' => $description,
+            'attributes' => $attributes,
+        ];
+        ProductSeoMetadata::applyDefaults($seoData, null);
+        $attributes = $seoData['attributes'];
 
         $updateProduct->execute([
             'id' => $productId,

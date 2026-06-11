@@ -9,6 +9,7 @@ use App\Core\TenantContext;
 use App\Repositories\InventoryLotRepository;
 use App\Repositories\PurchaseInvoiceRepository;
 use App\Support\ProductAudience;
+use App\Support\ProductSeoMetadata;
 use App\Support\ProductVariantMetadata;
 use Dotenv\Dotenv;
 
@@ -607,6 +608,20 @@ try {
             $currentQuantity += $quantity;
             $insertedPurchaseLines++;
         }
+
+        $seoData = [
+            'name' => $name,
+            'brand' => $brand,
+            'category' => $category,
+            'productType' => $productType,
+            'gender' => $resolvedGender,
+            'price' => $priceNet,
+            'quantity' => $currentQuantity,
+            'description' => $description,
+            'attributes' => $attributes,
+        ];
+        ProductSeoMetadata::applyDefaults($seoData, null);
+        $attributes = $seoData['attributes'];
 
         $updateProduct->execute([
             'id' => $productId,
